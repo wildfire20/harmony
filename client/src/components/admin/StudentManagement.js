@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 
 const StudentManagement = () => {
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingStudent, setEditingStudent] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGrade, setSelectedGrade] = useState('all');
   const queryClient = useQueryClient();
@@ -64,7 +65,31 @@ const StudentManagement = () => {
     }
   );
 
-  // Delete student mutation
+  // Update student mutation
+  const updateStudentMutation = useMutation(
+    ({ id, data }) => {
+      console.log('Updating student:', id, data);
+      return adminAPI.updateStudent(id, data);
+    },
+    {
+      onSuccess: (response) => {
+        console.log('Student updated successfully:', response);
+        queryClient.invalidateQueries(['students']);
+        setEditingStudent(null);
+        setShowAddForm(false);
+        reset();
+        toast.success('Student updated successfully!');
+      },
+      onError: (error) => {
+        console.error('Update student error:', error);
+        console.error('Error response:', error.response?.data);
+        const errorMessage = error.response?.data?.message || 
+                           error.response?.data?.errors?.[0]?.msg || 
+                           'Failed to update student';
+        toast.error(errorMessage);
+      }
+    }
+  );
   const deleteStudentMutation = useMutation(
     (id) => adminAPI.deleteStudent(id),
     {
@@ -92,7 +117,30 @@ const StudentManagement = () => {
 
   const onSubmit = (data) => {
     console.log('Form data being submitted:', data);
-    addStudentMutation.mutate(data);
+    
+    if (editingStudent) {
+      updateStudentMutation.mutate({ id: editingStudent.id, data });
+    } else {
+      addStudentMutation.mutate(data);
+    }
+  };
+
+  const handleEdit = (student) => {
+    setEditingStudent(student);
+    setShowAddForm(true);
+    reset({
+      first_name: student.first_name,
+      last_name: student.last_name,
+      student_number: student.student_number,
+      grade_id: student.grade_id,
+      class_id: student.class_id
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingStudent(null);
+    setShowAddForm(false);
+    reset();
   };
 
   const handleDelete = (id, name) => {
@@ -152,9 +200,11 @@ const StudentManagement = () => {
       {showAddForm && (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">Add New Student</h3>
+            <h3 className="text-lg font-semibold text-gray-900">
+              {editingStudent ? 'Edit Student' : 'Add New Student'}
+            </h3>
             <button
-              onClick={() => setShowAddForm(false)}
+              onClick={handleCancelEdit}
               className="text-gray-400 hover:text-gray-600"
             >
               ×
@@ -233,14 +283,17 @@ const StudentManagement = () => {
             <div className="md:col-span-2 flex space-x-3">
               <button
                 type="submit"
-                disabled={addStudentMutation.isLoading}
+                disabled={addStudentMutation.isLoading || updateStudentMutation.isLoading}
                 className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50"
               >
-                {addStudentMutation.isLoading ? 'Adding...' : 'Add Student'}
+                {(addStudentMutation.isLoading || updateStudentMutation.isLoading) 
+                  ? (editingStudent ? 'Updating...' : 'Adding...') 
+                  : (editingStudent ? 'Update Student' : 'Add Student')
+                }
               </button>
               <button
                 type="button"
-                onClick={() => setShowAddForm(false)}
+                onClick={handleCancelEdit}
                 className="border border-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-50"
               >
                 Cancel
@@ -307,6 +360,7 @@ const StudentManagement = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
                       <button
+                        onClick={() => handleEdit(student)}
                         className="text-blue-600 hover:text-blue-900"
                         title="Edit"
                       >

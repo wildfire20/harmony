@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 
 const TeacherManagement = () => {
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingTeacher, setEditingTeacher] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const queryClient = useQueryClient();
 
@@ -50,7 +51,31 @@ const TeacherManagement = () => {
     }
   );
 
-  // Delete teacher mutation
+  // Update teacher mutation
+  const updateTeacherMutation = useMutation(
+    ({ id, data }) => {
+      console.log('Updating teacher:', id, data);
+      return adminAPI.updateTeacher(id, data);
+    },
+    {
+      onSuccess: (response) => {
+        console.log('Teacher updated successfully:', response);
+        queryClient.invalidateQueries(['teachers']);
+        setEditingTeacher(null);
+        setShowAddForm(false);
+        reset();
+        toast.success('Teacher updated successfully!');
+      },
+      onError: (error) => {
+        console.error('Update teacher error:', error);
+        console.error('Error response:', error.response?.data);
+        const errorMessage = error.response?.data?.message || 
+                           error.response?.data?.errors?.[0]?.msg || 
+                           'Failed to update teacher';
+        toast.error(errorMessage);
+      }
+    }
+  );
   const deleteTeacherMutation = useMutation(
     (id) => adminAPI.deleteTeacher(id),
     {
@@ -79,7 +104,31 @@ const TeacherManagement = () => {
     };
     
     console.log('Formatted data being sent:', formattedData);
-    addTeacherMutation.mutate(formattedData);
+    
+    if (editingTeacher) {
+      updateTeacherMutation.mutate({ id: editingTeacher.id, data: formattedData });
+    } else {
+      addTeacherMutation.mutate(formattedData);
+    }
+  };
+
+  const handleEdit = (teacher) => {
+    setEditingTeacher(teacher);
+    setShowAddForm(true);
+    reset({
+      first_name: teacher.first_name,
+      last_name: teacher.last_name,
+      email: teacher.email,
+      role: teacher.role,
+      grade_ids: teacher.grade_ids || [],
+      class_ids: teacher.class_ids || []
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingTeacher(null);
+    setShowAddForm(false);
+    reset();
   };
 
   const handleDelete = (id, name) => {
@@ -121,9 +170,11 @@ const TeacherManagement = () => {
       {showAddForm && (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">Add New Teacher</h3>
+            <h3 className="text-lg font-semibold text-gray-900">
+              {editingTeacher ? 'Edit Teacher' : 'Add New Teacher'}
+            </h3>
             <button
-              onClick={() => setShowAddForm(false)}
+              onClick={handleCancelEdit}
               className="text-gray-400 hover:text-gray-600"
             >
               ×
@@ -236,14 +287,17 @@ const TeacherManagement = () => {
             <div className="md:col-span-2 flex space-x-3">
               <button
                 type="submit"
-                disabled={addTeacherMutation.isLoading}
+                disabled={addTeacherMutation.isLoading || updateTeacherMutation.isLoading}
                 className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:opacity-50"
               >
-                {addTeacherMutation.isLoading ? 'Adding...' : 'Add Teacher'}
+                {(addTeacherMutation.isLoading || updateTeacherMutation.isLoading) 
+                  ? (editingTeacher ? 'Updating...' : 'Adding...') 
+                  : (editingTeacher ? 'Update Teacher' : 'Add Teacher')
+                }
               </button>
               <button
                 type="button"
-                onClick={() => setShowAddForm(false)}
+                onClick={handleCancelEdit}
                 className="border border-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-50"
               >
                 Cancel
@@ -320,6 +374,7 @@ const TeacherManagement = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
                       <button
+                        onClick={() => handleEdit(teacher)}
                         className="text-green-600 hover:text-green-900"
                         title="Edit"
                       >
