@@ -86,39 +86,33 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
     }
 
     const result = await db.query(`
-      SELECT d.id, d.title, d.description, d.document_type, d.file_name, d.file_path, 
-             d.file_size, d.uploaded_at, d.is_active,
+      SELECT d.id, d.title, d.description, d.document_type, d.filename, d.original_filename,
+             d.file_size, d.created_at as uploaded_at, d.is_active,
              u.first_name as uploaded_by_first_name, u.last_name as uploaded_by_last_name,
              g.name as grade_name, c.name as class_name
       FROM documents d
       JOIN users u ON d.uploaded_by = u.id
-      JOIN grades g ON d.grade_id = g.id
-      JOIN classes c ON d.class_id = c.id
+      LEFT JOIN grades g ON d.grade_id = g.id
+      LEFT JOIN classes c ON d.class_id = c.id
       WHERE d.grade_id = $1 AND d.class_id = $2 AND d.is_active = true
-      ORDER BY d.document_type, d.uploaded_at DESC
+      ORDER BY d.document_type, d.created_at DESC
     `, [gradeId, classId]);
 
     console.log('Query result:', result.rows.length, 'documents found');
     console.log('Documents:', result.rows);
 
-    // Group documents by type
-    const groupedDocuments = result.rows.reduce((acc, doc) => {
-      if (!acc[doc.document_type]) {
-        acc[doc.document_type] = [];
-      }
-      acc[doc.document_type].push({
-        ...doc,
-        file_size_mb: (doc.file_size / (1024 * 1024)).toFixed(2)
-      });
-      return acc;
-    }, {});
+    // Return documents as array (frontend expects this format)
+    const documents = result.rows.map(doc => ({
+      ...doc,
+      file_size_mb: (doc.file_size / (1024 * 1024)).toFixed(2)
+    }));
 
-    console.log('Grouped documents:', groupedDocuments);
+    console.log('Final documents array:', documents);
     console.log('=== END DEBUG ===');
 
     res.json({ 
-      documents: groupedDocuments,
-      total_count: result.rows.length 
+      documents: documents,
+      total: result.rows.length 
     });
 
   } catch (error) {
@@ -210,8 +204,8 @@ router.get('/download/:id', authenticate, async (req, res) => {
     const result = await db.query(`
       SELECT d.*, g.name as grade_name, c.name as class_name
       FROM documents d
-      JOIN grades g ON d.grade_id = g.id
-      JOIN classes c ON d.class_id = c.id
+      LEFT JOIN grades g ON d.grade_id = g.id
+      LEFT JOIN classes c ON d.class_id = c.id
       WHERE d.id = $1 AND d.is_active = true
     `, [id]);
 
@@ -336,14 +330,14 @@ router.get('/all', [
     const user = req.user;
 
     let query = `
-      SELECT d.id, d.title, d.description, d.document_type, d.file_name, d.file_path, 
-             d.file_size, d.uploaded_at, d.is_active, d.uploaded_by,
+      SELECT d.id, d.title, d.description, d.document_type, d.filename, d.original_filename,
+             d.file_size, d.created_at as uploaded_at, d.is_active, d.uploaded_by,
              u.first_name as uploaded_by_first_name, u.last_name as uploaded_by_last_name,
              g.name as grade_name, c.name as class_name
       FROM documents d
       JOIN users u ON d.uploaded_by = u.id
-      JOIN grades g ON d.grade_id = g.id
-      JOIN classes c ON d.class_id = c.id
+      LEFT JOIN grades g ON d.grade_id = g.id
+      LEFT JOIN classes c ON d.class_id = c.id
       WHERE d.is_active = true
     `;
     
@@ -358,7 +352,7 @@ router.get('/all', [
       queryParams.push(user.id);
     }
 
-    query += ` ORDER BY d.document_type, d.uploaded_at DESC`;
+    query += ` ORDER BY d.document_type, d.created_at DESC`;
 
     const result = await db.query(query, queryParams);
 
@@ -408,44 +402,79 @@ router.get('/grade/:gradeId', authenticate, async (req, res) => {
     }
 
     const result = await db.query(`
-      SELECT d.id, d.title, d.description, d.document_type, d.file_name, d.file_path, 
-             d.file_size, d.uploaded_at, d.is_active,
+      SELECT d.id, d.title, d.description, d.document_type, d.filename, d.original_filename,
+             d.file_size, d.created_at as uploaded_at, d.is_active,
              u.first_name as uploaded_by_first_name, u.last_name as uploaded_by_last_name,
              g.name as grade_name, c.name as class_name
       FROM documents d
       JOIN users u ON d.uploaded_by = u.id
-      JOIN grades g ON d.grade_id = g.id
-      JOIN classes c ON d.class_id = c.id
+      LEFT JOIN grades g ON d.grade_id = g.id
+      LEFT JOIN classes c ON d.class_id = c.id
       WHERE d.grade_id = $1 AND d.is_active = true
-      ORDER BY d.document_type, d.uploaded_at DESC
+      ORDER BY d.document_type, d.created_at DESC
     `, [gradeId]);
 
     console.log('Query result for grade-only:', result.rows.length, 'documents found');
 
-    // Group documents by type
-    const groupedDocuments = result.rows.reduce((acc, doc) => {
-      if (!acc[doc.document_type]) {
-        acc[doc.document_type] = [];
-      }
-      acc[doc.document_type].push({
-        ...doc,
-        file_size_mb: (doc.file_size / (1024 * 1024)).toFixed(2)
-      });
-      return acc;
-    }, {});
+    // Return documents as array (frontend expects this format)
+    const documents = result.rows.map(doc => ({
+      ...doc,
+      file_size_mb: (doc.file_size / (1024 * 1024)).toFixed(2)
+    }));
 
-    console.log('Grouped documents for grade-only:', groupedDocuments);
+    console.log('Final documents array for grade-only:', documents);
     console.log('=== END DEBUG ===');
 
     res.json({
-      documents: result.rows,
-      groupedDocuments,
+      documents: documents,
       total: result.rows.length
     });
 
   } catch (error) {
     console.error('Error fetching documents for grade:', error);
     res.status(500).json({ message: 'Server error fetching documents' });
+  }
+});
+
+// Create test document for debugging
+router.post('/create-test-document', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    console.log('Creating test document...');
+    
+    // Create a test document for Grade 6, Class 16 (where the student is assigned)
+    const result = await db.query(`
+      INSERT INTO documents (
+        filename, original_filename, title, description, document_type, 
+        grade_id, class_id, uploaded_by, file_size, mime_type, is_active
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING *
+    `, [
+      'test-document.pdf',
+      'Test Document.pdf',
+      'Test Document for Grade 6 Class 16',
+      'This is a test document to verify document visibility',
+      'other',
+      6, // Grade 6
+      16, // Class 16 (where Broe Plussies is assigned)
+      req.user.id,
+      1024, // 1KB
+      'application/pdf',
+      true
+    ]);
+    
+    console.log('Test document created:', result.rows[0]);
+    
+    res.json({
+      message: 'Test document created successfully',
+      document: result.rows[0]
+    });
+    
+  } catch (error) {
+    console.error('Create test document error:', error);
+    res.status(500).json({ message: 'Server error creating test document' });
   }
 });
 

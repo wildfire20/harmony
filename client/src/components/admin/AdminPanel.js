@@ -136,6 +136,27 @@ const AdminPanel = () => {
                 >
                   Redistribute Last Document
                 </button>
+                
+                <button 
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/api/documents/create-test-document', {
+                        method: 'POST',
+                        headers: {
+                          'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                      });
+                      const data = await response.json();
+                      alert(data.message);
+                    } catch (error) {
+                      console.error('Create test document error:', error);
+                      alert('Failed to create test document. Check console for errors.');
+                    }
+                  }}
+                  className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors"
+                >
+                  Create Test Document
+                </button>
               </div>
             </div>
           </div>
