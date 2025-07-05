@@ -58,26 +58,58 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
     const { gradeId, classId } = req.params;
     const user = req.user;
 
-    console.log('=== DOCUMENTS GRADE/CLASS ENDPOINT DEBUG ===');
-    console.log('Requested gradeId:', gradeId);
-    console.log('Requested classId:', classId);
-    console.log('User:', user);
-    console.log('User grade_id:', user.grade_id);
-    console.log('User class_id:', user.class_id);
+    // Convert URL parameters to integers for comparison
+    const requestedGradeId = parseInt(gradeId, 10);
+    const requestedClassId = parseInt(classId, 10);
 
-    // Check access permissions
-    if (user.role === 'student' && (user.grade_id != gradeId || user.class_id != classId)) {
-      console.error('Access denied for student - grade/class mismatch');
-      console.error('User grade_id:', user.grade_id, 'Requested gradeId:', gradeId);
-      console.error('User class_id:', user.class_id, 'Requested classId:', classId);
-      return res.status(403).json({ message: 'Access denied' });
+    console.log('=== DOCUMENTS GRADE/CLASS ENDPOINT DEBUG ===');
+    console.log('Requested gradeId:', gradeId, typeof gradeId, '-> parsed:', requestedGradeId);
+    console.log('Requested classId:', classId, typeof classId, '-> parsed:', requestedClassId);
+    console.log('User:', user);
+    console.log('User grade_id:', user.grade_id, typeof user.grade_id);
+    console.log('User class_id:', user.class_id, typeof user.class_id);
+    console.log('User role:', user.role);
+
+    // Validate URL parameters
+    if (isNaN(requestedGradeId) || isNaN(requestedClassId)) {
+      console.error('❌ Invalid grade or class ID parameters');
+      return res.status(400).json({ 
+        message: 'Invalid grade or class ID',
+        debug: { gradeId, classId }
+      });
+    }
+
+    // Check access permissions with detailed logging
+    if (user.role === 'student') {
+      console.log('=== STUDENT ACCESS CHECK ===');
+      console.log('Comparing grade_id:', user.grade_id, '==', requestedGradeId);
+      console.log('Comparing class_id:', user.class_id, '==', requestedClassId);
+      console.log('Grade match:', user.grade_id === requestedGradeId);
+      console.log('Class match:', user.class_id === requestedClassId);
+      
+      if (user.grade_id === requestedGradeId && user.class_id === requestedClassId) {
+        console.log('✅ Student access GRANTED - exact match');
+      } else {
+        console.error('❌ Access denied for student - grade/class mismatch');
+        console.error('User grade_id:', user.grade_id, 'Requested gradeId:', requestedGradeId);
+        console.error('User class_id:', user.class_id, 'Requested classId:', requestedClassId);
+        return res.status(403).json({ 
+          message: 'Access denied - grade/class mismatch',
+          debug: {
+            user_grade: user.grade_id,
+            user_class: user.class_id,
+            requested_grade: requestedGradeId,
+            requested_class: requestedClassId
+          }
+        });
+      }
     }
 
     if (user.role === 'teacher') {
       const assignmentCheck = await db.query(`
         SELECT 1 FROM teacher_assignments 
         WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-      `, [user.id, gradeId, classId]);
+      `, [user.id, requestedGradeId, requestedClassId]);
 
       if (assignmentCheck.rows.length === 0) {
         console.error('Access denied for teacher - no assignment');
@@ -85,6 +117,9 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
       }
     }
 
+    console.log('=== EXECUTING DATABASE QUERY ===');
+    console.log('Query parameters:', [requestedGradeId, requestedClassId]);
+    
     const result = await db.query(`
       SELECT d.id, d.title, d.description, d.document_type, d.filename, d.original_filename,
              d.file_size, d.created_at as uploaded_at, d.is_active,
@@ -96,7 +131,14 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
       LEFT JOIN classes c ON d.class_id = c.id
       WHERE d.grade_id = $1 AND d.class_id = $2 AND d.is_active = true
       ORDER BY d.document_type, d.created_at DESC
-    `, [gradeId, classId]);
+    `, [requestedGradeId, requestedClassId]);
+
+    console.log('=== QUERY RESULTS ===');
+    console.log('Query result rows:', result.rows.length);
+    if (result.rows.length > 0) {
+      console.log('Sample document:', result.rows[0]);
+    }
+    console.log('All documents found:', result.rows);
 
     console.log('Query result:', result.rows.length, 'documents found');
     console.log('Documents:', result.rows);
