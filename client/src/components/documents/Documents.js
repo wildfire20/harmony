@@ -156,7 +156,16 @@ const Documents = () => {
     }
   );
 
-  const documentTypes = documentTypesData?.document_types || [];
+  const documentTypes = documentTypesData?.document_types || [
+    { value: 'timetable', label: 'Timetable' },
+    { value: 'past_paper', label: 'Past Paper' },
+    { value: 'syllabus', label: 'Syllabus' },
+    { value: 'assignment', label: 'Assignment' },
+    { value: 'notes', label: 'Study Notes' },
+    { value: 'handbook', label: 'Handbook' },
+    { value: 'form', label: 'Form' },
+    { value: 'other', label: 'Other' }
+  ];
   const grades = gradesData?.data?.grades || [];
   const classes = classesData?.data?.classes || [];
   const documents = documentsData?.documents || [];
@@ -348,6 +357,11 @@ const Documents = () => {
                     </option>
                   ))}
                 </select>
+                {/* Debug: Show document types count */}
+                <p className="text-xs text-gray-500 mt-1">
+                  Available types: {documentTypes.length} ({typesLoading ? 'Loading...' : 'Loaded'})
+                  {typesError && <span className="text-red-500"> - Error: {typesError.message}</span>}
+                </p>
               </div>
             </div>
 
