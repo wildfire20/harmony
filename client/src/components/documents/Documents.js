@@ -84,12 +84,18 @@ const Documents = () => {
         console.log('User class_id:', user.class_id);
         console.log('User object:', user);
         
-        if (!user.grade_id || !user.class_id) {
-          console.error('Student missing grade_id or class_id!');
-          throw new Error('Student account is missing grade or class assignment');
+        if (!user.grade_id) {
+          console.error('Student missing grade_id!');
+          throw new Error('Student account is missing grade assignment. Please contact the administrator.');
         }
         
-        url = `/api/documents/grade/${user.grade_id}/class/${user.class_id}`;
+        if (!user.class_id) {
+          console.warn('Student missing class_id, fetching grade-only documents');
+          url = `/api/documents/grade/${user.grade_id}`;
+        } else {
+          url = `/api/documents/grade/${user.grade_id}/class/${user.class_id}`;
+        }
+        
         console.log('Fetching from URL:', url);
       }
       
@@ -359,10 +365,21 @@ const Documents = () => {
         <div className="bg-red-50 border border-red-200 rounded-md p-4">
           <h3 className="text-red-800 font-medium">Error Loading Documents</h3>
           <p className="text-red-600 mt-1">{documentsError.message}</p>
-          {user?.role === 'student' && (!user.grade_id || !user.class_id) && (
-            <div className="mt-2">
-              <p className="text-red-600 text-sm">
-                Your student account is missing grade or class assignment. Please contact the administrator.
+          {user?.role === 'student' && !user.grade_id && (
+            <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
+              <h4 className="text-yellow-800 font-medium">Account Setup Required</h4>
+              <p className="text-yellow-700 text-sm mt-1">
+                Your student account needs to be assigned to a grade to access documents.
+              </p>
+              <div className="mt-2 text-sm text-gray-600">
+                <p><strong>Your current assignments:</strong></p>
+                <ul className="ml-4 mt-1">
+                  <li>Grade: {user.grade_id ? `Grade ${user.grade_id} (${user.grade_name || 'Unknown'})` : 'Not assigned'}</li>
+                  <li>Class: {user.class_id ? `Class ${user.class_id} (${user.class_name || 'Unknown'})` : 'Not assigned'}</li>
+                </ul>
+              </div>
+              <p className="text-yellow-700 text-sm mt-2">
+                Please contact your administrator to complete your account setup.
               </p>
             </div>
           )}
@@ -562,15 +579,37 @@ const Documents = () => {
 
       {/* Documents List */}
       <div className="space-y-6">
+        {user?.role === 'student' && (
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+            <h4 className="text-blue-800 font-medium">Your Class Information</h4>
+            <p className="text-blue-700 text-sm mt-1">
+              You are viewing documents for: <strong>{user.grade_name || `Grade ${user.grade_id}`}</strong>
+              {user.class_id && (
+                <span> - <strong>{user.class_name || `Class ${user.class_id}`}</strong></span>
+              )}
+            </p>
+            {!user.class_id && (
+              <p className="text-yellow-700 text-sm mt-1">
+                ⚠️ You are not assigned to a specific class, so you can see documents for all classes in your grade.
+              </p>
+            )}
+          </div>
+        )}
+        
         {Object.keys(groupedDocuments).length === 0 ? (
           <div className="text-center py-12">
             <File className="mx-auto h-12 w-12 text-gray-400 mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">No documents available</h3>
             <p className="text-gray-500">
               {user?.role === 'student' 
-                ? 'No documents have been uploaded for your class yet.' 
+                ? `No documents have been uploaded for ${user.grade_name || `Grade ${user.grade_id}`}${user.class_id ? ` - ${user.class_name || `Class ${user.class_id}`}` : ''} yet.` 
                 : 'Upload the first document to get started.'}
             </p>
+            {user?.role === 'student' && (
+              <p className="text-gray-500 text-sm mt-2">
+                Check back later or contact your teacher for more information.
+              </p>
+            )}
           </div>
         ) : (
           Object.entries(groupedDocuments).map(([type, docs]) => {

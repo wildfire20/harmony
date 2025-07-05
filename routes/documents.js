@@ -379,4 +379,74 @@ router.get('/all', [
   }
 });
 
+// Get documents for a grade only (for students without class assignment)
+router.get('/grade/:gradeId', authenticate, async (req, res) => {
+  try {
+    const { gradeId } = req.params;
+    const user = req.user;
+
+    console.log('=== DOCUMENTS GRADE-ONLY ENDPOINT DEBUG ===');
+    console.log('Requested gradeId:', gradeId);
+    console.log('User:', user);
+
+    // Check access permissions
+    if (user.role === 'student' && user.grade_id != gradeId) {
+      console.error('Access denied for student - grade mismatch');
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    if (user.role === 'teacher') {
+      const assignmentCheck = await db.query(`
+        SELECT 1 FROM teacher_assignments 
+        WHERE teacher_id = $1 AND grade_id = $2
+      `, [user.id, gradeId]);
+
+      if (assignmentCheck.rows.length === 0) {
+        console.error('Access denied for teacher - no assignment to this grade');
+        return res.status(403).json({ message: 'Access denied' });
+      }
+    }
+
+    const result = await db.query(`
+      SELECT d.id, d.title, d.description, d.document_type, d.file_name, d.file_path, 
+             d.file_size, d.uploaded_at, d.is_active,
+             u.first_name as uploaded_by_first_name, u.last_name as uploaded_by_last_name,
+             g.name as grade_name, c.name as class_name
+      FROM documents d
+      JOIN users u ON d.uploaded_by = u.id
+      JOIN grades g ON d.grade_id = g.id
+      JOIN classes c ON d.class_id = c.id
+      WHERE d.grade_id = $1 AND d.is_active = true
+      ORDER BY d.document_type, d.uploaded_at DESC
+    `, [gradeId]);
+
+    console.log('Query result for grade-only:', result.rows.length, 'documents found');
+
+    // Group documents by type
+    const groupedDocuments = result.rows.reduce((acc, doc) => {
+      if (!acc[doc.document_type]) {
+        acc[doc.document_type] = [];
+      }
+      acc[doc.document_type].push({
+        ...doc,
+        file_size_mb: (doc.file_size / (1024 * 1024)).toFixed(2)
+      });
+      return acc;
+    }, {});
+
+    console.log('Grouped documents for grade-only:', groupedDocuments);
+    console.log('=== END DEBUG ===');
+
+    res.json({
+      documents: result.rows,
+      groupedDocuments,
+      total: result.rows.length
+    });
+
+  } catch (error) {
+    console.error('Error fetching documents for grade:', error);
+    res.status(500).json({ message: 'Server error fetching documents' });
+  }
+});
+
 module.exports = router;
