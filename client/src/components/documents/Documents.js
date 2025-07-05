@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Download, File, Trash2, Calendar, User, FileText, BookOpen, Clock, Clipboard, Search } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { toast } from 'react-hot-toast';
 import LoadingSpinner from '../common/LoadingSpinner';
 
@@ -95,8 +95,8 @@ const Documents = () => {
   });
 
   // Upload document mutation
-  const uploadMutation = useMutation({
-    mutationFn: async (formData) => {
+  const uploadMutation = useMutation(
+    async (formData) => {
       const response = await fetch('/api/documents/upload', {
         method: 'POST',
         headers: {
@@ -110,27 +110,29 @@ const Documents = () => {
       }
       return response.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['documents']);
-      toast.success('Document uploaded successfully!');
-      setShowUploadForm(false);
-      setUploadForm({
-        title: '',
-        description: '',
-        document_type: '',
-        file: null,
-        grade_id: '',
-        class_id: ''
-      });
-    },
-    onError: (error) => {
-      toast.error(error.message || 'Failed to upload document');
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries(['documents']);
+        toast.success('Document uploaded successfully!');
+        setShowUploadForm(false);
+        setUploadForm({
+          title: '',
+          description: '',
+          document_type: '',
+          file: null,
+          grade_id: '',
+          class_id: ''
+        });
+      },
+      onError: (error) => {
+        toast.error(error.message || 'Failed to upload document');
+      }
     }
-  });
+  );
 
   // Delete document mutation
-  const deleteMutation = useMutation({
-    mutationFn: async (documentId) => {
+  const deleteMutation = useMutation(
+    async (documentId) => {
       const response = await fetch(`/api/documents/${documentId}`, {
         method: 'DELETE',
         headers: {
@@ -142,14 +144,16 @@ const Documents = () => {
       }
       return response.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['documents']);
-      toast.success('Document deleted successfully!');
-    },
-    onError: (error) => {
-      toast.error(error.message || 'Failed to delete document');
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries(['documents']);
+        toast.success('Document deleted successfully!');
+      },
+      onError: (error) => {
+        toast.error(error.message || 'Failed to delete document');
+      }
     }
-  });
+  );
 
   const documentTypes = documentTypesData?.document_types || [];
   const grades = gradesData?.data?.grades || [];
@@ -416,10 +420,10 @@ const Documents = () => {
               </button>
               <button
                 type="submit"
-                disabled={uploadMutation.isPending}
+                disabled={uploadMutation.isLoading}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
               >
-                {uploadMutation.isPending ? 'Uploading...' : 'Upload'}
+                {uploadMutation.isLoading ? 'Uploading...' : 'Upload'}
               </button>
             </div>
           </form>
