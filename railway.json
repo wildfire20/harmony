@@ -2,7 +2,7 @@
   "name": "harmony-learning-institute",
   "description": "Complete school management system with student and teacher panels",
   "keywords": ["education", "school", "management", "student", "teacher"],
-  "repository": "https://github.com/YOUR_USERNAME/harmony",
+  "repository": "https://github.com/wildfire20/harmony",
   "env": {
     "NODE_ENV": {
       "description": "Node environment",
