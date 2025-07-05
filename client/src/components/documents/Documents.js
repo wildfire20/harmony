@@ -19,6 +19,22 @@ const Documents = () => {
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState('');
+  const [componentError, setComponentError] = useState(null);
+
+  // Safety check for user and token
+  if (!user || !token) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center py-12">
+          <LoadingSpinner />
+          <p className="text-gray-600 mt-4">Loading user information...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Wrap component in try-catch for any unexpected errors
+  try {
 
   // Fetch document types
   const { data: documentTypesData, isLoading: typesLoading, error: typesError } = useQuery({
@@ -75,49 +91,69 @@ const Documents = () => {
   const { data: documentsData, isLoading, error: documentsError } = useQuery({
     queryKey: ['documents', user?.id],
     queryFn: async () => {
-      let url = '/api/documents/all';
-      
-      // For students, get documents for their specific grade/class
-      if (user?.role === 'student') {
-        console.log('=== STUDENT DOCUMENT FETCH DEBUG ===');
-        console.log('User grade_id:', user.grade_id);
-        console.log('User class_id:', user.class_id);
-        console.log('User object:', user);
+      try {
+        let url = '/api/documents/all';
         
-        if (!user.grade_id) {
-          console.error('Student missing grade_id!');
-          throw new Error('Student account is missing grade assignment. Please contact the administrator.');
+        // For students, get documents for their specific grade/class
+        if (user?.role === 'student') {
+          console.log('=== STUDENT DOCUMENT FETCH DEBUG ===');
+          console.log('User grade_id:', user.grade_id);
+          console.log('User class_id:', user.class_id);
+          console.log('User object:', user);
+          
+          if (!user.grade_id) {
+            console.error('Student missing grade_id!');
+            throw new Error('Student account is missing grade assignment. Please contact the administrator.');
+          }
+          
+          if (!user.class_id) {
+            console.warn('Student missing class_id, fetching grade-only documents');
+            url = `/api/documents/grade/${user.grade_id}`;
+          } else {
+            url = `/api/documents/grade/${user.grade_id}/class/${user.class_id}`;
+          }
+          
+          console.log('Fetching from URL:', url);
         }
         
-        if (!user.class_id) {
-          console.warn('Student missing class_id, fetching grade-only documents');
-          url = `/api/documents/grade/${user.grade_id}`;
-        } else {
-          url = `/api/documents/grade/${user.grade_id}/class/${user.class_id}`;
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        console.log('Documents fetch response status:', response.status);
+        console.log('Documents fetch response ok:', response.ok);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Documents fetch error response:', errorText);
+          
+          // Handle specific error cases
+          if (response.status === 404) {
+            // Return empty documents array for 404 instead of throwing error
+            return { documents: [], total: 0 };
+          }
+          
+          throw new Error(`Failed to fetch documents: ${response.status} ${errorText}`);
         }
         
-        console.log('Fetching from URL:', url);
+        const data = await response.json();
+        console.log('Documents fetch data:', data);
+        return data;
+      } catch (error) {
+        console.error('Documents fetch error:', error);
+        throw error;
       }
-      
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      console.log('Documents fetch response status:', response.status);
-      console.log('Documents fetch response ok:', response.ok);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Documents fetch error response:', errorText);
-        throw new Error(`Failed to fetch documents: ${response.status} ${errorText}`);
-      }
-      const data = await response.json();
-      console.log('Documents fetch data:', data);
-      return data;
     },
-    enabled: !!user && !!token
+    enabled: !!user && !!token,
+    retry: (failureCount, error) => {
+      // Don't retry for 404s or auth errors
+      if (error.message.includes('404') || error.message.includes('401') || error.message.includes('403')) {
+        return false;
+      }
+      return failureCount < 2;
+    }
   });
 
   // Upload document mutation
@@ -357,7 +393,16 @@ const Documents = () => {
     }
   };
 
-  if (isLoading) return <LoadingSpinner />;
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center py-12">
+          <LoadingSpinner />
+          <p className="text-gray-600 mt-4">Loading documents...</p>
+        </div>
+      </div>
+    );
+  }
   
   if (documentsError) {
     return (
@@ -383,6 +428,14 @@ const Documents = () => {
               </p>
             </div>
           )}
+          <div className="mt-3">
+            <button
+              onClick={() => window.location.reload()}
+              className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+            >
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -679,6 +732,24 @@ const Documents = () => {
       </div>
     </div>
   );
+  
+  } catch (error) {
+    console.error('Documents component error:', error);
+    return (
+      <div className="space-y-6">
+        <div className="bg-red-50 border border-red-200 rounded-md p-4">
+          <h3 className="text-red-800 font-medium">Component Error</h3>
+          <p className="text-red-600 mt-1">Something went wrong loading the documents page.</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-2 px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+          >
+            Refresh Page
+          </button>
+        </div>
+      </div>
+    );
+  }
 };
 
 export default Documents;
