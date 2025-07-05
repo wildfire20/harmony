@@ -532,6 +532,47 @@ const Documents = () => {
       </div>
     );
   }
+  
+  // Add debug information for students
+  if (user?.role === 'student' && safeDocuments.length === 0) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+          <h3 className="text-blue-800 font-medium">No Documents Available</h3>
+          <p className="text-blue-600 mt-1">No documents have been uploaded for your grade and class yet.</p>
+          
+          <div className="mt-3 p-3 bg-white border border-blue-200 rounded">
+            <h4 className="text-blue-800 font-medium">Your Account Information:</h4>
+            <div className="mt-2 text-sm text-gray-600">
+              <ul className="ml-4 mt-1">
+                <li><strong>Grade:</strong> {user.grade_id ? `Grade ${user.grade_id}` : 'Not assigned'}</li>
+                <li><strong>Class:</strong> {user.class_id ? `Class ${user.class_id}` : 'Not assigned'}</li>
+                <li><strong>Looking for documents in:</strong> Grade {user.grade_id} - Class {user.class_id}</li>
+              </ul>
+            </div>
+          </div>
+          
+          <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
+            <h4 className="text-yellow-800 font-medium">Debug Information:</h4>
+            <div className="mt-2 text-sm text-gray-600">
+              <p><strong>API URL being used:</strong> {user.class_id ? `/api/documents/grade/${user.grade_id}/class/${user.class_id}` : `/api/documents/grade/${user.grade_id}`}</p>
+              <p><strong>Documents found:</strong> {safeDocuments.length}</p>
+              <p><strong>User ID:</strong> {user.id}</p>
+            </div>
+          </div>
+          
+          <div className="mt-3">
+            <button
+              onClick={() => window.location.reload()}
+              className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

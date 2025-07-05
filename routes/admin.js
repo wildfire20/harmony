@@ -1243,4 +1243,152 @@ router.post('/fix-student-grades', [
   }
 });
 
+// Debug endpoint to check documents and student assignments
+router.get('/debug-documents', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    console.log('=== DEBUG DOCUMENTS AND STUDENTS ===');
+    
+    // Get all documents
+    const documentsResult = await db.query(`
+      SELECT d.id, d.title, d.filename, d.document_type, d.grade_id, d.class_id, 
+             g.name as grade_name, c.name as class_name, d.created_at
+      FROM documents d
+      LEFT JOIN grades g ON d.grade_id = g.id
+      LEFT JOIN classes c ON d.class_id = c.id
+      WHERE d.is_active = true
+      ORDER BY d.created_at DESC
+    `);
+    
+    // Get all students
+    const studentsResult = await db.query(`
+      SELECT u.id, u.student_number, u.first_name, u.last_name, u.grade_id, u.class_id,
+             g.name as grade_name, c.name as class_name
+      FROM users u
+      LEFT JOIN grades g ON u.grade_id = g.id
+      LEFT JOIN classes c ON u.class_id = c.id
+      WHERE u.role = 'student'
+      ORDER BY u.created_at DESC
+    `);
+    
+    // Get all grades and classes
+    const gradesResult = await db.query('SELECT * FROM grades ORDER BY id');
+    const classesResult = await db.query('SELECT * FROM classes ORDER BY id');
+    
+    res.json({
+      documents: documentsResult.rows,
+      students: studentsResult.rows,
+      grades: gradesResult.rows,
+      classes: classesResult.rows,
+      summary: {
+        total_documents: documentsResult.rows.length,
+        total_students: studentsResult.rows.length,
+        documents_by_grade: documentsResult.rows.reduce((acc, doc) => {
+          const key = `Grade ${doc.grade_id} - Class ${doc.class_id}`;
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        }, {}),
+        students_by_grade: studentsResult.rows.reduce((acc, student) => {
+          const key = `Grade ${student.grade_id} - Class ${student.class_id}`;
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        }, {})
+      }
+    });
+    
+  } catch (error) {
+    console.error('Debug documents error:', error);
+    res.status(500).json({ message: 'Server error debugging documents' });
+  }
+});
+
+// Redistribute last uploaded document to all grade/class combinations
+router.post('/redistribute-documents', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    console.log('Starting document redistribution...');
+    
+    // Get the most recent document
+    const latestDocResult = await db.query(`
+      SELECT d.*, u.first_name, u.last_name
+      FROM documents d
+      JOIN users u ON d.uploaded_by = u.id
+      WHERE d.is_active = true
+      ORDER BY d.created_at DESC
+      LIMIT 1
+    `);
+    
+    if (latestDocResult.rows.length === 0) {
+      return res.status(404).json({ message: 'No documents found to redistribute' });
+    }
+    
+    const latestDoc = latestDocResult.rows[0];
+    console.log('Latest document:', latestDoc);
+    
+    // Get all grades and classes
+    const gradesResult = await db.query('SELECT * FROM grades ORDER BY id');
+    const classesResult = await db.query('SELECT * FROM classes ORDER BY id');
+    
+    if (gradesResult.rows.length === 0 || classesResult.rows.length === 0) {
+      return res.status(400).json({ message: 'No grades or classes available' });
+    }
+    
+    // Remove existing copies of this document
+    await db.query('DELETE FROM documents WHERE title = $1 AND document_type = $2', [
+      latestDoc.title,
+      latestDoc.document_type
+    ]);
+    
+    // Create new copies for every grade/class combination
+    const insertPromises = [];
+    
+    gradesResult.rows.forEach(grade => {
+      classesResult.rows.forEach(cls => {
+        insertPromises.push(
+          db.query(`
+            INSERT INTO documents (
+              filename, original_filename, title, description, document_type, 
+              grade_id, class_id, uploaded_by, file_size, mime_type, is_active
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          `, [
+            latestDoc.filename,
+            latestDoc.original_filename,
+            latestDoc.title,
+            latestDoc.description,
+            latestDoc.document_type,
+            grade.id,
+            cls.id,
+            latestDoc.uploaded_by,
+            latestDoc.file_size,
+            latestDoc.mime_type,
+            true
+          ])
+        );
+      });
+    });
+    
+    await Promise.all(insertPromises);
+    
+    const totalCombinations = gradesResult.rows.length * classesResult.rows.length;
+    
+    console.log(`Redistributed document "${latestDoc.title}" to ${totalCombinations} grade/class combinations`);
+    
+    res.json({
+      message: `Successfully redistributed document "${latestDoc.title}" to all ${totalCombinations} grade/class combinations`,
+      document_title: latestDoc.title,
+      grades_count: gradesResult.rows.length,
+      classes_count: classesResult.rows.length,
+      total_combinations: totalCombinations
+    });
+    
+  } catch (error) {
+    console.error('Redistribute documents error:', error);
+    res.status(500).json({ message: 'Server error redistributing documents' });
+  }
+});
+
 module.exports = router;

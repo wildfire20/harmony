@@ -78,6 +78,66 @@ const AdminPanel = () => {
                 View Reports
               </button>
             </div>
+
+            {/* Debug Panel */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center space-x-3 mb-4">
+                <Settings className="h-8 w-8 text-orange-600" />
+                <h2 className="text-xl font-semibold text-gray-900">Debug Tools</h2>
+              </div>
+              <p className="text-gray-600 mb-4">
+                Debug document visibility and student assignments.
+              </p>
+              <div className="space-y-3">
+                <button 
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/api/admin/debug-documents', {
+                        headers: {
+                          'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                      });
+                      const data = await response.json();
+                      console.log('=== DEBUG DATA ===');
+                      console.log('Documents:', data.documents);
+                      console.log('Students:', data.students);
+                      console.log('Summary:', data.summary);
+                      console.log('=== END DEBUG ===');
+                      alert('Debug data logged to console. Check browser developer tools.');
+                    } catch (error) {
+                      console.error('Debug error:', error);
+                      alert('Debug failed. Check console for errors.');
+                    }
+                  }}
+                  className="w-full bg-orange-600 text-white py-2 px-4 rounded-md hover:bg-orange-700 transition-colors"
+                >
+                  Debug Documents
+                </button>
+                
+                <button 
+                  onClick={async () => {
+                    if (window.confirm('This will redistribute the latest document to ALL grade/class combinations. Continue?')) {
+                      try {
+                        const response = await fetch('/api/admin/redistribute-documents', {
+                          method: 'POST',
+                          headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                          }
+                        });
+                        const data = await response.json();
+                        alert(data.message);
+                      } catch (error) {
+                        console.error('Redistribute error:', error);
+                        alert('Redistribution failed. Check console for errors.');
+                      }
+                    }
+                  }}
+                  className="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 transition-colors"
+                >
+                  Redistribute Last Document
+                </button>
+              </div>
+            </div>
           </div>
         );
     }
