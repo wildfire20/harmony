@@ -107,11 +107,11 @@ router.post('/students/bulk', [
 router.post('/students', [
   authenticate,
   authorize('admin', 'super_admin'),
-  body('student_number').notEmpty().withMessage('Student number is required'),
   body('first_name').notEmpty().withMessage('First name is required'),
   body('last_name').notEmpty().withMessage('Last name is required'),
   body('grade_id').isInt().withMessage('Grade ID must be an integer'),
-  body('class_id').isInt().withMessage('Class ID must be an integer')
+  body('class_id').optional().isInt().withMessage('Class ID must be an integer'),
+  body('student_number').optional().notEmpty().withMessage('Student number cannot be empty if provided')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -119,16 +119,34 @@ router.post('/students', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { student_number, first_name, last_name, grade_id, class_id, email } = req.body;
+    let { student_number, first_name, last_name, grade_id, class_id, email } = req.body;
 
-    // Check if student number already exists
-    const existing = await db.query(
-      'SELECT id FROM users WHERE student_number = $1',
-      [student_number]
-    );
+    // Auto-generate student number if not provided
+    if (!student_number) {
+      const timestamp = Date.now().toString().slice(-6);
+      const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+      student_number = `STU${timestamp}${random}`;
+      
+      // Ensure uniqueness
+      const existing = await db.query(
+        'SELECT id FROM users WHERE student_number = $1',
+        [student_number]
+      );
+      
+      if (existing.rows.length > 0) {
+        // Try with additional random suffix
+        student_number = `STU${timestamp}${random}${Math.floor(Math.random() * 100)}`;
+      }
+    } else {
+      // Check if provided student number already exists
+      const existing = await db.query(
+        'SELECT id FROM users WHERE student_number = $1',
+        [student_number]
+      );
 
-    if (existing.rows.length > 0) {
-      return res.status(400).json({ message: 'Student number already exists' });
+      if (existing.rows.length > 0) {
+        return res.status(400).json({ message: 'Student number already exists' });
+      }
     }
 
     // Generate password (hashed version of student number)
@@ -144,7 +162,7 @@ router.post('/students', [
       first_name,
       last_name,
       grade_id,
-      class_id,
+      class_id || null, // Allow null class_id
       password,
       email || `${student_number}@harmonylearning.edu`
     ]);

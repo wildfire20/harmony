@@ -33,16 +33,25 @@ const StudentManagement = () => {
 
   // Add student mutation
   const addStudentMutation = useMutation(
-    (data) => adminAPI.addStudent(data),
+    (data) => {
+      console.log('Making API call with data:', data);
+      return adminAPI.addStudent(data);
+    },
     {
-      onSuccess: () => {
+      onSuccess: (response) => {
+        console.log('Student added successfully:', response);
         queryClient.invalidateQueries(['students']);
         setShowAddForm(false);
         reset();
         toast.success('Student added successfully!');
       },
       onError: (error) => {
-        toast.error(error.response?.data?.message || 'Failed to add student');
+        console.error('Add student error:', error);
+        console.error('Error response:', error.response?.data);
+        const errorMessage = error.response?.data?.message || 
+                           error.response?.data?.errors?.[0]?.msg || 
+                           'Failed to add student';
+        toast.error(errorMessage);
       }
     }
   );
@@ -70,6 +79,7 @@ const StudentManagement = () => {
   console.log('Grades error:', gradesError);
 
   const onSubmit = (data) => {
+    console.log('Form data being submitted:', data);
     addStudentMutation.mutate(data);
   };
 
