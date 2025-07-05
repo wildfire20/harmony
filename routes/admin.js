@@ -681,4 +681,300 @@ router.get('/submissions/all', [
   }
 });
 
+// ==================== GRADES MANAGEMENT ====================
+
+// Get all grades
+router.get('/grades', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT g.*, 
+        COUNT(DISTINCT u.id) as student_count,
+        COUNT(DISTINCT c.id) as class_count
+      FROM grades g
+      LEFT JOIN users u ON g.id = u.grade_id AND u.role = 'student'
+      LEFT JOIN classes c ON g.id = c.grade_id
+      GROUP BY g.id
+      ORDER BY g.name
+    `);
+
+    res.json({
+      grades: result.rows,
+      total: result.rows.length
+    });
+  } catch (error) {
+    console.error('Get grades error:', error);
+    res.status(500).json({ message: 'Server error fetching grades' });
+  }
+});
+
+// Add grade
+router.post('/grades', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+  body('name').notEmpty().withMessage('Grade name is required'),
+  body('description').optional()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { name, description } = req.body;
+
+    // Check if grade already exists
+    const existingGrade = await db.query(
+      'SELECT id FROM grades WHERE name = $1',
+      [name]
+    );
+
+    if (existingGrade.rows.length > 0) {
+      return res.status(400).json({ message: 'Grade with this name already exists' });
+    }
+
+    const result = await db.query(`
+      INSERT INTO grades (name, description) 
+      VALUES ($1, $2) 
+      RETURNING *
+    `, [name, description]);
+
+    res.status(201).json({
+      message: 'Grade added successfully',
+      grade: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Add grade error:', error);
+    res.status(500).json({ message: 'Server error adding grade' });
+  }
+});
+
+// Update grade
+router.put('/grades/:id', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+  body('name').notEmpty().withMessage('Grade name is required'),
+  body('description').optional()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { id } = req.params;
+    const { name, description } = req.body;
+
+    const result = await db.query(`
+      UPDATE grades 
+      SET name = $1, description = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3 
+      RETURNING *
+    `, [name, description, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Grade not found' });
+    }
+
+    res.json({
+      message: 'Grade updated successfully',
+      grade: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Update grade error:', error);
+    res.status(500).json({ message: 'Server error updating grade' });
+  }
+});
+
+// Delete grade
+router.delete('/grades/:id', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if grade has students or classes
+    const dependencies = await db.query(`
+      SELECT 
+        COUNT(DISTINCT u.id) as student_count,
+        COUNT(DISTINCT c.id) as class_count
+      FROM grades g
+      LEFT JOIN users u ON g.id = u.grade_id AND u.role = 'student'
+      LEFT JOIN classes c ON g.id = c.grade_id
+      WHERE g.id = $1
+    `, [id]);
+
+    const deps = dependencies.rows[0];
+    if (deps.student_count > 0 || deps.class_count > 0) {
+      return res.status(400).json({ 
+        message: `Cannot delete grade. It has ${deps.student_count} students and ${deps.class_count} classes assigned.`
+      });
+    }
+
+    const result = await db.query('DELETE FROM grades WHERE id = $1 RETURNING *', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Grade not found' });
+    }
+
+    res.json({
+      message: 'Grade deleted successfully',
+      grade: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Delete grade error:', error);
+    res.status(500).json({ message: 'Server error deleting grade' });
+  }
+});
+
+// ==================== CLASSES MANAGEMENT ====================
+
+// Get all classes
+router.get('/classes', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT c.*, 
+        g.name as grade_name,
+        CONCAT(t.first_name, ' ', t.last_name) as teacher_name,
+        COUNT(DISTINCT s.id) as student_count
+      FROM classes c
+      LEFT JOIN grades g ON c.grade_id = g.id
+      LEFT JOIN users t ON c.teacher_id = t.id
+      LEFT JOIN users s ON c.id = s.class_id AND s.role = 'student'
+      GROUP BY c.id, g.name, t.first_name, t.last_name
+      ORDER BY g.name, c.name
+    `);
+
+    res.json({
+      classes: result.rows,
+      total: result.rows.length
+    });
+  } catch (error) {
+    console.error('Get classes error:', error);
+    res.status(500).json({ message: 'Server error fetching classes' });
+  }
+});
+
+// Add class
+router.post('/classes', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+  body('name').notEmpty().withMessage('Class name is required'),
+  body('grade_id').isInt().withMessage('Grade ID is required'),
+  body('teacher_id').optional().isInt().withMessage('Teacher ID must be an integer')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { name, grade_id, teacher_id } = req.body;
+
+    // Check if class already exists in this grade
+    const existingClass = await db.query(
+      'SELECT id FROM classes WHERE name = $1 AND grade_id = $2',
+      [name, grade_id]
+    );
+
+    if (existingClass.rows.length > 0) {
+      return res.status(400).json({ message: 'Class with this name already exists in this grade' });
+    }
+
+    const result = await db.query(`
+      INSERT INTO classes (name, grade_id, teacher_id) 
+      VALUES ($1, $2, $3) 
+      RETURNING *
+    `, [name, grade_id, teacher_id || null]);
+
+    res.status(201).json({
+      message: 'Class added successfully',
+      class: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Add class error:', error);
+    res.status(500).json({ message: 'Server error adding class' });
+  }
+});
+
+// Update class
+router.put('/classes/:id', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+  body('name').notEmpty().withMessage('Class name is required'),
+  body('grade_id').isInt().withMessage('Grade ID is required'),
+  body('teacher_id').optional().isInt().withMessage('Teacher ID must be an integer')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { id } = req.params;
+    const { name, grade_id, teacher_id } = req.body;
+
+    const result = await db.query(`
+      UPDATE classes 
+      SET name = $1, grade_id = $2, teacher_id = $3, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $4 
+      RETURNING *
+    `, [name, grade_id, teacher_id || null, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    res.json({
+      message: 'Class updated successfully',
+      class: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Update class error:', error);
+    res.status(500).json({ message: 'Server error updating class' });
+  }
+});
+
+// Delete class
+router.delete('/classes/:id', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if class has students
+    const studentCount = await db.query(
+      'SELECT COUNT(*) as count FROM users WHERE class_id = $1 AND role = $2',
+      [id, 'student']
+    );
+
+    if (parseInt(studentCount.rows[0].count) > 0) {
+      return res.status(400).json({ 
+        message: `Cannot delete class. It has ${studentCount.rows[0].count} students assigned.`
+      });
+    }
+
+    const result = await db.query('DELETE FROM classes WHERE id = $1 RETURNING *', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    res.json({
+      message: 'Class deleted successfully',
+      class: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Delete class error:', error);
+    res.status(500).json({ message: 'Server error deleting class' });
+  }
+});
+
 module.exports = router;
