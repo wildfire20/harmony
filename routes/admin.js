@@ -227,12 +227,14 @@ router.post('/teachers', [
 
       const teacherId = result.rows[0].id;
 
-      // Assign teacher to grades and classes
-      for (let i = 0; i < grade_ids.length; i++) {
-        await client.query(`
-          INSERT INTO teacher_assignments (teacher_id, grade_id, class_id) 
-          VALUES ($1, $2, $3)
-        `, [teacherId, grade_ids[i], class_ids[i]]);
+      // Assign teacher to grades and classes (only if provided)
+      if (grade_ids && grade_ids.length > 0 && class_ids && class_ids.length > 0) {
+        for (let i = 0; i < Math.min(grade_ids.length, class_ids.length); i++) {
+          await client.query(`
+            INSERT INTO teacher_assignments (teacher_id, grade_id, class_id) 
+            VALUES ($1, $2, $3)
+          `, [teacherId, grade_ids[i], class_ids[i]]);
+        }
       }
 
       await client.query('COMMIT');
@@ -251,6 +253,15 @@ router.post('/teachers', [
 
   } catch (error) {
     console.error('Add teacher error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      email,
+      first_name,
+      last_name,
+      grade_ids,
+      class_ids
+    });
     res.status(500).json({ message: 'Server error adding teacher' });
   }
 });
