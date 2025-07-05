@@ -1,36 +1,23 @@
-# Railway Dockerfile for Harmony Learning Institute
-FROM node:18-alpine
+# Use official Node.js image
+FROM node:18
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
-COPY client/package*.json ./client/
-
-# Install dependencies
-RUN npm ci --only=production
-RUN cd client && npm ci --only=production
-
-# Copy source code
+# Copy both server and client code
 COPY . .
 
-# Build client
-RUN cd client && npm run build
+# Change permissions (fixes react-scripts permission denied)
+RUN chmod +x ./client/node_modules/.bin/react-scripts || true
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S harmonyuser -u 1001
+# Install dependencies
+RUN npm install --legacy-peer-deps
 
-# Change ownership of app directory
-RUN chown -R harmonyuser:nodejs /app
-USER harmonyuser
+# Build React client
+RUN cd client && npm install --legacy-peer-deps && npm run build
 
-# Expose port
+# Expose backend port
 EXPOSE 5000
 
-# Set environment
-ENV NODE_ENV=production
-
-# Start the application
-CMD ["node", "server.js"]
+# Start server
+CMD ["npm", "start"]

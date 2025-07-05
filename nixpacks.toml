@@ -1,4 +1,4 @@
-# Nixpacks configuration for Railway deployment
+# Nixpacks configuration for Railway deployment with permission fix
 providers = ["node"]
 
 [phases.setup]
@@ -6,14 +6,15 @@ nixPkgs = ["nodejs-18_x", "npm-9_x"]
 
 [phases.install]
 cmds = [
-  "npm ci",
-  "cd client && npm ci"
+  "npm install --legacy-peer-deps",
+  "cd client && npm install --legacy-peer-deps"
 ]
 
 [phases.build]
 cmds = [
+  "chmod +x ./client/node_modules/.bin/react-scripts || true",
   "cd client && npm run build"
 ]
 
 [start]
-cmd = "node server.js"
+cmd = "npm start"
