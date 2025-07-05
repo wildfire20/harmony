@@ -60,7 +60,9 @@ const TeacherManagement = () => {
     {
       onSuccess: (response) => {
         console.log('Teacher updated successfully:', response);
+        // Force refresh of teachers data
         queryClient.invalidateQueries(['teachers']);
+        queryClient.refetchQueries(['teachers']);
         setEditingTeacher(null);
         setShowAddForm(false);
         reset();
@@ -92,6 +94,10 @@ const TeacherManagement = () => {
   const teachers = teachersData?.data?.teachers || [];
   const grades = gradesData?.data?.grades || [];
   const classes = classesData?.data?.classes || [];
+
+  // Debug logging
+  console.log('Teachers data:', teachersData);
+  console.log('Processed teachers:', teachers);
 
   const onSubmit = (data) => {
     console.log('Form data being submitted:', data);

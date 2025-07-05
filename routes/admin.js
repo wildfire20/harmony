@@ -488,7 +488,7 @@ router.get('/teachers', [
 ], async (req, res) => {
   try {
     const result = await db.query(`
-      SELECT u.id, u.email, u.first_name, u.last_name, u.is_active, u.created_at,
+      SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_active, u.created_at,
              COALESCE(
                json_agg(
                  json_build_object(
@@ -504,7 +504,7 @@ router.get('/teachers', [
       LEFT JOIN teacher_assignments ta ON u.id = ta.teacher_id
       LEFT JOIN grades g ON ta.grade_id = g.id
       LEFT JOIN classes c ON ta.class_id = c.id
-      WHERE u.role = 'teacher'
+      WHERE u.role IN ('teacher', 'admin')
       GROUP BY u.id
       ORDER BY u.created_at DESC
     `);
