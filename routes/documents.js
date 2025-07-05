@@ -445,38 +445,49 @@ router.post('/create-test-document', [
     console.log('Creating test document...');
     console.log('User creating test:', req.user);
     
-    // First, let's check what columns exist in the documents table
-    const tableInfo = await db.query(`
-      SELECT column_name, data_type, is_nullable 
-      FROM information_schema.columns 
-      WHERE table_name = 'documents' 
-      ORDER BY ordinal_position
+    // First, let's find the student (Broe Plussies) and their exact grade/class assignment
+    const student = await db.query(`
+      SELECT u.id, u.first_name, u.last_name, u.grade_id, u.class_id,
+             g.name as grade_name, c.name as class_name
+      FROM users u
+      LEFT JOIN grades g ON u.grade_id = g.id
+      LEFT JOIN classes c ON u.class_id = c.id
+      WHERE u.role = 'student' AND u.first_name ILIKE '%broe%'
+      LIMIT 1
     `);
     
-    console.log('Documents table columns:', tableInfo.rows);
+    if (student.rows.length === 0) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
     
-    // Try a simpler insert with minimal required fields
+    const studentData = student.rows[0];
+    console.log('Found student:', studentData);
+    
+    // Create test document for this specific student's grade/class
     const result = await db.query(`
       INSERT INTO documents (
-        title, description, document_type, grade_id, class_id, uploaded_by, is_active
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        title, description, document_type, grade_id, class_id, uploaded_by, 
+        file_name, original_filename, is_active
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `, [
-      'Test Document for Grade 6 Class 16',
-      'This is a test document to verify document visibility',
+      `Test Document for ${studentData.first_name} ${studentData.last_name}`,
+      `Test document for Grade ${studentData.grade_id} Class ${studentData.class_id}`,
       'other',
-      6, // Grade 6
-      16, // Class 16 (where Broe Plussies is assigned)
+      studentData.grade_id,
+      studentData.class_id,
       req.user.id,
+      `test-document-grade${studentData.grade_id}-class${studentData.class_id}.pdf`,
+      `Test Document Grade ${studentData.grade_id} Class ${studentData.class_id}.pdf`,
       true
     ]);
     
     console.log('Test document created:', result.rows[0]);
     
     res.json({
-      message: 'Test document created successfully',
+      message: `Test document created successfully for ${studentData.first_name} ${studentData.last_name}`,
       document: result.rows[0],
-      table_info: tableInfo.rows
+      student_info: studentData
     });
     
   } catch (error) {
