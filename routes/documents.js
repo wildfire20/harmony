@@ -58,8 +58,18 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
     const { gradeId, classId } = req.params;
     const user = req.user;
 
+    console.log('=== DOCUMENTS GRADE/CLASS ENDPOINT DEBUG ===');
+    console.log('Requested gradeId:', gradeId);
+    console.log('Requested classId:', classId);
+    console.log('User:', user);
+    console.log('User grade_id:', user.grade_id);
+    console.log('User class_id:', user.class_id);
+
     // Check access permissions
     if (user.role === 'student' && (user.grade_id != gradeId || user.class_id != classId)) {
+      console.error('Access denied for student - grade/class mismatch');
+      console.error('User grade_id:', user.grade_id, 'Requested gradeId:', gradeId);
+      console.error('User class_id:', user.class_id, 'Requested classId:', classId);
       return res.status(403).json({ message: 'Access denied' });
     }
 
@@ -70,6 +80,7 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
       `, [user.id, gradeId, classId]);
 
       if (assignmentCheck.rows.length === 0) {
+        console.error('Access denied for teacher - no assignment');
         return res.status(403).json({ message: 'Access denied' });
       }
     }
@@ -87,6 +98,9 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
       ORDER BY d.document_type, d.uploaded_at DESC
     `, [gradeId, classId]);
 
+    console.log('Query result:', result.rows.length, 'documents found');
+    console.log('Documents:', result.rows);
+
     // Group documents by type
     const groupedDocuments = result.rows.reduce((acc, doc) => {
       if (!acc[doc.document_type]) {
@@ -98,6 +112,9 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
       });
       return acc;
     }, {});
+
+    console.log('Grouped documents:', groupedDocuments);
+    console.log('=== END DEBUG ===');
 
     res.json({ 
       documents: groupedDocuments,

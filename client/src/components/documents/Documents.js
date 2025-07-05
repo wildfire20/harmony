@@ -72,14 +72,25 @@ const Documents = () => {
   });
 
   // Fetch all documents (for admin) or user-specific documents
-  const { data: documentsData, isLoading } = useQuery({
+  const { data: documentsData, isLoading, error: documentsError } = useQuery({
     queryKey: ['documents', user?.id],
     queryFn: async () => {
       let url = '/api/documents/all';
       
       // For students, get documents for their specific grade/class
       if (user?.role === 'student') {
+        console.log('=== STUDENT DOCUMENT FETCH DEBUG ===');
+        console.log('User grade_id:', user.grade_id);
+        console.log('User class_id:', user.class_id);
+        console.log('User object:', user);
+        
+        if (!user.grade_id || !user.class_id) {
+          console.error('Student missing grade_id or class_id!');
+          throw new Error('Student account is missing grade or class assignment');
+        }
+        
         url = `/api/documents/grade/${user.grade_id}/class/${user.class_id}`;
+        console.log('Fetching from URL:', url);
       }
       
       const response = await fetch(url, {
@@ -87,12 +98,20 @@ const Documents = () => {
           'Authorization': `Bearer ${token}`
         }
       });
+      
+      console.log('Documents fetch response status:', response.status);
+      console.log('Documents fetch response ok:', response.ok);
+      
       if (!response.ok) {
-        throw new Error('Failed to fetch documents');
+        const errorText = await response.text();
+        console.error('Documents fetch error response:', errorText);
+        throw new Error(`Failed to fetch documents: ${response.status} ${errorText}`);
       }
-      return response.json();
+      const data = await response.json();
+      console.log('Documents fetch data:', data);
+      return data;
     },
-    enabled: !!user
+    enabled: !!user && !!token
   });
 
   // Upload document mutation
@@ -208,6 +227,7 @@ const Documents = () => {
   const documents = documentsData?.documents || [];
 
   // Debug logging
+  console.log('=== DOCUMENTS COMPONENT DEBUG ===');
   console.log('Document Types Data:', documentTypesData);
   console.log('Document Types Array:', documentTypes);
   console.log('Document Types Loading:', typesLoading);
@@ -220,6 +240,13 @@ const Documents = () => {
   console.log('Token available:', !!token);
   console.log('Token value:', token ? 'Present' : 'Missing');
   console.log('User data:', user);
+  console.log('Documents loading:', isLoading);
+  console.log('Documents error:', documentsError);
+  console.log('Documents data:', documentsData);
+  console.log('Documents array:', documents);
+  console.log('Filtered documents:', filteredDocuments.length);
+  console.log('Grouped documents:', Object.keys(groupedDocuments));
+  console.log('=== END DEBUG ===');
 
   const documentIcons = {
     timetable: Calendar,
@@ -325,6 +352,24 @@ const Documents = () => {
   }, {});
 
   if (isLoading) return <LoadingSpinner />;
+  
+  if (documentsError) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-red-50 border border-red-200 rounded-md p-4">
+          <h3 className="text-red-800 font-medium">Error Loading Documents</h3>
+          <p className="text-red-600 mt-1">{documentsError.message}</p>
+          {user?.role === 'student' && (!user.grade_id || !user.class_id) && (
+            <div className="mt-2">
+              <p className="text-red-600 text-sm">
+                Your student account is missing grade or class assignment. Please contact the administrator.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
