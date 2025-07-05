@@ -24,7 +24,12 @@ const StudentManagement = () => {
   );
 
   // Fetch grades for dropdown
-  const { data: gradesData } = useQuery('grades', () => adminAPI.getGrades());
+  const { data: gradesData, error: gradesError, isLoading: gradesLoading } = useQuery('grades', () => adminAPI.getGrades(), {
+    onError: (error) => {
+      console.error('Failed to fetch grades:', error);
+      toast.error('Failed to load grades');
+    }
+  });
 
   // Add student mutation
   const addStudentMutation = useMutation(
@@ -58,6 +63,11 @@ const StudentManagement = () => {
 
   const students = studentsData?.data?.students || [];
   const grades = gradesData?.data?.grades || [];
+
+  // Debug logging
+  console.log('Grades data:', gradesData);
+  console.log('Processed grades:', grades);
+  console.log('Grades error:', gradesError);
 
   const onSubmit = (data) => {
     addStudentMutation.mutate(data);
