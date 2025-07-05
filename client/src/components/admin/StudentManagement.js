@@ -31,6 +31,14 @@ const StudentManagement = () => {
     }
   });
 
+  // Fetch classes for dropdown
+  const { data: classesData, error: classesError, isLoading: classesLoading } = useQuery('classes', () => adminAPI.getClasses(), {
+    onError: (error) => {
+      console.error('Failed to fetch classes:', error);
+      toast.error('Failed to load classes');
+    }
+  });
+
   // Add student mutation
   const addStudentMutation = useMutation(
     (data) => {
@@ -72,11 +80,15 @@ const StudentManagement = () => {
 
   const students = studentsData?.data?.students || [];
   const grades = gradesData?.data?.grades || [];
+  const classes = classesData?.data?.classes || [];
 
   // Debug logging
   console.log('Grades data:', gradesData);
   console.log('Processed grades:', grades);
   console.log('Grades error:', gradesError);
+  console.log('Classes data:', classesData);
+  console.log('Processed classes:', classes);
+  console.log('Classes error:', classesError);
 
   const onSubmit = (data) => {
     console.log('Form data being submitted:', data);
@@ -201,6 +213,22 @@ const StudentManagement = () => {
               {errors.grade_id && (
                 <p className="text-red-500 text-sm mt-1">{errors.grade_id.message}</p>
               )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Class
+              </label>
+              <select
+                {...register('class_id')}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">Select Class (Optional)</option>
+                {classes.map((classItem) => (
+                  <option key={classItem.id} value={classItem.id}>
+                    {classItem.name} (Grade {classItem.grade_name || classItem.grade_id})
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="md:col-span-2 flex space-x-3">
               <button

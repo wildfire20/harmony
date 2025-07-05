@@ -19,6 +19,12 @@ const TeacherManagement = () => {
     () => adminAPI.getTeachers({ search: searchTerm })
   );
 
+  // Fetch grades for assignment
+  const { data: gradesData } = useQuery('grades', () => adminAPI.getGrades());
+
+  // Fetch classes for assignment
+  const { data: classesData } = useQuery('classes', () => adminAPI.getClasses());
+
   // Add teacher mutation
   const addTeacherMutation = useMutation(
     (data) => {
@@ -59,9 +65,21 @@ const TeacherManagement = () => {
   );
 
   const teachers = teachersData?.data?.teachers || [];
+  const grades = gradesData?.data?.grades || [];
+  const classes = classesData?.data?.classes || [];
 
   const onSubmit = (data) => {
-    addTeacherMutation.mutate(data);
+    console.log('Form data being submitted:', data);
+    
+    // Convert grade_ids and class_ids to arrays if they exist
+    const formattedData = {
+      ...data,
+      grade_ids: data.grade_ids ? (Array.isArray(data.grade_ids) ? data.grade_ids : [data.grade_ids]) : [],
+      class_ids: data.class_ids ? (Array.isArray(data.class_ids) ? data.class_ids : [data.class_ids]) : []
+    };
+    
+    console.log('Formatted data being sent:', formattedData);
+    addTeacherMutation.mutate(formattedData);
   };
 
   const handleDelete = (id, name) => {
@@ -166,6 +184,40 @@ const TeacherManagement = () => {
                 <option value="teacher">Teacher</option>
                 <option value="admin">Admin</option>
               </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Assign to Grades (Optional)
+              </label>
+              <select
+                multiple
+                {...register('grade_ids')}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 h-20"
+              >
+                {grades.map((grade) => (
+                  <option key={grade.id} value={grade.id}>
+                    {grade.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-sm text-gray-500 mt-1">Hold Ctrl/Cmd to select multiple grades</p>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Assign to Classes (Optional)
+              </label>
+              <select
+                multiple
+                {...register('class_ids')}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 h-20"
+              >
+                {classes.map((classItem) => (
+                  <option key={classItem.id} value={classItem.id}>
+                    {classItem.name} (Grade {classItem.grade_name || classItem.grade_id})
+                  </option>
+                ))}
+              </select>
+              <p className="text-sm text-gray-500 mt-1">Hold Ctrl/Cmd to select multiple classes</p>
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
