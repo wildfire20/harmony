@@ -74,10 +74,32 @@ const corsOptions = {
       'http://localhost:3001'  // Alternative development port
     ];
     
+    // In production, allow Railway domains and common deployment platforms
+    if (process.env.NODE_ENV === 'production') {
+      // Allow same-origin requests (when frontend and backend are served from same domain)
+      if (!origin) return callback(null, true);
+      
+      // Allow Railway.app domains
+      if (origin.includes('.railway.app')) {
+        return callback(null, true);
+      }
+      
+      // Allow custom domains if configured
+      if (process.env.ALLOWED_ORIGINS) {
+        const customOrigins = process.env.ALLOWED_ORIGINS.split(',');
+        allowedOrigins.push(...customOrigins);
+      }
+    }
+    
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      // In production, be more permissive for same-origin requests
+      if (process.env.NODE_ENV === 'production') {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
     }
   },
   credentials: true,
@@ -104,8 +126,17 @@ app.use('/api/submissions', submissionRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/documents', documentRoutes);
 
-// Root endpoint
-app.get('/', (req, res) => {
+// Health check endpoint (before static files)
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    service: 'Harmony Learning Institute API'
+  });
+});
+
+// API info endpoint (for debugging)
+app.get('/api', (req, res) => {
   res.json({
     message: 'Harmony Learning Institute API',
     version: '1.0.0',
@@ -126,21 +157,41 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    service: 'Harmony Learning Institute API'
-  });
-});
-
 // Serve static files from React app in production
 if (process.env.NODE_ENV === 'production') {
+  // Serve static files from the React app
   app.use(express.static(path.join(__dirname, 'client/build')));
   
+  // Catch-all handler: send back React's index.html file for any non-API routes
   app.get('*', (req, res) => {
+    // Don't serve React for API routes
+    if (req.path.startsWith('/api/')) {
+      return res.status(404).json({ message: 'API route not found' });
+    }
     res.sendFile(path.join(__dirname, 'client/build/index.html'));
+  });
+} else {
+  // Development mode - serve API info at root
+  app.get('/', (req, res) => {
+    res.json({
+      message: 'Harmony Learning Institute API - Development Mode',
+      version: '1.0.0',
+      status: 'Running',
+      timestamp: new Date().toISOString(),
+      note: 'In development, frontend runs on port 3000',
+      endpoints: {
+        health: '/api/health',
+        auth: '/api/auth',
+        users: '/api/users',
+        classes: '/api/classes',
+        tasks: '/api/tasks',
+        quizzes: '/api/quizzes',
+        announcements: '/api/announcements',
+        submissions: '/api/submissions',
+        admin: '/api/admin',
+        documents: '/api/documents'
+      }
+    });
   });
 }
 
@@ -151,11 +202,6 @@ app.use((err, req, res, next) => {
     message: 'Something went wrong!', 
     error: process.env.NODE_ENV === 'development' ? err.message : {}
   });
-});
-
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({ message: 'Route not found' });
 });
 
 const PORT = process.env.PORT || 5000;
