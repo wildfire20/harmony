@@ -1,0 +1,19 @@
+# Nixpacks configuration for Railway deployment
+providers = ["node"]
+
+[phases.setup]
+nixPkgs = ["nodejs-18_x", "npm-9_x"]
+
+[phases.install]
+cmds = [
+  "npm ci",
+  "cd client && npm ci"
+]
+
+[phases.build]
+cmds = [
+  "cd client && npm run build"
+]
+
+[start]
+cmd = "node server.js"

@@ -1,9 +1,16 @@
 # Dependencies
 node_modules/
 client/node_modules/
+**/node_modules/
 
 # Production build
 client/build/
+build/
+
+# Cache directories
+.cache/
+client/.cache/
+**/.cache/
 
 # Environment variables
 .env
