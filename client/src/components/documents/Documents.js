@@ -101,12 +101,12 @@ const Documents = () => {
           console.log('User class_id:', user.class_id);
           console.log('User object:', user);
           
-          if (!user.grade_id) {
+          if (!user.grade_id || user.grade_id === 0) {
             console.error('Student missing grade_id!');
-            throw new Error('Student account is missing grade assignment. Please contact the administrator.');
+            throw new Error('Your student account is missing grade assignment. Please contact the administrator to assign you to a grade and class.');
           }
           
-          if (!user.class_id) {
+          if (!user.class_id || user.class_id === 0) {
             console.warn('Student missing class_id, fetching grade-only documents');
             url = `/api/documents/grade/${user.grade_id}`;
           } else {

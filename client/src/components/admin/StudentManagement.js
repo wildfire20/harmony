@@ -103,6 +103,34 @@ const StudentManagement = () => {
     }
   );
 
+  // Fix student grades mutation
+  const fixStudentGradesMutation = useMutation(
+    () => {
+      return fetch('/api/admin/fix-student-grades', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        }
+      }).then(res => {
+        if (!res.ok) {
+          throw new Error('Failed to fix student grades');
+        }
+        return res.json();
+      });
+    },
+    {
+      onSuccess: (response) => {
+        toast.success(response.message);
+        queryClient.invalidateQueries(['students']);
+        console.log('Fixed students:', response.fixed_students);
+      },
+      onError: (error) => {
+        toast.error(error.message || 'Failed to fix student grade assignments');
+      }
+    }
+  );
+
   const students = studentsData?.data?.students || [];
   const grades = gradesData?.data?.grades || [];
   const classes = classesData?.data?.classes || [];
@@ -155,13 +183,26 @@ const StudentManagement = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-900">Student Management</h2>
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center space-x-2"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Add Student</span>
-        </button>
+        <div className="flex space-x-3">
+          <button
+            onClick={() => {
+              if (window.confirm('This will assign unassigned students to the first available grade and class. Continue?')) {
+                fixStudentGradesMutation.mutate();
+              }
+            }}
+            disabled={fixStudentGradesMutation.isLoading}
+            className="bg-orange-600 text-white px-4 py-2 rounded-md hover:bg-orange-700 flex items-center space-x-2 disabled:opacity-50"
+          >
+            <span>{fixStudentGradesMutation.isLoading ? 'Fixing...' : 'Fix Grade Assignments'}</span>
+          </button>
+          <button
+            onClick={() => setShowAddForm(true)}
+            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center space-x-2"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Add Student</span>
+          </button>
+        </div>
       </div>
 
       {/* Filters */}

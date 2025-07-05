@@ -109,7 +109,7 @@ router.post('/students', [
   authorize('admin', 'super_admin'),
   body('first_name').notEmpty().withMessage('First name is required'),
   body('last_name').notEmpty().withMessage('Last name is required'),
-  body('grade_id').isInt().withMessage('Grade ID must be an integer'),
+  body('grade_id').isInt({ min: 1 }).withMessage('Valid Grade ID is required'),
   body('class_id').optional().isInt().withMessage('Class ID must be an integer'),
   body('student_number').optional().notEmpty().withMessage('Student number cannot be empty if provided')
 ], async (req, res) => {
@@ -120,6 +120,27 @@ router.post('/students', [
     }
 
     let { student_number, first_name, last_name, grade_id, class_id, email } = req.body;
+    
+    // Ensure grade_id is a valid integer
+    grade_id = parseInt(grade_id);
+    if (!grade_id || grade_id < 1) {
+      return res.status(400).json({ message: 'Valid grade assignment is required' });
+    }
+    
+    // Ensure class_id is either null or a valid integer
+    if (class_id) {
+      class_id = parseInt(class_id);
+      if (class_id < 1) {
+        class_id = null;
+      }
+    }
+    
+    console.log('Creating student with validated data:', { 
+      first_name, 
+      last_name, 
+      grade_id, 
+      class_id 
+    });
 
     // Auto-generate student number if not provided
     if (!student_number) {
@@ -1154,6 +1175,71 @@ router.delete('/classes/:id', [
   } catch (error) {
     console.error('Delete class error:', error);
     res.status(500).json({ message: 'Server error deleting class' });
+  }
+});
+
+// Data integrity fix - assign grades to students without proper assignments
+router.post('/fix-student-grades', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    console.log('Starting student grade assignment fix...');
+    
+    // Get students without grade assignments
+    const unassignedStudents = await db.query(`
+      SELECT u.id, u.student_number, u.first_name, u.last_name, u.grade_id, u.class_id
+      FROM users u
+      WHERE u.role = 'student' AND (u.grade_id IS NULL OR u.grade_id = 0)
+    `);
+    
+    console.log(`Found ${unassignedStudents.rows.length} students without proper grade assignments`);
+    
+    if (unassignedStudents.rows.length === 0) {
+      return res.json({ 
+        message: 'All students have proper grade assignments',
+        fixed_count: 0 
+      });
+    }
+    
+    // Get the first available grade and class
+    const defaultGrade = await db.query('SELECT id FROM grades ORDER BY id LIMIT 1');
+    const defaultClass = await db.query('SELECT id FROM classes ORDER BY id LIMIT 1');
+    
+    if (defaultGrade.rows.length === 0) {
+      return res.status(400).json({ message: 'No grades available. Please create grades first.' });
+    }
+    
+    const gradeId = defaultGrade.rows[0].id;
+    const classId = defaultClass.rows.length > 0 ? defaultClass.rows[0].id : null;
+    
+    // Update students without grade assignments
+    const updateResult = await db.query(`
+      UPDATE users 
+      SET grade_id = $1, class_id = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE role = 'student' AND (grade_id IS NULL OR grade_id = 0)
+      RETURNING id, student_number, first_name, last_name, grade_id, class_id
+    `, [gradeId, classId]);
+    
+    console.log(`Fixed grade assignments for ${updateResult.rows.length} students`);
+    
+    res.json({
+      message: `Successfully fixed grade assignments for ${updateResult.rows.length} students`,
+      fixed_count: updateResult.rows.length,
+      assigned_grade_id: gradeId,
+      assigned_class_id: classId,
+      fixed_students: updateResult.rows.map(s => ({
+        id: s.id,
+        student_number: s.student_number,
+        name: `${s.first_name} ${s.last_name}`,
+        grade_id: s.grade_id,
+        class_id: s.class_id
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Fix student grades error:', error);
+    res.status(500).json({ message: 'Server error fixing student grade assignments' });
   }
 });
 
