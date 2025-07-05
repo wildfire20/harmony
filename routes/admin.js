@@ -266,6 +266,151 @@ router.post('/teachers', [
   }
 });
 
+// Update teacher
+router.put('/teachers/:id', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+  body('email').optional().isEmail().withMessage('Valid email is required'),
+  body('password').optional().isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  body('first_name').optional().notEmpty().withMessage('First name is required'),
+  body('last_name').optional().notEmpty().withMessage('Last name is required'),
+  body('role').optional().isIn(['teacher', 'admin']).withMessage('Invalid role'),
+  body('grade_ids').optional().isArray().withMessage('Grade IDs must be an array'),
+  body('class_ids').optional().isArray().withMessage('Class IDs must be an array')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { id } = req.params;
+    let { email, password, first_name, last_name, role, grade_ids, class_ids } = req.body;
+
+    // Check if teacher exists
+    const existingTeacher = await db.query('SELECT * FROM users WHERE id = $1 AND role IN ($2, $3)', [id, 'teacher', 'admin']);
+    if (existingTeacher.rows.length === 0) {
+      return res.status(404).json({ message: 'Teacher not found' });
+    }
+
+    // Check if email already exists for another user
+    if (email) {
+      const emailCheck = await db.query('SELECT id FROM users WHERE email = $1 AND id != $2', [email, id]);
+      if (emailCheck.rows.length > 0) {
+        return res.status(400).json({ message: 'Email already exists' });
+      }
+    }
+
+    const client = await db.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+
+      // Build update query dynamically
+      const updateFields = [];
+      const updateValues = [];
+      let paramCount = 0;
+
+      if (first_name) {
+        paramCount++;
+        updateFields.push(`first_name = $${paramCount}`);
+        updateValues.push(first_name);
+      }
+
+      if (last_name) {
+        paramCount++;
+        updateFields.push(`last_name = $${paramCount}`);
+        updateValues.push(last_name);
+      }
+
+      if (email) {
+        paramCount++;
+        updateFields.push(`email = $${paramCount}`);
+        updateValues.push(email);
+      }
+
+      if (role) {
+        paramCount++;
+        updateFields.push(`role = $${paramCount}`);
+        updateValues.push(role);
+      }
+
+      if (password) {
+        const hashedPassword = await bcrypt.hash(password, parseInt(process.env.BCRYPT_ROUNDS) || 12);
+        paramCount++;
+        updateFields.push(`password = $${paramCount}`);
+        updateValues.push(hashedPassword);
+      }
+
+      // Add updated_at
+      paramCount++;
+      updateFields.push(`updated_at = $${paramCount}`);
+      updateValues.push(new Date());
+
+      // Add id for WHERE clause
+      paramCount++;
+      updateValues.push(id);
+
+      // Update teacher if there are fields to update
+      let result;
+      if (updateFields.length > 0) {
+        const updateQuery = `
+          UPDATE users 
+          SET ${updateFields.join(', ')} 
+          WHERE id = $${paramCount}
+          RETURNING id, email, first_name, last_name, role
+        `;
+        result = await client.query(updateQuery, updateValues);
+      } else {
+        result = await client.query('SELECT id, email, first_name, last_name, role FROM users WHERE id = $1', [id]);
+      }
+
+      // Update teacher assignments if provided
+      if (grade_ids !== undefined || class_ids !== undefined) {
+        // Delete existing assignments
+        await client.query('DELETE FROM teacher_assignments WHERE teacher_id = $1', [id]);
+
+        // Add new assignments if provided
+        if (grade_ids && grade_ids.length > 0 && class_ids && class_ids.length > 0) {
+          for (let i = 0; i < Math.min(grade_ids.length, class_ids.length); i++) {
+            await client.query(`
+              INSERT INTO teacher_assignments (teacher_id, grade_id, class_id) 
+              VALUES ($1, $2, $3)
+            `, [id, grade_ids[i], class_ids[i]]);
+          }
+        }
+      }
+
+      await client.query('COMMIT');
+
+      res.json({
+        message: 'Teacher updated successfully',
+        teacher: result.rows[0]
+      });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+  } catch (error) {
+    console.error('Update teacher error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      id,
+      email,
+      first_name,
+      last_name,
+      grade_ids,
+      class_ids
+    });
+    res.status(500).json({ message: 'Server error updating teacher' });
+  }
+});
+
 // Get all students with pagination and filters
 router.get('/students', [
   authenticate,
