@@ -268,8 +268,11 @@ const Documents = () => {
   
   const documents = documentsData?.documents || [];
 
-  const filteredDocuments = documents.filter(doc => {
-    const matchesSearch = doc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+  // Ensure documents is always an array
+  const safeDocuments = Array.isArray(documents) ? documents : [];
+
+  const filteredDocuments = safeDocuments.filter(doc => {
+    const matchesSearch = doc.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          doc.description?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesType = selectedType === '' || doc.document_type === selectedType;
     return matchesSearch && matchesType;
@@ -302,6 +305,9 @@ const Documents = () => {
   console.log('Documents error:', documentsError);
   console.log('Documents data:', documentsData);
   console.log('Documents array:', documents);
+  console.log('Safe documents array:', safeDocuments);
+  console.log('Safe documents length:', safeDocuments.length);
+  console.log('Safe documents is array:', Array.isArray(safeDocuments));
   console.log('Filtered documents:', filteredDocuments.length);
   console.log('Grouped documents:', Object.keys(groupedDocuments));
   console.log('=== END DEBUG ===');
