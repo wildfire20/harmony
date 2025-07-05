@@ -14,6 +14,7 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [token, setToken] = useState(localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -33,6 +34,7 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error('Token verification failed:', error);
       localStorage.removeItem('token');
+      setToken(null);
       setLoading(false);
     }
   };
@@ -40,9 +42,10 @@ export const AuthProvider = ({ children }) => {
   const login = async (credentials, userType) => {
     try {
       const response = await authAPI.login(credentials, userType);
-      const { token, user } = response.data;
+      const { token: newToken, user } = response.data;
       
-      localStorage.setItem('token', token);
+      localStorage.setItem('token', newToken);
+      setToken(newToken);
       setUser(user);
       
       toast.success(`Welcome back, ${user.first_name}!`);
@@ -61,6 +64,7 @@ export const AuthProvider = ({ children }) => {
       console.error('Logout error:', error);
     } finally {
       localStorage.removeItem('token');
+      setToken(null);
       setUser(null);
       toast.success('Logged out successfully');
     }
@@ -72,6 +76,7 @@ export const AuthProvider = ({ children }) => {
 
   const value = {
     user,
+    token,
     loading,
     login,
     logout,

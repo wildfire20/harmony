@@ -98,6 +98,14 @@ const Documents = () => {
   // Upload document mutation
   const uploadMutation = useMutation(
     async (formData) => {
+      console.log('=== MUTATION DEBUG START ===');
+      console.log('Token being sent:', token);
+      console.log('FormData entries:');
+      for (let [key, value] of formData.entries()) {
+        console.log(key, ':', value);
+      }
+      console.log('=== MUTATION DEBUG END ===');
+      
       const response = await fetch('/api/documents/upload', {
         method: 'POST',
         headers: {
@@ -105,8 +113,13 @@ const Documents = () => {
         },
         body: formData
       });
+      
+      console.log('Upload response status:', response.status);
+      console.log('Upload response ok:', response.ok);
+      
       if (!response.ok) {
         const error = await response.json();
+        console.error('Upload error response:', error);
         throw new Error(error.message || 'Upload failed');
       }
       return response.json();
@@ -205,6 +218,8 @@ const Documents = () => {
   console.log('Classes Array:', classes);
   console.log('User role:', user?.role);
   console.log('Token available:', !!token);
+  console.log('Token value:', token ? 'Present' : 'Missing');
+  console.log('User data:', user);
 
   const documentIcons = {
     timetable: Calendar,
@@ -219,6 +234,12 @@ const Documents = () => {
 
   const handleFileUpload = (e) => {
     e.preventDefault();
+    console.log('=== UPLOAD DEBUG START ===');
+    console.log('Token available:', !!token);
+    console.log('Token value:', token);
+    console.log('User:', user);
+    console.log('Upload form:', uploadForm);
+    
     if (!uploadForm.file || !uploadForm.title || !uploadForm.document_type) {
       toast.error('Please fill in all required fields and select a file');
       return;
@@ -238,6 +259,9 @@ const Documents = () => {
       return;
     }
 
+    console.log('Final gradeId:', gradeId);
+    console.log('Final classId:', classId);
+
     const formData = new FormData();
     formData.append('document', uploadForm.file);
     formData.append('title', uploadForm.title);
@@ -246,6 +270,8 @@ const Documents = () => {
     formData.append('grade_id', gradeId);
     formData.append('class_id', classId);
 
+    console.log('Calling uploadMutation with formData');
+    console.log('=== UPLOAD DEBUG END ===');
     uploadMutation.mutate(formData);
   };
 
