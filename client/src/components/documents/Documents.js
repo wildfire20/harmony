@@ -14,8 +14,8 @@ const Documents = () => {
     description: '',
     document_type: '',
     file: null,
-    grade_id: '',
-    class_id: ''
+    grade_ids: [], // Changed to array for multiple grades
+    class_ids: []  // Changed to array for multiple classes
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState('');
@@ -195,8 +195,8 @@ const Documents = () => {
           description: '',
           document_type: '',
           file: null,
-          grade_id: '',
-          class_id: ''
+          grade_ids: [],
+          class_ids: []
         });
       },
       onError: (error) => {
@@ -336,34 +336,87 @@ const Documents = () => {
       return;
     }
 
-    // For students, use their grade/class
-    let gradeId = uploadForm.grade_id;
-    let classId = uploadForm.class_id;
-    
+    // For students, use their grade/class (single values)
     if (user?.role === 'student') {
-      gradeId = user.grade_id;
-      classId = user.class_id;
-    }
+      if (!user.grade_id || !user.class_id) {
+        toast.error('Your account is missing grade or class assignment');
+        return;
+      }
 
-    if (!gradeId || !classId) {
-      toast.error('Please select grade and class');
+      const formData = new FormData();
+      formData.append('document', uploadForm.file);
+      formData.append('title', uploadForm.title);
+      formData.append('description', uploadForm.description);
+      formData.append('document_type', uploadForm.document_type);
+      formData.append('grade_id', user.grade_id);
+      formData.append('class_id', user.class_id);
+
+      console.log('Student upload - single grade/class');
+      uploadMutation.mutate(formData);
       return;
     }
 
-    console.log('Final gradeId:', gradeId);
-    console.log('Final classId:', classId);
+    // For admin/teachers, handle multiple selections
+    if (uploadForm.grade_ids.length === 0 || uploadForm.class_ids.length === 0) {
+      toast.error('Please select at least one grade and one class');
+      return;
+    }
 
-    const formData = new FormData();
-    formData.append('document', uploadForm.file);
-    formData.append('title', uploadForm.title);
-    formData.append('description', uploadForm.description);
-    formData.append('document_type', uploadForm.document_type);
-    formData.append('grade_id', gradeId);
-    formData.append('class_id', classId);
+    console.log('Admin upload - multiple grades/classes');
+    console.log('Selected grade_ids:', uploadForm.grade_ids);
+    console.log('Selected class_ids:', uploadForm.class_ids);
 
-    console.log('Calling uploadMutation with formData');
+    // Create multiple upload requests for each grade/class combination
+    const uploadPromises = [];
+    
+    uploadForm.grade_ids.forEach(gradeId => {
+      uploadForm.class_ids.forEach(classId => {
+        const formData = new FormData();
+        formData.append('document', uploadForm.file);
+        formData.append('title', uploadForm.title);
+        formData.append('description', uploadForm.description);
+        formData.append('document_type', uploadForm.document_type);
+        formData.append('grade_id', gradeId);
+        formData.append('class_id', classId);
+        
+        uploadPromises.push(
+          fetch('/api/documents/upload', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            },
+            body: formData
+          })
+        );
+      });
+    });
+
+    // Execute all uploads
+    Promise.all(uploadPromises)
+      .then(responses => {
+        const failedUploads = responses.filter(r => !r.ok);
+        if (failedUploads.length === 0) {
+          queryClient.invalidateQueries(['documents']);
+          toast.success(`Document uploaded successfully to ${uploadForm.grade_ids.length} grade(s) and ${uploadForm.class_ids.length} class(es)!`);
+          setShowUploadForm(false);
+          setUploadForm({
+            title: '',
+            description: '',
+            document_type: '',
+            file: null,
+            grade_ids: [],
+            class_ids: []
+          });
+        } else {
+          toast.error(`Some uploads failed. ${responses.length - failedUploads.length} successful, ${failedUploads.length} failed.`);
+        }
+      })
+      .catch(error => {
+        console.error('Upload error:', error);
+        toast.error('Upload failed');
+      });
+
     console.log('=== UPLOAD DEBUG END ===');
-    uploadMutation.mutate(formData);
   };
 
   const handleDownload = async (documentId, fileName) => {
@@ -397,6 +450,39 @@ const Documents = () => {
     if (window.confirm('Are you sure you want to delete this document?')) {
       deleteMutation.mutate(documentId);
     }
+  };
+
+  // Helper functions for multiple selections
+  const handleGradeSelection = (gradeId) => {
+    const currentSelection = uploadForm.grade_ids;
+    const newSelection = currentSelection.includes(gradeId)
+      ? currentSelection.filter(id => id !== gradeId)
+      : [...currentSelection, gradeId];
+    
+    setUploadForm({ ...uploadForm, grade_ids: newSelection });
+  };
+
+  const handleClassSelection = (classId) => {
+    const currentSelection = uploadForm.class_ids;
+    const newSelection = currentSelection.includes(classId)
+      ? currentSelection.filter(id => id !== classId)
+      : [...currentSelection, classId];
+    
+    setUploadForm({ ...uploadForm, class_ids: newSelection });
+  };
+
+  const selectAllGrades = () => {
+    const allGradeIds = grades.map(grade => grade.id.toString());
+    setUploadForm({ ...uploadForm, grade_ids: allGradeIds });
+  };
+
+  const selectAllClasses = () => {
+    const allClassIds = classes.map(cls => cls.id.toString());
+    setUploadForm({ ...uploadForm, class_ids: allClassIds });
+  };
+
+  const clearAllSelections = () => {
+    setUploadForm({ ...uploadForm, grade_ids: [], class_ids: [] });
   };
 
   if (isLoading) {
@@ -538,52 +624,88 @@ const Documents = () => {
 
             {/* Grade and Class selection (for admin/teachers) */}
             {(user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'teacher') && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-4">
+                {/* Grade Selection */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Grade *
-                  </label>
-                  <select
-                    required
-                    value={uploadForm.grade_id}
-                    onChange={(e) => setUploadForm({ ...uploadForm, grade_id: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Select grade</option>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Grades * (Select multiple)
+                    </label>
+                    <div className="space-x-2">
+                      <button
+                        type="button"
+                        onClick={selectAllGrades}
+                        className="text-xs text-blue-600 hover:text-blue-800"
+                      >
+                        Select All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={clearAllSelections}
+                        className="text-xs text-red-600 hover:text-red-800"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 p-3 border border-gray-300 rounded-md max-h-32 overflow-y-auto">
                     {grades.map((grade) => (
-                      <option key={grade.id} value={grade.id}>
-                        {grade.name}
-                      </option>
+                      <label key={grade.id} className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={uploadForm.grade_ids.includes(grade.id.toString())}
+                          onChange={() => handleGradeSelection(grade.id.toString())}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-gray-700">{grade.name}</span>
+                      </label>
                     ))}
-                  </select>
-                  {/* Debug: Show grades count */}
+                  </div>
                   <p className="text-xs text-gray-500 mt-1">
-                    Available grades: {grades.length}
+                    Selected: {uploadForm.grade_ids.length} grade(s)
                   </p>
                 </div>
 
+                {/* Class Selection */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Class *
-                  </label>
-                  <select
-                    required
-                    value={uploadForm.class_id}
-                    onChange={(e) => setUploadForm({ ...uploadForm, class_id: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Select class</option>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Classes * (Select multiple)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={selectAllClasses}
+                      className="text-xs text-blue-600 hover:text-blue-800"
+                    >
+                      Select All Classes
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 p-3 border border-gray-300 rounded-md max-h-32 overflow-y-auto">
                     {classes.map((cls) => (
-                      <option key={cls.id} value={cls.id}>
-                        {cls.name}
-                      </option>
+                      <label key={cls.id} className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={uploadForm.class_ids.includes(cls.id.toString())}
+                          onChange={() => handleClassSelection(cls.id.toString())}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-gray-700">{cls.name}</span>
+                      </label>
                     ))}
-                  </select>
-                  {/* Debug: Show classes count */}
+                  </div>
                   <p className="text-xs text-gray-500 mt-1">
-                    Available classes: {classes.length}
+                    Selected: {uploadForm.class_ids.length} class(es)
                   </p>
                 </div>
+
+                {/* Selection Summary */}
+                {(uploadForm.grade_ids.length > 0 || uploadForm.class_ids.length > 0) && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                    <p className="text-sm text-blue-800 font-medium">
+                      Document will be uploaded to: {uploadForm.grade_ids.length} grade(s) × {uploadForm.class_ids.length} class(es) = {uploadForm.grade_ids.length * uploadForm.class_ids.length} total assignments
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -619,7 +741,17 @@ const Documents = () => {
             <div className="flex justify-end space-x-3">
               <button
                 type="button"
-                onClick={() => setShowUploadForm(false)}
+                onClick={() => {
+                  setShowUploadForm(false);
+                  setUploadForm({
+                    title: '',
+                    description: '',
+                    document_type: '',
+                    file: null,
+                    grade_ids: [],
+                    class_ids: []
+                  });
+                }}
                 className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
               >
                 Cancel
@@ -629,7 +761,11 @@ const Documents = () => {
                 disabled={uploadMutation.isLoading}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
               >
-                {uploadMutation.isLoading ? 'Uploading...' : 'Upload'}
+                {uploadMutation.isLoading ? 'Uploading...' : 
+                  (user?.role === 'admin' || user?.role === 'super_admin') && uploadForm.grade_ids.length > 0 && uploadForm.class_ids.length > 0
+                    ? `Upload to ${uploadForm.grade_ids.length * uploadForm.class_ids.length} Assignment(s)`
+                    : 'Upload'
+                }
               </button>
             </div>
           </form>
