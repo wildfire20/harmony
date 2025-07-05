@@ -443,25 +443,31 @@ router.post('/create-test-document', [
 ], async (req, res) => {
   try {
     console.log('Creating test document...');
+    console.log('User creating test:', req.user);
     
-    // Create a test document for Grade 6, Class 16 (where the student is assigned)
+    // First, let's check what columns exist in the documents table
+    const tableInfo = await db.query(`
+      SELECT column_name, data_type, is_nullable 
+      FROM information_schema.columns 
+      WHERE table_name = 'documents' 
+      ORDER BY ordinal_position
+    `);
+    
+    console.log('Documents table columns:', tableInfo.rows);
+    
+    // Try a simpler insert with minimal required fields
     const result = await db.query(`
       INSERT INTO documents (
-        filename, original_filename, title, description, document_type, 
-        grade_id, class_id, uploaded_by, file_size, mime_type, is_active
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        title, description, document_type, grade_id, class_id, uploaded_by, is_active
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *
     `, [
-      'test-document.pdf',
-      'Test Document.pdf',
       'Test Document for Grade 6 Class 16',
       'This is a test document to verify document visibility',
       'other',
       6, // Grade 6
       16, // Class 16 (where Broe Plussies is assigned)
       req.user.id,
-      1024, // 1KB
-      'application/pdf',
       true
     ]);
     
@@ -469,12 +475,79 @@ router.post('/create-test-document', [
     
     res.json({
       message: 'Test document created successfully',
-      document: result.rows[0]
+      document: result.rows[0],
+      table_info: tableInfo.rows
     });
     
   } catch (error) {
     console.error('Create test document error:', error);
-    res.status(500).json({ message: 'Server error creating test document' });
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      detail: error.detail,
+      constraint: error.constraint
+    });
+    res.status(500).json({ 
+      message: 'Server error creating test document',
+      error: error.message,
+      details: error.detail || 'No additional details'
+    });
+  }
+});
+
+// Debug database schema and existing data
+router.get('/debug-schema', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    console.log('=== DEBUGGING DATABASE SCHEMA ===');
+    
+    // Check documents table structure
+    const documentsSchema = await db.query(`
+      SELECT column_name, data_type, is_nullable, column_default
+      FROM information_schema.columns 
+      WHERE table_name = 'documents' 
+      ORDER BY ordinal_position
+    `);
+    
+    // Check if documents table exists and get sample data
+    const documentsData = await db.query(`
+      SELECT * FROM documents LIMIT 3
+    `);
+    
+    // Check grades table
+    const gradesData = await db.query(`
+      SELECT * FROM grades ORDER BY id
+    `);
+    
+    // Check classes table  
+    const classesData = await db.query(`
+      SELECT * FROM classes ORDER BY id
+    `);
+    
+    // Check users (students) table
+    const studentsData = await db.query(`
+      SELECT id, first_name, last_name, grade_id, class_id, role 
+      FROM users 
+      WHERE role = 'student' 
+      ORDER BY id
+    `);
+    
+    res.json({
+      documents_schema: documentsSchema.rows,
+      sample_documents: documentsData.rows,
+      grades: gradesData.rows,
+      classes: classesData.rows,
+      students: studentsData.rows
+    });
+    
+  } catch (error) {
+    console.error('Debug schema error:', error);
+    res.status(500).json({ 
+      message: 'Server error debugging schema',
+      error: error.message 
+    });
   }
 });
 

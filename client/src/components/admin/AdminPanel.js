@@ -92,6 +92,33 @@ const AdminPanel = () => {
                 <button 
                   onClick={async () => {
                     try {
+                      const response = await fetch('/api/documents/debug-schema', {
+                        headers: {
+                          'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                      });
+                      const data = await response.json();
+                      console.log('=== DATABASE SCHEMA DEBUG ===');
+                      console.log('Documents Schema:', data.documents_schema);
+                      console.log('Sample Documents:', data.sample_documents);
+                      console.log('Grades:', data.grades);
+                      console.log('Classes:', data.classes);
+                      console.log('Students:', data.students);
+                      console.log('=== END SCHEMA DEBUG ===');
+                      alert('Database schema logged to console. Check browser developer tools.');
+                    } catch (error) {
+                      console.error('Schema debug error:', error);
+                      alert('Schema debug failed. Check console for errors.');
+                    }
+                  }}
+                  className="w-full bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700 transition-colors"
+                >
+                  Debug Database Schema
+                </button>
+                
+                <button 
+                  onClick={async () => {
+                    try {
                       const response = await fetch('/api/admin/debug-documents', {
                         headers: {
                           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -147,7 +174,8 @@ const AdminPanel = () => {
                         }
                       });
                       const data = await response.json();
-                      alert(data.message);
+                      console.log('Test document response:', data);
+                      alert(data.message || 'Check console for details');
                     } catch (error) {
                       console.error('Create test document error:', error);
                       alert('Failed to create test document. Check console for errors.');
