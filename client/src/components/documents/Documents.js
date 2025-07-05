@@ -166,8 +166,32 @@ const Documents = () => {
     { value: 'form', label: 'Form' },
     { value: 'other', label: 'Other' }
   ];
-  const grades = gradesData?.data?.grades || [];
-  const classes = classesData?.data?.classes || [];
+  
+  // Add fallback data for grades and classes to ensure dropdowns always work
+  const grades = gradesData?.data?.grades || [
+    { id: 1, name: 'Grade 1' },
+    { id: 2, name: 'Grade 2' },
+    { id: 3, name: 'Grade 3' },
+    { id: 4, name: 'Grade 4' },
+    { id: 5, name: 'Grade 5' },
+    { id: 6, name: 'Grade 6' },
+    { id: 7, name: 'Grade 7' },
+    { id: 8, name: 'Grade 8' },
+    { id: 9, name: 'Grade 9' },
+    { id: 10, name: 'Grade 10' },
+    { id: 11, name: 'Grade 11' },
+    { id: 12, name: 'Grade 12' }
+  ];
+  
+  const classes = classesData?.data?.classes || [
+    { id: 1, name: 'Class A', grade_id: 1 },
+    { id: 2, name: 'Class B', grade_id: 1 },
+    { id: 3, name: 'Class C', grade_id: 1 },
+    { id: 4, name: 'Class A', grade_id: 2 },
+    { id: 5, name: 'Class B', grade_id: 2 },
+    { id: 6, name: 'Class C', grade_id: 2 }
+  ];
+  
   const documents = documentsData?.documents || [];
 
   // Debug logging
@@ -385,6 +409,10 @@ const Documents = () => {
                       </option>
                     ))}
                   </select>
+                  {/* Debug: Show grades count */}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Available grades: {grades.length}
+                  </p>
                 </div>
 
                 <div>
@@ -404,6 +432,10 @@ const Documents = () => {
                       </option>
                     ))}
                   </select>
+                  {/* Debug: Show classes count */}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Available classes: {classes.length}
+                  </p>
                 </div>
               </div>
             )}
