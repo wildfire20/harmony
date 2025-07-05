@@ -2,21 +2,34 @@
 const validateProductionEnvironment = () => {
   const requiredEnvVars = [
     'NODE_ENV',
-    'JWT_SECRET',
-    'DB_HOST',
-    'DB_NAME',
-    'DB_USER',
-    'DB_PASSWORD'
+    'JWT_SECRET'
   ];
 
-  const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+  // Database variables - Railway uses PG*, others use DB*
+  const hasRailwayDB = process.env.PGHOST && process.env.PGDATABASE && process.env.PGUSER && process.env.PGPASSWORD;
+  const hasStandardDB = process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER && process.env.DB_PASSWORD;
   
-  if (missingVars.length > 0) {
+  if (!hasRailwayDB && !hasStandardDB) {
+    requiredEnvVars.push('PGHOST or DB_HOST', 'PGDATABASE or DB_NAME', 'PGUSER or DB_USER', 'PGPASSWORD or DB_PASSWORD');
+  }
+
+  const missingVars = requiredEnvVars.filter(varName => {
+    // Skip the database variables we already checked
+    if (varName.includes('or')) return false;
+    return !process.env[varName];
+  });
+  
+  if (missingVars.length > 0 || (!hasRailwayDB && !hasStandardDB)) {
     console.error('❌ Missing required environment variables:');
     missingVars.forEach(varName => {
       console.error(`   - ${varName}`);
     });
+    if (!hasRailwayDB && !hasStandardDB) {
+      console.error('   - Database variables (either PG* or DB* format)');
+    }
     console.error('\n📋 Please set these variables before starting the server.');
+    console.error('💡 For Railway: Use PGHOST, PGDATABASE, PGUSER, PGPASSWORD');
+    console.error('💡 For other platforms: Use DB_HOST, DB_NAME, DB_USER, DB_PASSWORD');
     process.exit(1);
   }
 
