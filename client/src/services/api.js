@@ -136,7 +136,21 @@ export const adminAPI = {
   
   // Teachers
   addTeacher: (data) => api.post('/admin/teachers', data),
-  getTeachers: () => api.get('/admin/teachers'),
+  getTeachers: (params) => api.get('/admin/teachers', { params }),
+  updateTeacher: (id, data) => api.put(`/admin/teachers/${id}`, data),
+  deleteTeacher: (id) => api.delete(`/admin/teachers/${id}`),
+  
+  // Grades (System Settings)
+  getGrades: () => api.get('/admin/grades'),
+  addGrade: (data) => api.post('/admin/grades', data),
+  updateGrade: (id, data) => api.put(`/admin/grades/${id}`, data),
+  deleteGrade: (id) => api.delete(`/admin/grades/${id}`),
+  
+  // Classes (System Settings)
+  getClasses: () => api.get('/admin/classes'),
+  addClass: (data) => api.post('/admin/classes', data),
+  updateClass: (id, data) => api.put(`/admin/classes/${id}`, data),
+  deleteClass: (id) => api.delete(`/admin/classes/${id}`),
   
   // Statistics
   getStatistics: () => api.get('/admin/statistics'),
