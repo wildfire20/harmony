@@ -20,7 +20,7 @@ import QuizResults from './components/quiz/QuizResults';
 import Announcements from './components/announcements/Announcements';
 import Profile from './components/profile/Profile';
 import AdminPanel from './components/admin/AdminPanel';
-import DocumentLibrary from './components/documents/DocumentLibrary';
+import Documents from './components/documents/Documents';
 import LoadingSpinner from './components/common/LoadingSpinner';
 
 // New components
@@ -104,7 +104,7 @@ const AppContent = () => {
         
         <Route path="announcements" element={<Announcements />} />
         
-        <Route path="documents" element={<DocumentLibrary />} />
+        <Route path="documents" element={<Documents />} />
         
         <Route path="profile" element={<Profile />} />
         

@@ -310,4 +310,56 @@ router.get('/types', authenticate, async (req, res) => {
   }
 });
 
+// Get all documents (for admin users)
+router.get('/all', [
+  authenticate,
+  authorize('admin', 'super_admin', 'teacher')
+], async (req, res) => {
+  try {
+    const user = req.user;
+
+    let query = `
+      SELECT d.id, d.title, d.description, d.document_type, d.file_name, d.file_path, 
+             d.file_size, d.uploaded_at, d.is_active, d.uploaded_by,
+             u.first_name as uploaded_by_first_name, u.last_name as uploaded_by_last_name,
+             g.name as grade_name, c.name as class_name
+      FROM documents d
+      JOIN users u ON d.uploaded_by = u.id
+      JOIN grades g ON d.grade_id = g.id
+      JOIN classes c ON d.class_id = c.id
+      WHERE d.is_active = true
+    `;
+    
+    let queryParams = [];
+
+    // For teachers, only show documents they can access
+    if (user.role === 'teacher') {
+      query += ` AND EXISTS (
+        SELECT 1 FROM teacher_assignments ta 
+        WHERE ta.teacher_id = $1 AND ta.grade_id = d.grade_id AND ta.class_id = d.class_id
+      )`;
+      queryParams.push(user.id);
+    }
+
+    query += ` ORDER BY d.document_type, d.uploaded_at DESC`;
+
+    const result = await db.query(query, queryParams);
+
+    // Return as flat array for the new Documents component
+    const documents = result.rows.map(doc => ({
+      ...doc,
+      file_size_mb: (doc.file_size / (1024 * 1024)).toFixed(2)
+    }));
+
+    res.json({ 
+      documents: documents,
+      total_count: documents.length 
+    });
+
+  } catch (error) {
+    console.error('Get all documents error:', error);
+    res.status(500).json({ message: 'Server error fetching documents' });
+  }
+});
+
 module.exports = router;
