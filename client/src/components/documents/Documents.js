@@ -232,6 +232,22 @@ const Documents = () => {
   
   const documents = documentsData?.documents || [];
 
+  const filteredDocuments = documents.filter(doc => {
+    const matchesSearch = doc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         doc.description?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesType = selectedType === '' || doc.document_type === selectedType;
+    return matchesSearch && matchesType;
+  });
+
+  // Group documents by type
+  const groupedDocuments = filteredDocuments.reduce((acc, doc) => {
+    if (!acc[doc.document_type]) {
+      acc[doc.document_type] = [];
+    }
+    acc[doc.document_type].push(doc);
+    return acc;
+  }, {});
+
   // Debug logging
   console.log('=== DOCUMENTS COMPONENT DEBUG ===');
   console.log('Document Types Data:', documentTypesData);
@@ -340,22 +356,6 @@ const Documents = () => {
       deleteMutation.mutate(documentId);
     }
   };
-
-  const filteredDocuments = documents.filter(doc => {
-    const matchesSearch = doc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         doc.description?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesType = selectedType === '' || doc.document_type === selectedType;
-    return matchesSearch && matchesType;
-  });
-
-  // Group documents by type
-  const groupedDocuments = filteredDocuments.reduce((acc, doc) => {
-    if (!acc[doc.document_type]) {
-      acc[doc.document_type] = [];
-    }
-    acc[doc.document_type].push(doc);
-    return acc;
-  }, {});
 
   if (isLoading) return <LoadingSpinner />;
   
