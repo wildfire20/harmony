@@ -21,16 +21,25 @@ const TeacherManagement = () => {
 
   // Add teacher mutation
   const addTeacherMutation = useMutation(
-    (data) => adminAPI.addTeacher(data),
+    (data) => {
+      console.log('Adding teacher with data:', data);
+      return adminAPI.addTeacher(data);
+    },
     {
-      onSuccess: () => {
+      onSuccess: (response) => {
+        console.log('Teacher added successfully:', response);
         queryClient.invalidateQueries(['teachers']);
         setShowAddForm(false);
         reset();
         toast.success('Teacher added successfully!');
       },
       onError: (error) => {
-        toast.error(error.response?.data?.message || 'Failed to add teacher');
+        console.error('Add teacher error:', error);
+        console.error('Error response:', error.response?.data);
+        const errorMessage = error.response?.data?.message || 
+                           error.response?.data?.errors?.[0]?.msg || 
+                           'Failed to add teacher';
+        toast.error(errorMessage);
       }
     }
   );

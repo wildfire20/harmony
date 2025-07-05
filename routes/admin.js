@@ -184,11 +184,11 @@ router.post('/teachers', [
   authenticate,
   authorize('admin', 'super_admin'),
   body('email').isEmail().withMessage('Valid email is required'),
-  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  body('password').optional().isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   body('first_name').notEmpty().withMessage('First name is required'),
   body('last_name').notEmpty().withMessage('Last name is required'),
-  body('grade_ids').isArray().withMessage('Grade IDs must be an array'),
-  body('class_ids').isArray().withMessage('Class IDs must be an array')
+  body('grade_ids').optional().isArray().withMessage('Grade IDs must be an array'),
+  body('class_ids').optional().isArray().withMessage('Class IDs must be an array')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -196,12 +196,18 @@ router.post('/teachers', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { email, password, first_name, last_name, grade_ids, class_ids } = req.body;
+    let { email, password, first_name, last_name, grade_ids, class_ids } = req.body;
 
     // Check if email already exists
     const existing = await db.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existing.rows.length > 0) {
       return res.status(400).json({ message: 'Email already exists' });
+    }
+
+    // Auto-generate password if not provided
+    if (!password) {
+      const randomPassword = Math.random().toString(36).slice(-8);
+      password = randomPassword;
     }
 
     const client = await db.pool.connect();

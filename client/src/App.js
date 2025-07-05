@@ -23,6 +23,12 @@ import AdminPanel from './components/admin/AdminPanel';
 import DocumentLibrary from './components/documents/DocumentLibrary';
 import LoadingSpinner from './components/common/LoadingSpinner';
 
+// New components
+import Calendar from './components/calendar/Calendar';
+import Quizzes from './components/quizzes/Quizzes';
+import UserManagement from './components/users/UserManagement';
+import Analytics from './components/analytics/Analytics';
+
 // Create a client
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -93,6 +99,9 @@ const AppContent = () => {
         <Route path="quiz/:taskId" element={<QuizPlayer />} />
         <Route path="quiz-results" element={<QuizResults />} />
         
+        <Route path="quizzes" element={<Quizzes />} />
+        <Route path="calendar" element={<Calendar />} />
+        
         <Route path="announcements" element={<Announcements />} />
         
         <Route path="documents" element={<DocumentLibrary />} />
@@ -102,6 +111,18 @@ const AppContent = () => {
         <Route path="admin" element={
           <ProtectedRoute roles={['admin', 'super_admin']}>
             <AdminPanel />
+          </ProtectedRoute>
+        } />
+        
+        <Route path="users" element={
+          <ProtectedRoute roles={['admin', 'super_admin']}>
+            <UserManagement />
+          </ProtectedRoute>
+        } />
+        
+        <Route path="analytics" element={
+          <ProtectedRoute roles={['admin', 'super_admin']}>
+            <Analytics />
           </ProtectedRoute>
         } />
       </Route>
