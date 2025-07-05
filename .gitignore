@@ -99,8 +99,12 @@ temp/
 ehthumbs.db
 Thumbs.db
 
-# Uploads directory (optional - comment out if you want to track uploaded files)
-uploads/
+# Uploads directory - ignore files but keep structure
+uploads/*
+!uploads/README.md
+!uploads/documents/
+uploads/documents/*
+!uploads/documents/.gitkeep
 
 # Database files
 *.sqlite
