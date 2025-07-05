@@ -25,6 +25,40 @@ const documentRoutes = require('./routes/documents');
 // Import database
 const db = require('./config/database');
 
+// Initialize documents table on startup
+const initializeDocumentsTable = async () => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS documents (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(255) NOT NULL,
+          description TEXT,
+          document_type VARCHAR(50) NOT NULL,
+          file_name VARCHAR(255) NOT NULL,
+          file_path VARCHAR(500) NOT NULL,
+          file_size BIGINT NOT NULL,
+          grade_id INTEGER REFERENCES grades(id) ON DELETE CASCADE,
+          class_id INTEGER REFERENCES classes(id) ON DELETE CASCADE,
+          uploaded_by INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          is_active BOOLEAN DEFAULT true,
+          uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS idx_documents_grade_class ON documents(grade_id, class_id);
+      CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(document_type);
+      CREATE INDEX IF NOT EXISTS idx_documents_uploaded_by ON documents(uploaded_by);
+      CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(is_active);
+    `);
+    
+    console.log('Documents table initialized successfully');
+  } catch (error) {
+    console.log('Documents table initialization skipped or already exists:', error.message);
+  }
+};
+
 const app = express();
 
 // Production security enhancements
@@ -210,6 +244,7 @@ const PORT = process.env.PORT || 5000;
 const startServer = async () => {
   try {
     await db.initialize();
+    await initializeDocumentsTable();
     app.listen(PORT, () => {
       console.log(`🚀 Harmony Learning Institute server running on port ${PORT}`);
       console.log(`🌐 Environment: ${process.env.NODE_ENV}`);
