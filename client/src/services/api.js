@@ -1,11 +1,18 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+// In production, use relative paths since frontend and backend are on same domain
+// In development, use localhost:5000
+const API_BASE_URL = process.env.NODE_ENV === 'production' 
+  ? '/api' 
+  : (process.env.REACT_APP_API_URL || 'http://localhost:5000/api');
+
+console.log('API Base URL:', API_BASE_URL);
 
 // Create axios instance
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 10000,
+  withCredentials: true, // Include cookies for CORS
 });
 
 // Request interceptor to add token
@@ -26,6 +33,7 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    console.error('API Error:', error.response?.data || error.message);
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
       window.location.href = '/login';
