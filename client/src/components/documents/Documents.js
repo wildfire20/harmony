@@ -21,7 +21,7 @@ const Documents = () => {
   const [selectedType, setSelectedType] = useState('');
 
   // Fetch document types
-  const { data: documentTypesData } = useQuery({
+  const { data: documentTypesData, isLoading: typesLoading, error: typesError } = useQuery({
     queryKey: ['documentTypes'],
     queryFn: async () => {
       const response = await fetch('/api/documents/types', {
@@ -33,7 +33,8 @@ const Documents = () => {
         throw new Error('Failed to fetch document types');
       }
       return response.json();
-    }
+    },
+    enabled: !!token
   });
 
   // Fetch grades for admin/teachers
@@ -159,6 +160,18 @@ const Documents = () => {
   const grades = gradesData?.data?.grades || [];
   const classes = classesData?.data?.classes || [];
   const documents = documentsData?.documents || [];
+
+  // Debug logging
+  console.log('Document Types Data:', documentTypesData);
+  console.log('Document Types Array:', documentTypes);
+  console.log('Document Types Loading:', typesLoading);
+  console.log('Document Types Error:', typesError);
+  console.log('Grades Data:', gradesData);
+  console.log('Grades Array:', grades);
+  console.log('Classes Data:', classesData);
+  console.log('Classes Array:', classes);
+  console.log('User role:', user?.role);
+  console.log('Token available:', !!token);
 
   const documentIcons = {
     timetable: Calendar,
