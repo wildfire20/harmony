@@ -11,10 +11,36 @@
    # Railway will automatically detect and deploy your app
    # Add environment variables in Railway dashboard
    ```
-4. **Add environment variables in Railway dashboard:**
-   - Copy from `.env.production`
-   - Set `DATABASE_URL` (Railway provides PostgreSQL)
-   - Set `FRONTEND_URL` to your Railway domain
+4. **ADD POSTGRESQL DATABASE (DETAILED STEPS):**
+   
+   **Step 4a: In your Railway project dashboard:**
+   - Look for a **"+ New"** button or **"+ Add Service"** button
+   - Click it to open the service menu
+   
+   **Step 4b: Select Database:**
+   - Click **"Database"** from the service options
+   - Select **"Add PostgreSQL"** or **"PostgreSQL"**
+   - Railway will automatically provision a PostgreSQL database
+   
+   **Step 4c: Database Auto-Configuration:**
+   - Railway automatically creates these environment variables:
+     - `PGHOST` (database host)
+     - `PGPORT` (database port, usually 5432)
+     - `PGDATABASE` (database name)
+     - `PGUSER` (database username)
+     - `PGPASSWORD` (database password)
+     - `DATABASE_URL` (complete connection string)
+   
+   **Step 4d: Verify Database Connection:**
+   - Go to your web service (not the database service)
+   - Click on **"Variables"** tab
+   - You should see the database variables automatically added
+   - If not, Railway will link them automatically on next deploy
+
+5. **Add additional environment variables in Railway dashboard:**
+   - `NODE_ENV=production`
+   - `JWT_SECRET=harmony_learning_super_secure_jwt_secret_2025_production_railway_wildfire20_64chars`
+   - `FRONTEND_URL=https://your-railway-domain.railway.app` (update after deployment)
 
 ### Option 2: Deploy to Heroku
 
