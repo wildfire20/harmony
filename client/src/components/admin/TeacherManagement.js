@@ -99,6 +99,31 @@ const TeacherManagement = () => {
   console.log('Teachers data:', teachersData);
   console.log('Processed teachers:', teachers);
 
+  // Process teachers to format assigned classes
+  const processedTeachers = teachers.map(teacher => {
+    let assignedClasses = 'None';
+    
+    if (teacher.assignments && Array.isArray(teacher.assignments) && teacher.assignments.length > 0) {
+      // Filter out null/empty assignments and format them
+      const validAssignments = teacher.assignments.filter(assignment => 
+        assignment && assignment.class_name && assignment.grade_name
+      );
+      
+      if (validAssignments.length > 0) {
+        assignedClasses = validAssignments
+          .map(assignment => `${assignment.grade_name} - ${assignment.class_name}`)
+          .join(', ');
+      }
+    }
+    
+    return {
+      ...teacher,
+      assigned_classes: assignedClasses
+    };
+  });
+
+  console.log('Processed teachers with assignments:', processedTeachers);
+
   const onSubmit = (data) => {
     console.log('Form data being submitted:', data);
     
@@ -121,13 +146,27 @@ const TeacherManagement = () => {
   const handleEdit = (teacher) => {
     setEditingTeacher(teacher);
     setShowAddForm(true);
+    
+    // Extract grade_ids and class_ids from assignments
+    let grade_ids = [];
+    let class_ids = [];
+    
+    if (teacher.assignments && Array.isArray(teacher.assignments)) {
+      teacher.assignments.forEach(assignment => {
+        if (assignment && assignment.grade_id && assignment.class_id) {
+          grade_ids.push(assignment.grade_id);
+          class_ids.push(assignment.class_id);
+        }
+      });
+    }
+    
     reset({
       first_name: teacher.first_name,
       last_name: teacher.last_name,
       email: teacher.email,
       role: teacher.role,
-      grade_ids: teacher.grade_ids || [],
-      class_ids: teacher.class_ids || []
+      grade_ids: grade_ids,
+      class_ids: class_ids
     });
   };
 
@@ -340,8 +379,8 @@ const TeacherManagement = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {teachers.length > 0 ? (
-                teachers.map((teacher) => (
+              {processedTeachers.length > 0 ? (
+                processedTeachers.map((teacher) => (
                   <tr key={teacher.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div>
