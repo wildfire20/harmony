@@ -1,13 +1,15 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery } from 'react-query';
 import { Link } from 'react-router-dom';
 import { BookOpen, Clock, CheckCircle, AlertTriangle, Plus } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { tasksAPI } from '../../services/api';
+import { tasksAPI, classesAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 
 const Tasks = () => {
   const { user } = useAuth();
+  const [selectedGrade, setSelectedGrade] = useState('');
+  const [selectedClass, setSelectedClass] = useState('');
 
   console.log('=== TASKS COMPONENT DEBUG ===');
   console.log('User:', user);
@@ -15,18 +17,72 @@ const Tasks = () => {
   console.log('User class_id:', user?.class_id);
   console.log('User role:', user?.role);
 
+  // Fetch grades and classes for admin/teacher selection
+  const { data: gradesData } = useQuery('grades', () => classesAPI.getGrades(), {
+    enabled: user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'teacher'
+  });
+  const { data: classesData } = useQuery('classes', () => classesAPI.getClasses(), {
+    enabled: user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'teacher'
+  });
+
+  // Fetch teacher assignments if user is a teacher
+  const { data: teacherAssignments } = useQuery(
+    ['teacher-assignments', user?.id],
+    () => user?.role === 'teacher' ? 
+      fetch(`/api/admin/teachers/${user.id}/assignments`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      }).then(res => res.json()) : 
+      null,
+    { enabled: user?.role === 'teacher' }
+  );
+
+  const grades = gradesData?.data?.grades || [];
+  const classes = classesData?.data?.classes || [];
+
+  // Determine which grade/class to fetch tasks for
+  let gradeToFetch, classToFetch;
+  
+  if (user?.role === 'student') {
+    // Students use their assigned grade/class
+    gradeToFetch = user.grade_id;
+    classToFetch = user.class_id;
+  } else if (user?.role === 'teacher') {
+    // Teachers: use selected grade/class if available, otherwise use first assignment
+    if (selectedGrade && selectedClass) {
+      gradeToFetch = selectedGrade;
+      classToFetch = selectedClass;
+    } else if (teacherAssignments?.assignments?.length > 0) {
+      gradeToFetch = teacherAssignments.assignments[0].grade_id;
+      classToFetch = teacherAssignments.assignments[0].class_id;
+    }
+  } else if (user?.role === 'admin' || user?.role === 'super_admin') {
+    // Admins: use selected grade/class or default to first available
+    if (selectedGrade && selectedClass) {
+      gradeToFetch = selectedGrade;
+      classToFetch = selectedClass;
+    } else if (grades.length > 0 && classes.length > 0) {
+      gradeToFetch = grades[0].id;
+      classToFetch = classes[0].id;
+    }
+  }
+
   const { data: tasksData, isLoading, error } = useQuery(
-    ['tasks', user?.grade_id, user?.class_id],
+    ['tasks', gradeToFetch, classToFetch],
     async () => {
-      if (!user?.grade_id || !user?.class_id) {
-        console.warn('Missing grade_id or class_id for user:', user);
-        throw new Error('Your account is missing grade or class assignment. Please contact the administrator.');
+      if (!gradeToFetch || !classToFetch) {
+        if (user?.role === 'student') {
+          throw new Error('Your account is missing grade or class assignment. Please contact the administrator.');
+        } else if (user?.role === 'teacher') {
+          throw new Error('You are not assigned to any grades or classes. Please contact the administrator.');
+        } else {
+          throw new Error('Please select a grade and class to view tasks.');
+        }
       }
       
-      console.log('Fetching tasks for grade:', user.grade_id, 'class:', user.class_id);
+      console.log('Fetching tasks for grade:', gradeToFetch, 'class:', classToFetch);
       
       try {
-        const response = await tasksAPI.getTasks(user.grade_id, user.class_id);
+        const response = await tasksAPI.getTasks(gradeToFetch, classToFetch);
         console.log('Tasks API response:', response);
         return response;
       } catch (apiError) {
@@ -36,7 +92,7 @@ const Tasks = () => {
       }
     },
     { 
-      enabled: !!(user?.grade_id && user?.class_id),
+      enabled: !!(gradeToFetch && classToFetch),
       retry: (failureCount, error) => {
         console.log('Task fetch retry attempt:', failureCount, 'Error:', error.message);
         // Don't retry for auth/permission errors
@@ -46,6 +102,23 @@ const Tasks = () => {
         return failureCount < 2;
       }
     }
+  );
+
+  // Filter available grades/classes for teachers
+  let availableGrades = grades;
+  let availableClasses = classes;
+
+  if (user?.role === 'teacher' && teacherAssignments?.assignments) {
+    const assignedGradeIds = [...new Set(teacherAssignments.assignments.map(a => a.grade_id))];
+    const assignedClassIds = [...new Set(teacherAssignments.assignments.map(a => a.class_id))];
+    
+    availableGrades = grades.filter(grade => assignedGradeIds.includes(grade.id));
+    availableClasses = classes.filter(cls => assignedClassIds.includes(cls.id));
+  }
+
+  // Filter classes based on selected grade
+  const filteredClasses = availableClasses.filter(cls => 
+    selectedGrade ? cls.grade_id == selectedGrade : true
   );
 
   const tasks = tasksData?.data?.tasks || [];
@@ -95,9 +168,63 @@ const Tasks = () => {
         )}
       </div>
 
-      {user && (
+      {/* Grade/Class Selection for Admins and Teachers */}
+      {(user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'teacher') && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">Select Grade & Class</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="grade-select" className="block text-sm font-medium text-gray-700 mb-2">
+                Grade {user?.role === 'teacher' && "(Only your assigned grades)"}
+              </label>
+              <select
+                id="grade-select"
+                value={selectedGrade}
+                onChange={(e) => {
+                  setSelectedGrade(e.target.value);
+                  setSelectedClass(''); // Reset class when grade changes
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">Select Grade</option>
+                {availableGrades.map((grade) => (
+                  <option key={grade.id} value={grade.id}>
+                    {grade.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="class-select" className="block text-sm font-medium text-gray-700 mb-2">
+                Class {user?.role === 'teacher' && "(Only your assigned classes)"}
+              </label>
+              <select
+                id="class-select"
+                value={selectedClass}
+                onChange={(e) => setSelectedClass(e.target.value)}
+                disabled={!selectedGrade}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
+              >
+                <option value="">Select Class</option>
+                {filteredClasses.map((cls) => (
+                  <option key={cls.id} value={cls.id}>
+                    {cls.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {user && gradeToFetch && classToFetch && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
           <div className="text-sm text-blue-700">
+            <span className="font-medium">Viewing tasks for: </span>
+            {grades.find(g => g.id == gradeToFetch)?.name || `Grade ${gradeToFetch}`} - {classes.find(c => c.id == classToFetch)?.name || `Class ${classToFetch}`}
+          </div>
+        </div>
+      )}
             <strong>Viewing tasks for:</strong> {user.grade_name || `Grade ${user.grade_id}`} - {user.class_name || `Class ${user.class_id}`}
           </div>
         </div>

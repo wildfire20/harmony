@@ -155,6 +155,11 @@ router.get('/:id', [
     const { id } = req.params;
     const user = req.user;
 
+    console.log('=== TASK DETAIL ENDPOINT DEBUG ===');
+    console.log('Task ID:', id);
+    console.log('User:', JSON.stringify(user, null, 2));
+    console.log('Resource from middleware:', req.resource);
+
     let query = `
       SELECT t.id, t.title, t.description, t.instructions, t.due_date, t.max_points,
              t.task_type, t.created_at, t.updated_at, t.grade_id, t.class_id,
@@ -170,12 +175,16 @@ router.get('/:id', [
     const params = [id];
 
     const result = await db.query(query, params);
-
+    
+    console.log('Query result:', result.rows.length, 'rows');
+    
     if (result.rows.length === 0) {
+      console.log('❌ Task not found in database');
       return res.status(404).json({ message: 'Task not found' });
     }
 
     const task = result.rows[0];
+    console.log('Task found:', JSON.stringify(task, null, 2));
 
     // If it's a quiz, get quiz details
     if (task.task_type === 'quiz') {
