@@ -613,4 +613,38 @@ router.get('/debug-schema', [
   }
 });
 
+// Quick debug endpoint to check database schema for documents table
+router.get('/debug-columns', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    // Check the actual columns in the documents table
+    const schemaQuery = await db.query(`
+      SELECT column_name, data_type, is_nullable 
+      FROM information_schema.columns 
+      WHERE table_name = 'documents' 
+      ORDER BY ordinal_position
+    `);
+    
+    // Try to get one sample document to see actual data structure
+    const sampleQuery = await db.query(`
+      SELECT * FROM documents LIMIT 1
+    `);
+    
+    res.json({
+      message: 'Database schema debug',
+      columns: schemaQuery.rows,
+      sample_document: sampleQuery.rows[0] || 'No documents found'
+    });
+    
+  } catch (error) {
+    console.error('Debug columns error:', error);
+    res.status(500).json({ 
+      message: 'Error checking database schema',
+      error: error.message 
+    });
+  }
+});
+
 module.exports = router;
