@@ -331,6 +331,64 @@ app.post('/api/debug/run-sql', async (req, res) => {
   }
 });
 
+// Debug endpoint to check database schema
+app.get('/api/debug/check-schema', async (req, res) => {
+  try {
+    console.log('Checking database schema...');
+    
+    // Check if tables exist
+    const tablesResult = await db.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name IN ('documents', 'tasks', 'submissions', 'users', 'grades', 'classes')
+      ORDER BY table_name
+    `);
+    
+    // Check documents table columns
+    const documentsColumns = await db.query(`
+      SELECT column_name, data_type, is_nullable, column_default
+      FROM information_schema.columns 
+      WHERE table_name = 'documents' AND table_schema = 'public'
+      ORDER BY ordinal_position
+    `);
+    
+    // Check tasks table columns
+    const tasksColumns = await db.query(`
+      SELECT column_name, data_type, is_nullable, column_default
+      FROM information_schema.columns 
+      WHERE table_name = 'tasks' AND table_schema = 'public'
+      ORDER BY ordinal_position
+    `);
+    
+    // Check submissions table columns
+    const submissionsColumns = await db.query(`
+      SELECT column_name, data_type, is_nullable, column_default
+      FROM information_schema.columns 
+      WHERE table_name = 'submissions' AND table_schema = 'public'
+      ORDER BY ordinal_position
+    `);
+    
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      tables: tablesResult.rows.map(row => row.table_name),
+      schema: {
+        documents: documentsColumns.rows,
+        tasks: tasksColumns.rows,
+        submissions: submissionsColumns.rows
+      }
+    });
+  } catch (error) {
+    console.error('Schema check error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check database schema',
+      error: error.message
+    });
+  }
+});
+
 // Global error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
