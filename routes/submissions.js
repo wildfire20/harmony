@@ -518,8 +518,11 @@ router.get('/task/:taskId/students', [
 
     // Get task details first
     const taskResult = await db.query(`
-      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by
+      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by,
+             g.name as grade_name, c.name as class_name
       FROM tasks t
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
       WHERE t.id = $1 AND t.is_active = true
     `, [taskId]);
 
@@ -531,8 +534,9 @@ router.get('/task/:taskId/students', [
     }
 
     const task = taskResult.rows[0];
+    console.log('Task details:', task);
 
-    // Check if teacher is assigned to this grade/class
+    // Check authorization for teachers
     if (user.role === 'teacher') {
       const assignmentCheck = await db.query(`
         SELECT 1 FROM teacher_assignments 
@@ -546,19 +550,34 @@ router.get('/task/:taskId/students', [
         assignments_found: assignmentCheck.rows.length
       });
 
-      if (assignmentCheck.rows.length === 0) {
-        // For debugging, let's be more permissive and check if this teacher created the task
-        if (task.created_by === user.id) {
-          console.log('Teacher created this task, allowing access even without formal assignment');
-        } else {
-          console.log('Teacher not assigned and did not create task, denying access');
-          return res.status(403).json({ 
-            success: false,
-            message: 'Access denied. You can only view students for tasks in your assigned grades/classes.' 
-          });
-        }
+      // Allow if teacher created the task OR is assigned to the grade/class
+      if (assignmentCheck.rows.length === 0 && task.created_by !== user.id) {
+        console.log('Teacher not assigned and did not create task, denying access');
+        return res.status(403).json({ 
+          success: false,
+          message: 'Access denied. You can only view students for tasks in your assigned grades/classes.' 
+        });
       }
     }
+
+    // Debug: First check how many students exist in this grade/class
+    const studentCountResult = await db.query(`
+      SELECT COUNT(*) as count
+      FROM users 
+      WHERE role = 'student' AND grade_id = $1 AND class_id = $2 AND is_active = true
+    `, [task.grade_id, task.class_id]);
+
+    console.log('Student count in grade/class:', studentCountResult.rows[0]?.count);
+
+    // Debug: Get all students to see the data
+    const allStudentsResult = await db.query(`
+      SELECT id, first_name, last_name, grade_id, class_id, is_active
+      FROM users 
+      WHERE role = 'student' AND is_active = true
+      ORDER BY grade_id, class_id, last_name
+    `);
+
+    console.log('All active students:', allStudentsResult.rows);
 
     // Get all students in this grade/class with their submission status
     const studentsResult = await db.query(`
@@ -571,13 +590,20 @@ router.get('/task/:taskId/students', [
       ORDER BY u.last_name, u.first_name
     `, [taskId, task.grade_id, task.class_id]);
 
+    console.log('Students in task grade/class:', studentsResult.rows);
     console.log('✅ Found students:', studentsResult.rows.length);
 
     res.json({
       success: true,
       data: {
         task,
-        students: studentsResult.rows
+        students: studentsResult.rows,
+        debug: {
+          task_grade_id: task.grade_id,
+          task_class_id: task.class_id,
+          students_found: studentsResult.rows.length,
+          total_active_students: allStudentsResult.rows.length
+        }
       }
     });
 
@@ -585,7 +611,8 @@ router.get('/task/:taskId/students', [
     console.error('Get task students error:', error);
     res.status(500).json({ 
       success: false,
-      message: 'Server error fetching task students' 
+      message: 'Server error fetching task students',
+      error: error.message
     });
   }
 });
