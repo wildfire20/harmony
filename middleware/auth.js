@@ -191,28 +191,23 @@ const authorizeResourceAccess = (resourceType) => {
 
       } else if (user.role === 'student') {
         // Students can only access resources from their grade/class
-        console.log('=== STUDENT RESOURCE ACCESS DEBUG ===');
-        console.log('Resource grade_id:', resource.grade_id, 'type:', typeof resource.grade_id);
-        console.log('User grade_id:', user.grade_id, 'type:', typeof user.grade_id);
-        console.log('Resource class_id:', resource.class_id, 'type:', typeof resource.class_id);
-        console.log('User class_id:', user.class_id, 'type:', typeof user.class_id);
-        console.log('Grade match:', resource.grade_id == user.grade_id);
-        console.log('Class match:', resource.class_id == user.class_id);
+        // Use parseInt to ensure proper comparison of IDs
+        const resourceGradeId = parseInt(resource.grade_id);
+        const userGradeId = parseInt(user.grade_id);
+        const resourceClassId = parseInt(resource.class_id);
+        const userClassId = parseInt(user.class_id);
         
-        if (parseInt(resource.grade_id) !== parseInt(user.grade_id) || parseInt(resource.class_id) !== parseInt(user.class_id)) {
-          console.log('❌ Access denied due to grade/class mismatch');
+        if (resourceGradeId !== userGradeId || resourceClassId !== userClassId) {
           return res.status(403).json({ 
             message: 'Access denied. You can only access resources from your grade/class.',
             debug: {
-              resource_grade: resource.grade_id,
-              user_grade: user.grade_id,
-              resource_class: resource.class_id,
-              user_class: user.class_id
+              resource_grade: resourceGradeId,
+              user_grade: userGradeId,
+              resource_class: resourceClassId,
+              user_class: userClassId
             }
           });
         }
-        
-        console.log('✅ Student access granted');
 
         // For submissions, students can only access their own
         if (resourceType === 'submission' && resource.student_id != user.id) {
