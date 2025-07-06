@@ -198,11 +198,24 @@ router.get('/task/:taskId', [
         WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
       `, [user.id, task.grade_id, task.class_id]);
 
+      console.log('Teacher assignment check for submissions:', {
+        teacher_id: user.id,
+        task_grade_id: task.grade_id,
+        task_class_id: task.class_id,
+        assignments_found: assignmentCheck.rows.length
+      });
+
       if (assignmentCheck.rows.length === 0) {
-        return res.status(403).json({ 
-          success: false,
-          message: 'Access denied. You can only view submissions for tasks in your assigned grades/classes.' 
-        });
+        // For debugging, let's be more permissive and check if this teacher created the task
+        if (task.created_by === user.id) {
+          console.log('Teacher created this task, allowing submissions access even without formal assignment');
+        } else {
+          console.log('Teacher not assigned and did not create task, denying submissions access');
+          return res.status(403).json({ 
+            success: false,
+            message: 'Access denied. You can only view submissions for tasks in your assigned grades/classes.' 
+          });
+        }
       }
     }
 
@@ -526,11 +539,24 @@ router.get('/task/:taskId/students', [
         WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
       `, [user.id, task.grade_id, task.class_id]);
 
+      console.log('Teacher assignment check:', {
+        teacher_id: user.id,
+        task_grade_id: task.grade_id,
+        task_class_id: task.class_id,
+        assignments_found: assignmentCheck.rows.length
+      });
+
       if (assignmentCheck.rows.length === 0) {
-        return res.status(403).json({ 
-          success: false,
-          message: 'Access denied. You can only view students for tasks in your assigned grades/classes.' 
-        });
+        // For debugging, let's be more permissive and check if this teacher created the task
+        if (task.created_by === user.id) {
+          console.log('Teacher created this task, allowing access even without formal assignment');
+        } else {
+          console.log('Teacher not assigned and did not create task, denying access');
+          return res.status(403).json({ 
+            success: false,
+            message: 'Access denied. You can only view students for tasks in your assigned grades/classes.' 
+          });
+        }
       }
     }
 
