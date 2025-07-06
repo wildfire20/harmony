@@ -101,8 +101,15 @@ const authorizeResourceAccess = (resourceType) => {
       const user = req.user;
       const resourceId = req.params.id;
 
+      console.log(`=== AUTHORIZE RESOURCE ACCESS DEBUG ===`);
+      console.log(`Resource Type: ${resourceType}`);
+      console.log(`Resource ID: ${resourceId}`);
+      console.log(`User:`, JSON.stringify(user, null, 2));
+      console.log(`Timestamp: ${new Date().toISOString()}`);
+
       // Super admin can access everything
       if (user.role === 'super_admin') {
+        console.log('✅ Super admin access granted');
         return next();
       }
 
@@ -155,8 +162,21 @@ const authorizeResourceAccess = (resourceType) => {
 
       const result = await db.query(query, params);
       
+      console.log(`Database query result: ${result.rows.length} rows found`);
+      if (result.rows.length > 0) {
+        console.log('Resource data:', JSON.stringify(result.rows[0], null, 2));
+      }
+      
       if (result.rows.length === 0) {
-        return res.status(404).json({ message: 'Resource not found.' });
+        console.log('❌ Resource not found in database');
+        return res.status(404).json({ 
+          message: 'Resource not found.',
+          debug: {
+            resourceType,
+            resourceId,
+            timestamp: new Date().toISOString()
+          }
+        });
       }
 
       const resource = result.rows[0];
@@ -164,6 +184,7 @@ const authorizeResourceAccess = (resourceType) => {
       // Check access based on user role
       if (user.role === 'admin') {
         // Admins can access everything
+        console.log('✅ Admin access granted');
         return next();
       } else if (user.role === 'teacher') {
         // Check if teacher is assigned to this grade/class
@@ -172,17 +193,23 @@ const authorizeResourceAccess = (resourceType) => {
           WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
         `, [user.id, resource.grade_id, resource.class_id]);
 
+        console.log('Teacher assignment check:', assignmentResult.rows.length > 0);
+
         if (assignmentResult.rows.length === 0) {
+          console.log('❌ Teacher access denied - not assigned to grade/class');
           return res.status(403).json({ 
             message: 'Access denied. You are not assigned to this grade/class.' 
           });
         }
+
+        console.log('✅ Teacher access granted');
 
         // For submissions, teachers can only view submissions for tasks they created
         // or tasks in their assigned grades/classes
         if (resourceType === 'submission') {
           // Teachers can view submissions if they created the task or are assigned to the grade/class
           if (resource.task_created_by != user.id && assignmentResult.rows.length === 0) {
+            console.log('❌ Teacher submission access denied');
             return res.status(403).json({ 
               message: 'Access denied. You can only view submissions for your tasks or assigned classes.' 
             });
@@ -197,7 +224,14 @@ const authorizeResourceAccess = (resourceType) => {
         const resourceClassId = parseInt(resource.class_id);
         const userClassId = parseInt(user.class_id);
         
+        console.log('Student access check:');
+        console.log(`Resource grade: ${resourceGradeId}, User grade: ${userGradeId}`);
+        console.log(`Resource class: ${resourceClassId}, User class: ${userClassId}`);
+        console.log(`Grade match: ${resourceGradeId === userGradeId}`);
+        console.log(`Class match: ${resourceClassId === userClassId}`);
+        
         if (resourceGradeId !== userGradeId || resourceClassId !== userClassId) {
+          console.log('❌ Student access denied - grade/class mismatch');
           return res.status(403).json({ 
             message: 'Access denied. You can only access resources from your grade/class.',
             debug: {
@@ -208,6 +242,8 @@ const authorizeResourceAccess = (resourceType) => {
             }
           });
         }
+
+        console.log('✅ Student access granted');
 
         // For submissions, students can only access their own
         if (resourceType === 'submission' && resource.student_id != user.id) {
