@@ -490,4 +490,78 @@ router.get('/task/:taskId', [
   }
 });
 
+// Get all students for a task's grade/class (to show who hasn't submitted)
+router.get('/task/:taskId/students', [
+  authenticate,
+  authorize('teacher', 'admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const user = req.user;
+
+    console.log('=== GET TASK STUDENTS ===');
+    console.log('User:', JSON.stringify(user, null, 2));
+    console.log('Task ID:', taskId);
+
+    // Get task details first
+    const taskResult = await db.query(`
+      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by
+      FROM tasks t
+      WHERE t.id = $1 AND t.is_active = true
+    `, [taskId]);
+
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Task not found' 
+      });
+    }
+
+    const task = taskResult.rows[0];
+
+    // Check if teacher is assigned to this grade/class
+    if (user.role === 'teacher') {
+      const assignmentCheck = await db.query(`
+        SELECT 1 FROM teacher_assignments 
+        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+      `, [user.id, task.grade_id, task.class_id]);
+
+      if (assignmentCheck.rows.length === 0) {
+        return res.status(403).json({ 
+          success: false,
+          message: 'Access denied. You can only view students for tasks in your assigned grades/classes.' 
+        });
+      }
+    }
+
+    // Get all students in this grade/class with their submission status
+    const studentsResult = await db.query(`
+      SELECT u.id, u.first_name, u.last_name, u.student_number,
+             s.id as submission_id, s.status as submission_status, 
+             s.submitted_at, s.score, s.max_score
+      FROM users u
+      LEFT JOIN submissions s ON u.id = s.student_id AND s.task_id = $1
+      WHERE u.role = 'student' AND u.grade_id = $2 AND u.class_id = $3 AND u.is_active = true
+      ORDER BY u.last_name, u.first_name
+    `, [taskId, task.grade_id, task.class_id]);
+
+    console.log('✅ Found students:', studentsResult.rows.length);
+
+    res.json({
+      success: true,
+      data: {
+        task,
+        students: studentsResult.rows
+      }
+    });
+
+  } catch (error) {
+    console.error('Get task students error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching task students' 
+    });
+  }
+});
+
 module.exports = router;

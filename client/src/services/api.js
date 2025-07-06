@@ -116,6 +116,7 @@ export const submissionsAPI = {
   returnSubmission: (id, data) => api.put(`/submissions/${id}/return`, data),
   downloadSubmission: (id) => api.get(`/submissions/${id}/download`, { responseType: 'blob' }),
   getTaskSubmissions: (taskId, status) => api.get(`/submissions/task/${taskId}${status ? `?status=${status}` : ''}`),
+  getTaskStudents: (taskId) => api.get(`/submissions/task/${taskId}/students`),
 };
 
 // Admin API
