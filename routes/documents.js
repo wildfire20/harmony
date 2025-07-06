@@ -328,7 +328,6 @@ router.post('/upload', [
         file_size_mb: (req.file.size / (1024 * 1024)).toFixed(2)
       }
     });
-    });
 
   } catch (error) {
     // Clean up uploaded file on error
@@ -336,7 +335,10 @@ router.post('/upload', [
       fs.unlinkSync(req.file.path);
     }
     console.error('Upload document error:', error);
-    res.status(500).json({ message: 'Server error uploading document' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error uploading document' 
+    });
   }
 });
 
