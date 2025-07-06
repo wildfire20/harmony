@@ -673,4 +673,39 @@ router.get('/debug/task/:taskId/data', [
   }
 });
 
+// Debug endpoint - simple test
+router.get('/debug/simple', [
+  authenticate
+], async (req, res) => {
+  try {
+    const user = req.user;
+    
+    // Get basic counts
+    const taskCount = await db.query('SELECT COUNT(*) as count FROM tasks WHERE is_active = true');
+    const studentCount = await db.query('SELECT COUNT(*) as count FROM users WHERE role = $1', ['student']);
+    const teacherCount = await db.query('SELECT COUNT(*) as count FROM users WHERE role = $1', ['teacher']);
+    
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        role: user.role,
+        name: `${user.first_name} ${user.last_name}`
+      },
+      stats: {
+        tasks: taskCount.rows[0]?.count || 0,
+        students: studentCount.rows[0]?.count || 0,
+        teachers: teacherCount.rows[0]?.count || 0
+      }
+    });
+  } catch (error) {
+    console.error('Simple debug error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Debug error',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;

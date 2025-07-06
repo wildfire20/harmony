@@ -29,6 +29,7 @@ import Calendar from './components/calendar/Calendar';
 import Quizzes from './components/quizzes/Quizzes';
 import UserManagement from './components/users/UserManagement';
 import Analytics from './components/analytics/Analytics';
+import DebugPage from './components/debug/DebugPage';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -129,6 +130,12 @@ const AppContent = () => {
         <Route path="analytics" element={
           <ProtectedRoute roles={['admin', 'super_admin']}>
             <Analytics />
+          </ProtectedRoute>
+        } />
+        
+        <Route path="debug" element={
+          <ProtectedRoute roles={['teacher', 'admin', 'super_admin']}>
+            <DebugPage />
           </ProtectedRoute>
         } />
       </Route>
