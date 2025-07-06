@@ -19,6 +19,7 @@ const CreateTask = () => {
     due_date: '',
     max_points: 100,
     task_type: 'assignment',
+    submission_type: 'online',
     grade_id: '',
     class_id: ''
   });
@@ -113,7 +114,8 @@ const CreateTask = () => {
       grade_id: parseInt(formData.grade_id),
       class_id: parseInt(formData.class_id),
       max_points: parseInt(formData.max_points),
-      due_date: new Date(formData.due_date).toISOString()
+      due_date: new Date(formData.due_date).toISOString(),
+      submission_type: formData.task_type === 'assignment' ? formData.submission_type : null
     };
 
     createTaskMutation.mutate(taskData);
@@ -229,6 +231,31 @@ const CreateTask = () => {
                 <option value="quiz">Quiz</option>
               </select>
             </div>
+
+            {/* Submission Type - Only show for assignments */}
+            {formData.task_type === 'assignment' && (
+              <div>
+                <label htmlFor="submission_type" className="block text-sm font-medium text-gray-700 mb-2">
+                  Submission Type *
+                </label>
+                <select
+                  id="submission_type"
+                  name="submission_type"
+                  value={formData.submission_type}
+                  onChange={handleChange}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="online">Online (Students upload documents)</option>
+                  <option value="physical">Physical (No uploads - hand in directly)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  {formData.submission_type === 'online' 
+                    ? 'Students can upload files or type responses online' 
+                    : 'Students must submit physical copies directly to you'}
+                </p>
+              </div>
+            )}
 
             <div>
               <label htmlFor="max_points" className="block text-sm font-medium text-gray-700 mb-2">

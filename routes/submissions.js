@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
-const { authenticate, authorize, authorizeResourceAccess } = require('../middleware/auth');
+const { authenticate, authorize, authorizeResourceAccess, authorizeTeacherAssignment } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -53,27 +53,72 @@ router.post('/assignment/:taskId', [
     const { content } = req.body;
     const user = req.user;
 
+    console.log('=== SUBMISSION ATTEMPT ===');
+    console.log('User:', JSON.stringify(user, null, 2));
+    console.log('Task ID:', taskId);
+    console.log('Content:', content);
+    console.log('File:', req.file);
+
     // Verify task exists and is an assignment
     const taskResult = await db.query(`
-      SELECT t.id, t.title, t.task_type, t.due_date, t.max_points, t.grade_id, t.class_id
+      SELECT t.id, t.title, t.task_type, t.due_date, t.max_points, t.grade_id, t.class_id, t.submission_type
       FROM tasks t
       WHERE t.id = $1 AND t.is_active = true AND t.task_type = 'assignment'
     `, [taskId]);
 
     if (taskResult.rows.length === 0) {
-      return res.status(404).json({ message: 'Assignment not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Assignment not found or not available for submission' 
+      });
     }
 
     const task = taskResult.rows[0];
+    console.log('Task details:', task);
 
-    // Check if student has access to this assignment
-    if (user.grade_id != task.grade_id || user.class_id != task.class_id) {
-      return res.status(403).json({ message: 'Access denied to this assignment' });
+    // Check if student has access to this assignment (must be from their grade/class)
+    const userGradeId = parseInt(user.grade_id, 10);
+    const userClassId = parseInt(user.class_id, 10);
+    const taskGradeId = parseInt(task.grade_id, 10);
+    const taskClassId = parseInt(task.class_id, 10);
+
+    if (userGradeId !== taskGradeId || userClassId !== taskClassId) {
+      return res.status(403).json({ 
+        success: false,
+        message: 'Access denied. You can only submit assignments for your own grade/class.',
+        debug: {
+          user_grade: userGradeId,
+          user_class: userClassId,
+          task_grade: taskGradeId,
+          task_class: taskClassId
+        }
+      });
+    }
+
+    // Check submission type requirements
+    if (task.submission_type === 'physical') {
+      return res.status(400).json({ 
+        success: false,
+        message: 'This assignment requires physical submission. Please submit your work directly to your teacher.' 
+      });
+    }
+
+    // For online submissions, validate requirements
+    if (task.submission_type === 'online') {
+      if (!content && !req.file) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'Online submission requires either text content or file upload.' 
+        });
+      }
     }
 
     // Check if assignment is past due
     if (task.due_date && new Date() > new Date(task.due_date)) {
-      return res.status(400).json({ message: 'Assignment is past due' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Assignment is past due. Late submissions are not accepted.' 
+      });
     }
 
     // Check if student has already submitted (only one submission per assignment)
@@ -83,26 +128,111 @@ router.post('/assignment/:taskId', [
     `, [taskId, user.id]);
 
     if (existingSubmission.rows.length > 0) {
-      return res.status(400).json({ message: 'Assignment already submitted' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Assignment already submitted. Only one submission per assignment is allowed.' 
+      });
     }
 
     // Create submission
     const filePath = req.file ? req.file.path : null;
+    const fileName = req.file ? req.file.filename : null;
     
     const result = await db.query(`
-      INSERT INTO submissions (task_id, student_id, content, file_path, max_score, status)
-      VALUES ($1, $2, $3, $4, $5, 'submitted')
-      RETURNING id, content, file_path, status, submitted_at
-    `, [taskId, user.id, content, filePath, task.max_points]);
+      INSERT INTO submissions (task_id, student_id, content, file_path, file_name, max_score, status, submission_type)
+      VALUES ($1, $2, $3, $4, $5, $6, 'submitted', $7)
+      RETURNING id, content, file_path, file_name, status, submitted_at, submission_type
+    `, [taskId, user.id, content, filePath, fileName, task.max_points, task.submission_type]);
+
+    console.log('✅ Submission created successfully:', result.rows[0]);
 
     res.status(201).json({
+      success: true,
       message: 'Assignment submitted successfully',
       submission: result.rows[0]
     });
 
   } catch (error) {
-    console.error('Submit assignment error:', error);
-    res.status(500).json({ message: 'Server error submitting assignment' });
+    console.error('❌ SUBMISSION ERROR:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error submitting assignment',
+      error: error.message 
+    });
+  }
+});
+
+// Get submissions for a task (only visible to assigned teachers and admins)
+router.get('/task/:taskId', [
+  authenticate,
+  authorize('teacher', 'admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const user = req.user;
+
+    console.log('=== GET TASK SUBMISSIONS ===');
+    console.log('User:', JSON.stringify(user, null, 2));
+    console.log('Task ID:', taskId);
+
+    // Get task details first
+    const taskResult = await db.query(`
+      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by
+      FROM tasks t
+      WHERE t.id = $1 AND t.is_active = true
+    `, [taskId]);
+
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Task not found' 
+      });
+    }
+
+    const task = taskResult.rows[0];
+
+    // Check if teacher is assigned to this grade/class
+    if (user.role === 'teacher') {
+      const assignmentCheck = await db.query(`
+        SELECT 1 FROM teacher_assignments 
+        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+      `, [user.id, task.grade_id, task.class_id]);
+
+      if (assignmentCheck.rows.length === 0) {
+        return res.status(403).json({ 
+          success: false,
+          message: 'Access denied. You can only view submissions for tasks in your assigned grades/classes.' 
+        });
+      }
+    }
+
+    // Get submissions for this task
+    const submissionsResult = await db.query(`
+      SELECT s.id, s.content, s.file_path, s.file_name, s.score, s.max_score, s.feedback,
+             s.status, s.submitted_at, s.graded_at, s.attempt_number, s.submission_type,
+             u.first_name, u.last_name, u.student_number
+      FROM submissions s
+      JOIN users u ON s.student_id = u.id
+      WHERE s.task_id = $1
+      ORDER BY s.submitted_at DESC
+    `, [taskId]);
+
+    console.log('✅ Found submissions:', submissionsResult.rows.length);
+
+    res.json({
+      success: true,
+      submissions: submissionsResult.rows,
+      task: task,
+      total: submissionsResult.rows.length
+    });
+
+  } catch (error) {
+    console.error('❌ GET TASK SUBMISSIONS ERROR:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching submissions',
+      error: error.message 
+    });
   }
 });
 

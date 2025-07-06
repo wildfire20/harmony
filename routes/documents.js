@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, authorizeTeacherAssignment, requireTeacherAssignment } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -53,7 +53,10 @@ const upload = multer({
 });
 
 // Get documents for a grade/class - COMPLETELY REWRITTEN VERSION
-router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
+router.get('/grade/:gradeId/class/:classId', [
+  authenticate,
+  authorizeTeacherAssignment
+], async (req, res) => {
   try {
     const { gradeId, classId } = req.params;
     const user = req.user;
@@ -238,63 +241,93 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
 router.post('/upload', [
   authenticate,
   authorize('teacher', 'admin', 'super_admin'),
+  requireTeacherAssignment,
   upload.single('document')
 ], async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ message: 'No file uploaded' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'No file uploaded' 
+      });
     }
 
     const { title, description, document_type, grade_id, class_id } = req.body;
     const user = req.user;
+
+    console.log('=== DOCUMENT UPLOAD ===');
+    console.log('User:', JSON.stringify(user, null, 2));
+    console.log('Request body:', req.body);
+    console.log('File:', req.file);
 
     // Validate required fields
     if (!title || !document_type || !grade_id || !class_id) {
       // Clean up uploaded file if validation fails
       fs.unlinkSync(req.file.path);
       return res.status(400).json({ 
+        success: false,
         message: 'Title, document type, grade ID, and class ID are required' 
       });
     }
 
-    // Check if teacher has access to this grade/class
+    // Convert to integers
+    const gradeId = parseInt(grade_id, 10);
+    const classId = parseInt(class_id, 10);
+
+    if (isNaN(gradeId) || isNaN(classId)) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ 
+        success: false,
+        message: 'Invalid grade or class ID' 
+      });
+    }
+
+    // Check if teacher has access to this grade/class - MANDATORY CHECK
     if (user.role === 'teacher') {
       const assignmentCheck = await db.query(`
         SELECT 1 FROM teacher_assignments 
         WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-      `, [user.id, grade_id, class_id]);
+      `, [user.id, gradeId, classId]);
 
       if (assignmentCheck.rows.length === 0) {
         // Clean up uploaded file
         fs.unlinkSync(req.file.path);
-        return res.status(403).json({ message: 'Access denied to this grade/class' });
+        return res.status(403).json({ 
+          success: false,
+          message: 'Access denied. You are not assigned to this grade/class. Please contact an administrator for assignment.' 
+        });
       }
+      console.log('✅ Teacher assignment verified');
     }
 
     // Insert document record
     const result = await db.query(`
-      INSERT INTO documents (title, description, document_type, filename, file_path, file_size, 
+      INSERT INTO documents (title, description, document_type, filename, original_filename, file_size, 
                            grade_id, class_id, uploaded_by)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id, title, description, document_type, filename, file_size, created_at as uploaded_at
+      RETURNING id, title, description, document_type, filename, original_filename, file_size, created_at as uploaded_at
     `, [
       title,
       description,
       document_type,
+      req.file.filename,
       req.file.originalname,
-      req.file.path,
       req.file.size,
-      grade_id,
-      class_id,
+      gradeId,
+      classId,
       user.id
     ]);
 
+    console.log('✅ Document uploaded successfully:', result.rows[0]);
+
     res.status(201).json({
+      success: true,
       message: 'Document uploaded successfully',
       document: {
         ...result.rows[0],
         file_size_mb: (req.file.size / (1024 * 1024)).toFixed(2)
       }
+    });
     });
 
   } catch (error) {

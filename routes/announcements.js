@@ -1,30 +1,27 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
-const { authenticate, authorize, authorizeResourceAccess } = require('../middleware/auth');
+const { authenticate, authorize, authorizeResourceAccess, authorizeTeacherAssignment, requireTeacherAssignment } = require('../middleware/auth');
 
 const router = express.Router();
 
 // Get announcements for a grade/class
-router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
+router.get('/grade/:gradeId/class/:classId', [
+  authenticate,
+  authorizeTeacherAssignment
+], async (req, res) => {
   try {
     const { gradeId, classId } = req.params;
-    const user = req.user;
 
-    // Check access permissions
-    if (user.role === 'student' && (user.grade_id != gradeId || user.class_id != classId)) {
-      return res.status(403).json({ message: 'Access denied' });
-    }
+    // Convert to integers for consistency
+    const requestedGradeId = parseInt(gradeId, 10);
+    const requestedClassId = parseInt(classId, 10);
 
-    if (user.role === 'teacher') {
-      const assignmentCheck = await db.query(`
-        SELECT 1 FROM teacher_assignments 
-        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-      `, [user.id, gradeId, classId]);
-
-      if (assignmentCheck.rows.length === 0) {
-        return res.status(403).json({ message: 'Access denied' });
-      }
+    if (isNaN(requestedGradeId) || isNaN(requestedClassId)) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Invalid grade or class ID parameters' 
+      });
     }
 
     const result = await db.query(`
@@ -37,13 +34,20 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
       JOIN classes c ON a.class_id = c.id
       WHERE a.grade_id = $1 AND a.class_id = $2 AND a.is_active = true
       ORDER BY a.priority DESC, a.created_at DESC
-    `, [gradeId, classId]);
+    `, [requestedGradeId, requestedClassId]);
 
-    res.json({ announcements: result.rows });
+    res.json({ 
+      success: true,
+      announcements: result.rows,
+      total: result.rows.length
+    });
 
   } catch (error) {
     console.error('Get announcements error:', error);
-    res.status(500).json({ message: 'Server error fetching announcements' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching announcements' 
+    });
   }
 });
 
@@ -83,6 +87,7 @@ router.get('/:id', [
 router.post('/', [
   authenticate,
   authorize('teacher', 'admin', 'super_admin'),
+  requireTeacherAssignment,
   body('title').notEmpty().withMessage('Title is required'),
   body('content').notEmpty().withMessage('Content is required'),
   body('priority').optional().isIn(['low', 'normal', 'high', 'urgent']).withMessage('Invalid priority'),
@@ -92,21 +97,38 @@ router.post('/', [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({ 
+        success: false,
+        errors: errors.array() 
+      });
     }
 
     const { title, content, priority, grade_id, class_id } = req.body;
     const user = req.user;
+
+    // Convert to integers
+    const gradeId = parseInt(grade_id, 10);
+    const classId = parseInt(class_id, 10);
+
+    if (isNaN(gradeId) || isNaN(classId)) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Invalid grade or class ID' 
+      });
+    }
 
     // Check if teacher has access to this grade/class
     if (user.role === 'teacher') {
       const assignmentCheck = await db.query(`
         SELECT 1 FROM teacher_assignments 
         WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-      `, [user.id, grade_id, class_id]);
+      `, [user.id, gradeId, classId]);
 
       if (assignmentCheck.rows.length === 0) {
-        return res.status(403).json({ message: 'Access denied to this grade/class' });
+        return res.status(403).json({ 
+          success: false,
+          message: 'Access denied. You are not assigned to this grade/class. Please contact an administrator for assignment.' 
+        });
       }
     }
 
@@ -114,16 +136,20 @@ router.post('/', [
       INSERT INTO announcements (title, content, priority, grade_id, class_id, created_by)
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING id, title, content, priority, grade_id, class_id, created_at
-    `, [title, content, priority || 'normal', grade_id, class_id, user.id]);
+    `, [title, content, priority || 'normal', gradeId, classId, user.id]);
 
     res.status(201).json({
+      success: true,
       message: 'Announcement created successfully',
       announcement: result.rows[0]
     });
 
   } catch (error) {
     console.error('Create announcement error:', error);
-    res.status(500).json({ message: 'Server error creating announcement' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error creating announcement' 
+    });
   }
 });
 

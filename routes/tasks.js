@@ -240,43 +240,119 @@ router.post('/', [
   body('max_points').optional().isInt({ min: 1 }).withMessage('Max points must be a positive integer'),
   body('grade_id').isInt().withMessage('Grade ID is required'),
   body('class_id').isInt().withMessage('Class ID is required'),
-  body('task_type').isIn(['assignment', 'quiz']).withMessage('Task type must be assignment or quiz')
+  body('task_type').isIn(['assignment', 'quiz']).withMessage('Task type must be assignment or quiz'),
+  body('submission_type').optional().isIn(['online', 'physical']).withMessage('Submission type must be online or physical')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      console.error('Validation errors:', errors.array());
+      return res.status(400).json({ 
+        success: false,
+        errors: errors.array() 
+      });
     }
 
-    const { title, description, instructions, due_date, max_points, grade_id, class_id, task_type } = req.body;
+    const { 
+      title, 
+      description, 
+      instructions, 
+      due_date, 
+      max_points, 
+      grade_id, 
+      class_id, 
+      task_type,
+      submission_type 
+    } = req.body;
     const user = req.user;
 
-    // Check if teacher has access to this grade/class
+    console.log('=== CREATE TASK DEBUG ===');
+    console.log('User:', JSON.stringify(user, null, 2));
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+
+    // Convert grade_id and class_id to integers
+    const gradeId = parseInt(grade_id, 10);
+    const classId = parseInt(class_id, 10);
+
+    if (isNaN(gradeId) || isNaN(classId)) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Invalid grade or class ID' 
+      });
+    }
+
+    // Check if teacher has access to this grade/class - MANDATORY CHECK
     if (user.role === 'teacher') {
+      console.log('Checking teacher assignment for grade:', gradeId, 'class:', classId);
+      
       const assignmentCheck = await db.query(`
         SELECT 1 FROM teacher_assignments 
         WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-      `, [user.id, grade_id, class_id]);
+      `, [user.id, gradeId, classId]);
+
+      console.log('Teacher assignment check result:', assignmentCheck.rows);
 
       if (assignmentCheck.rows.length === 0) {
-        return res.status(403).json({ message: 'Access denied to this grade/class' });
+        console.error('❌ Teacher access denied - no assignment found');
+        return res.status(403).json({ 
+          success: false,
+          message: 'Access denied. You are not assigned to this grade/class. Please contact an administrator to assign you to this grade/class.',
+          debug: {
+            teacher_id: user.id,
+            requested_grade: gradeId,
+            requested_class: classId
+          }
+        });
       }
+      console.log('✅ Teacher assignment verified');
     }
 
+    // Set default submission type for assignments
+    const finalSubmissionType = submission_type || (task_type === 'assignment' ? 'online' : null);
+
+    console.log('Creating task with submission_type:', finalSubmissionType);
+
     const result = await db.query(`
-      INSERT INTO tasks (title, description, instructions, due_date, max_points, grade_id, class_id, created_by, task_type)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id, title, description, instructions, due_date, max_points, grade_id, class_id, task_type, created_at
-    `, [title, description, instructions, due_date, max_points || 100, grade_id, class_id, user.id, task_type]);
+      INSERT INTO tasks (title, description, instructions, due_date, max_points, grade_id, class_id, created_by, task_type, submission_type)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING id, title, description, instructions, due_date, max_points, grade_id, class_id, task_type, submission_type, created_at
+    `, [
+      title, 
+      description, 
+      instructions, 
+      due_date, 
+      max_points || 100, 
+      gradeId, 
+      classId, 
+      user.id, 
+      task_type,
+      finalSubmissionType
+    ]);
+
+    console.log('✅ Task created successfully:', result.rows[0]);
 
     res.status(201).json({
+      success: true,
       message: 'Task created successfully',
       task: result.rows[0]
     });
 
   } catch (error) {
-    console.error('Create task error:', error);
-    res.status(500).json({ message: 'Server error creating task' });
+    console.error('❌ CREATE TASK ERROR:', error);
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error detail:', error.detail);
+    
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error creating task',
+      error_details: {
+        name: error.name,
+        message: error.message,
+        code: error.code
+      }
+    });
   }
 });
 
