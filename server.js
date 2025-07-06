@@ -239,6 +239,26 @@ if (process.env.NODE_ENV === 'production') {
 // Debug endpoint to run SQL schema updates
 app.post('/api/debug/run-sql', async (req, res) => {
   try {
+    console.log('Running database schema updates...');
+    
+    // First, check if tables exist and create them if needed
+    await db.query(`CREATE TABLE IF NOT EXISTS submissions (
+      id SERIAL PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT,
+      file_path VARCHAR(500),
+      quiz_answers JSONB,
+      score DECIMAL(5,2),
+      max_score DECIMAL(5,2),
+      feedback TEXT,
+      status VARCHAR(50) DEFAULT 'submitted' CHECK (status IN ('submitted', 'graded', 'returned')),
+      attempt_number INTEGER DEFAULT 1,
+      submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      graded_at TIMESTAMP,
+      UNIQUE(task_id, student_id, attempt_number)
+    )`);
+    
     // Add submission_type column to tasks table if not exists
     await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS submission_type VARCHAR(20) DEFAULT 'online'`);
     
@@ -249,11 +269,14 @@ app.post('/api/debug/run-sql', async (req, res) => {
     await db.query(`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS file_name VARCHAR(255)`);
     
     // Update existing tasks to have submission_type 'online' for assignments
-    await db.query(`UPDATE tasks SET submission_type = 'online' WHERE task_type = 'assignment' AND submission_type IS NULL`);
+    await db.query(`UPDATE tasks SET submission_type = 'online' WHERE task_type = 'assignment' AND (submission_type IS NULL OR submission_type = '')`);
     
     // Create indexes for better performance
     await db.query(`CREATE INDEX IF NOT EXISTS idx_tasks_submission_type ON tasks(submission_type)`);
     await db.query(`CREATE INDEX IF NOT EXISTS idx_submissions_submission_type ON submissions(submission_type)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_submissions_task_student ON submissions(task_id, student_id)`);
+    
+    console.log('✅ Database schema updated successfully');
     
     res.json({ 
       success: true, 
