@@ -136,7 +136,7 @@ const authorizeResourceAccess = (resourceType) => {
       switch (resourceType) {
         case 'task':
           query = `
-            SELECT grade_id, class_id, created_by, submission_type FROM tasks 
+            SELECT grade_id, class_id, created_by FROM tasks 
             WHERE id = $1 AND is_active = true
           `;
           params = [resourceId];
@@ -223,10 +223,17 @@ const authorizeResourceAccess = (resourceType) => {
         return next();
       } else if (user.role === 'teacher') {
         // Check if teacher is assigned to this grade/class
-        const assignmentResult = await db.query(`
-          SELECT 1 FROM teacher_assignments 
-          WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-        `, [user.id, resource.grade_id, resource.class_id]);
+        let assignmentResult;
+        try {
+          assignmentResult = await db.query(`
+            SELECT 1 FROM teacher_assignments 
+            WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+          `, [user.id, resource.grade_id, resource.class_id]);
+        } catch (assignmentError) {
+          console.error('Teacher assignment query failed:', assignmentError);
+          // Continue with no assignment found
+          assignmentResult = { rows: [] };
+        }
 
         console.log('Teacher assignment check:', assignmentResult.rows.length > 0);
 
@@ -306,7 +313,24 @@ const authorizeResourceAccess = (resourceType) => {
       next();
     } catch (error) {
       console.error('Resource authorization error:', error);
-      res.status(500).json({ message: 'Server error during resource authorization.' });
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        code: error.code,
+        resourceType,
+        resourceId,
+        userId: user?.id,
+        userRole: user?.role
+      });
+      res.status(500).json({ 
+        message: 'Server error during resource authorization.',
+        debug: {
+          resourceType,
+          resourceId,
+          timestamp: new Date().toISOString(),
+          error_type: error.name
+        }
+      });
     }
   };
 };
