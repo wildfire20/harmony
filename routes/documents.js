@@ -120,6 +120,7 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
     console.log('=== EXECUTING DATABASE QUERY ===');
     console.log('Query parameters:', [requestedGradeId, requestedClassId]);
     
+    // Fixed: Ensure all column names match the database schema
     const result = await db.query(`
       SELECT d.id, d.title, d.description, d.document_type, d.filename, d.original_filename,
              d.file_size, d.created_at as uploaded_at, d.is_active,
@@ -158,8 +159,16 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Get documents error:', error);
-    res.status(500).json({ message: 'Server error fetching documents' });
+    console.error('❌ DOCUMENTS ENDPOINT ERROR:', error);
+    console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error detail:', error.detail);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Server error fetching documents',
+      error_details: error.message,
+      error_code: error.code 
+    });
   }
 });
 
@@ -202,10 +211,10 @@ router.post('/upload', [
 
     // Insert document record
     const result = await db.query(`
-      INSERT INTO documents (title, description, document_type, file_name, file_path, file_size, 
+      INSERT INTO documents (title, description, document_type, filename, file_path, file_size, 
                            grade_id, class_id, uploaded_by)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id, title, description, document_type, file_name, file_size, uploaded_at
+      RETURNING id, title, description, document_type, filename, file_size, created_at as uploaded_at
     `, [
       title,
       description,
@@ -279,7 +288,7 @@ router.get('/download/:id', authenticate, async (req, res) => {
     }
 
     // Send file
-    res.download(document.file_path, document.file_name);
+    res.download(document.file_path, document.filename);
 
   } catch (error) {
     console.error('Download document error:', error);
@@ -509,7 +518,7 @@ router.post('/create-test-document', [
     const result = await db.query(`
       INSERT INTO documents (
         title, description, document_type, grade_id, class_id, uploaded_by, 
-        file_name, original_filename, is_active
+        filename, original_filename, is_active
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `, [
