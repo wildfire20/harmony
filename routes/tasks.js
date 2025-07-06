@@ -595,4 +595,100 @@ router.post('/create-sample-tasks', [
   }
 });
 
+// Initialize tasks tables (admin only)
+router.post('/init-tables', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    console.log('Initializing tasks tables via API...');
+    
+    // Create tasks table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS tasks (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(255) NOT NULL,
+          description TEXT,
+          instructions TEXT,
+          due_date TIMESTAMP,
+          max_points INTEGER DEFAULT 100,
+          task_type VARCHAR(50) DEFAULT 'assignment' CHECK (task_type IN ('assignment', 'quiz')),
+          grade_id INTEGER NOT NULL REFERENCES grades(id) ON DELETE CASCADE,
+          class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+          created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          is_active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // Create submissions table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS submissions (
+          id SERIAL PRIMARY KEY,
+          task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          content TEXT,
+          file_path VARCHAR(500),
+          quiz_answers JSONB,
+          score DECIMAL(5,2),
+          max_score DECIMAL(5,2),
+          feedback TEXT,
+          status VARCHAR(50) DEFAULT 'submitted' CHECK (status IN ('submitted', 'graded', 'returned')),
+          attempt_number INTEGER DEFAULT 1,
+          submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          graded_at TIMESTAMP,
+          UNIQUE(task_id, student_id, attempt_number)
+      )
+    `);
+    
+    // Create quizzes table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS quizzes (
+          id SERIAL PRIMARY KEY,
+          task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          questions JSONB NOT NULL,
+          time_limit INTEGER,
+          attempts_allowed INTEGER DEFAULT 1,
+          show_results BOOLEAN DEFAULT true,
+          randomize_questions BOOLEAN DEFAULT false,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // Create indexes
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS idx_tasks_grade_class ON tasks(grade_id, class_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_created_by ON tasks(created_by);
+      CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
+      CREATE INDEX IF NOT EXISTS idx_submissions_task_student ON submissions(task_id, student_id);
+      CREATE INDEX IF NOT EXISTS idx_submissions_student ON submissions(student_id);
+      CREATE INDEX IF NOT EXISTS idx_quizzes_task ON quizzes(task_id);
+    `);
+    
+    console.log('✅ Tasks tables initialized successfully');
+    
+    // Verify tables exist
+    const tablesCheck = await db.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_name IN ('tasks', 'submissions', 'quizzes')
+      ORDER BY table_name
+    `);
+    
+    res.json({
+      message: 'Tasks tables initialized successfully',
+      created_tables: tablesCheck.rows.map(row => row.table_name)
+    });
+    
+  } catch (error) {
+    console.error('Error initializing tasks tables:', error);
+    res.status(500).json({ 
+      message: 'Error initializing tasks tables',
+      error: error.message 
+    });
+  }
+});
+
 module.exports = router;
