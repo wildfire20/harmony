@@ -155,6 +155,7 @@ router.get('/:id', [
     const { id } = req.params;
     const user = req.user;
 
+    // First try with submission_type column, if it fails, try without it
     let query = `
       SELECT t.id, t.title, t.description, t.instructions, t.due_date, t.max_points,
              t.task_type, t.submission_type, t.created_at, t.updated_at, t.grade_id, t.class_id,
@@ -168,8 +169,26 @@ router.get('/:id', [
     `;
 
     const params = [id];
+    let result;
 
-    const result = await db.query(query, params);
+    try {
+      result = await db.query(query, params);
+    } catch (columnError) {
+      console.log('submission_type column might not exist, trying fallback query');
+      // Fallback query without submission_type column
+      query = `
+        SELECT t.id, t.title, t.description, t.instructions, t.due_date, t.max_points,
+               t.task_type, 'online' as submission_type, t.created_at, t.updated_at, t.grade_id, t.class_id,
+               u.first_name as teacher_first_name, u.last_name as teacher_last_name,
+               g.name as grade_name, c.name as class_name
+        FROM tasks t
+        JOIN users u ON t.created_by = u.id
+        JOIN grades g ON t.grade_id = g.id
+        JOIN classes c ON t.class_id = c.id
+        WHERE t.id = $1 AND t.is_active = true
+      `;
+      result = await db.query(query, params);
+    }
     
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Task not found' });
