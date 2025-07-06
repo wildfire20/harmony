@@ -11,21 +11,64 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
     const { gradeId, classId } = req.params;
     const user = req.user;
 
+    console.log('=== TASKS ENDPOINT DEBUG ===');
+    console.log('Requested gradeId:', gradeId, 'classId:', classId);
+    console.log('User:', JSON.stringify(user, null, 2));
+
+    // Convert parameters to integers
+    const requestedGradeId = parseInt(gradeId, 10);
+    const requestedClassId = parseInt(classId, 10);
+
+    if (isNaN(requestedGradeId) || isNaN(requestedClassId)) {
+      console.error('❌ Invalid grade or class ID parameters');
+      return res.status(400).json({ 
+        success: false,
+        message: 'Invalid grade or class ID parameters',
+        debug: { gradeId, classId }
+      });
+    }
+
     // Check access permissions
-    if (user.role === 'student' && (user.grade_id != gradeId || user.class_id != classId)) {
-      return res.status(403).json({ message: 'Access denied' });
+    if (user.role === 'student') {
+      const userGradeId = parseInt(user.grade_id, 10);
+      const userClassId = parseInt(user.class_id, 10);
+      
+      console.log('Student access check:');
+      console.log('User grade_id:', userGradeId, 'Requested:', requestedGradeId);
+      console.log('User class_id:', userClassId, 'Requested:', requestedClassId);
+      
+      if (userGradeId !== requestedGradeId || userClassId !== requestedClassId) {
+        console.error('❌ Student access denied - grade/class mismatch');
+        return res.status(403).json({ 
+          success: false,
+          message: 'Access denied - you can only view tasks for your assigned grade and class',
+          debug: {
+            user_grade: userGradeId,
+            user_class: userClassId,
+            requested_grade: requestedGradeId,
+            requested_class: requestedClassId
+          }
+        });
+      }
     }
 
     if (user.role === 'teacher') {
+      console.log('Checking teacher assignment...');
       const assignmentCheck = await db.query(`
         SELECT 1 FROM teacher_assignments 
         WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-      `, [user.id, gradeId, classId]);
+      `, [user.id, requestedGradeId, requestedClassId]);
 
       if (assignmentCheck.rows.length === 0) {
-        return res.status(403).json({ message: 'Access denied' });
+        console.error('❌ Teacher access denied - no assignment');
+        return res.status(403).json({ 
+          success: false,
+          message: 'Access denied - you are not assigned to this grade/class' 
+        });
       }
     }
+
+    console.log('✅ Access granted, fetching tasks...');
 
     let query = `
       SELECT t.id, t.title, t.description, t.instructions, t.due_date, t.max_points,
@@ -39,7 +82,7 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
       WHERE t.grade_id = $1 AND t.class_id = $2 AND t.is_active = true
     `;
 
-    const params = [gradeId, classId];
+    const params = [requestedGradeId, requestedClassId];
 
     // If student, also get their submission status
     if (user.role === 'student') {
@@ -61,13 +104,45 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
 
     query += ' ORDER BY t.due_date ASC, t.created_at DESC';
 
+    console.log('Executing query:', query);
+    console.log('Query parameters:', params);
+
     const result = await db.query(query, params);
 
-    res.json({ tasks: result.rows });
+    console.log('=== QUERY RESULTS ===');
+    console.log('Rows returned:', result.rows.length);
+    if (result.rows.length > 0) {
+      console.log('Sample task:', JSON.stringify(result.rows[0], null, 2));
+    }
+
+    console.log('✅ Returning tasks:', result.rows.length);
+
+    res.json({ 
+      success: true,
+      tasks: result.rows,
+      total: result.rows.length,
+      grade_id: requestedGradeId,
+      class_id: requestedClassId
+    });
 
   } catch (error) {
-    console.error('Get tasks error:', error);
-    res.status(500).json({ message: 'Server error fetching tasks' });
+    console.error('❌ TASKS ENDPOINT ERROR:', error);
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error detail:', error.detail);
+    console.error('Error stack:', error.stack);
+
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching tasks',
+      error_details: {
+        name: error.name,
+        message: error.message,
+        code: error.code,
+        detail: error.detail
+      }
+    });
   }
 });
 
@@ -355,6 +430,168 @@ router.get('/:id/submissions', [
   } catch (error) {
     console.error('Get task submissions error:', error);
     res.status(500).json({ message: 'Server error fetching submissions' });
+  }
+});
+
+// Debug endpoint to check tasks table and create sample data
+router.get('/debug-tasks', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    console.log('=== DEBUGGING TASKS TABLE ===');
+    
+    // Check if tasks table exists
+    const tableCheck = await db.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_name = 'tasks'
+      );
+    `);
+    
+    console.log('Tasks table exists:', tableCheck.rows[0].exists);
+    
+    if (!tableCheck.rows[0].exists) {
+      return res.json({
+        message: 'Tasks table does not exist',
+        table_exists: false
+      });
+    }
+    
+    // Check table structure
+    const schemaQuery = await db.query(`
+      SELECT column_name, data_type, is_nullable 
+      FROM information_schema.columns 
+      WHERE table_name = 'tasks' 
+      ORDER BY ordinal_position
+    `);
+    
+    // Get existing tasks
+    const tasksQuery = await db.query(`
+      SELECT t.*, u.first_name, u.last_name, g.name as grade_name, c.name as class_name
+      FROM tasks t
+      LEFT JOIN users u ON t.created_by = u.id
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
+      ORDER BY t.id
+    `);
+    
+    // Get grades and classes for reference
+    const gradesQuery = await db.query('SELECT * FROM grades ORDER BY id');
+    const classesQuery = await db.query('SELECT * FROM classes ORDER BY id');
+    const teachersQuery = await db.query("SELECT id, first_name, last_name FROM users WHERE role = 'teacher' OR role = 'admin' ORDER BY id");
+    
+    res.json({
+      message: 'Tasks debug information',
+      table_exists: true,
+      table_schema: schemaQuery.rows,
+      existing_tasks: tasksQuery.rows,
+      available_grades: gradesQuery.rows,
+      available_classes: classesQuery.rows,
+      available_teachers: teachersQuery.rows
+    });
+    
+  } catch (error) {
+    console.error('Debug tasks error:', error);
+    res.status(500).json({ 
+      message: 'Error debugging tasks',
+      error: error.message 
+    });
+  }
+});
+
+// Create sample tasks for testing
+router.post('/create-sample-tasks', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    console.log('Creating sample tasks...');
+    console.log('User creating tasks:', req.user);
+    
+    // Get available grades and classes
+    const gradesResult = await db.query('SELECT * FROM grades ORDER BY id LIMIT 3');
+    const classesResult = await db.query('SELECT * FROM classes ORDER BY id LIMIT 3');
+    
+    if (gradesResult.rows.length === 0 || classesResult.rows.length === 0) {
+      return res.status(400).json({
+        message: 'No grades or classes available to create tasks for',
+        grades_count: gradesResult.rows.length,
+        classes_count: classesResult.rows.length
+      });
+    }
+    
+    const sampleTasks = [
+      {
+        title: 'Mathematics Assignment 1',
+        description: 'Complete exercises 1-10 from Chapter 3',
+        instructions: 'Show all your work and write clearly. Submit by the due date.',
+        due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+        max_points: 100,
+        task_type: 'assignment'
+      },
+      {
+        title: 'Science Quiz - Plants',
+        description: 'Quiz on plant biology and photosynthesis',
+        instructions: 'This is a timed quiz. You will have 30 minutes to complete.',
+        due_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // 3 days from now
+        max_points: 50,
+        task_type: 'quiz'
+      },
+      {
+        title: 'English Essay',
+        description: 'Write a 500-word essay on your favorite book',
+        instructions: 'Use proper grammar and cite your sources.',
+        due_date: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000), // 10 days from now
+        max_points: 75,
+        task_type: 'assignment'
+      }
+    ];
+    
+    const createdTasks = [];
+    
+    // Create tasks for each grade/class combination
+    for (const grade of gradesResult.rows) {
+      for (const cls of classesResult.rows.filter(c => c.grade_id === grade.id)) {
+        for (const taskTemplate of sampleTasks) {
+          try {
+            const result = await db.query(`
+              INSERT INTO tasks (title, description, instructions, due_date, max_points, grade_id, class_id, created_by, task_type)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              RETURNING *
+            `, [
+              `${taskTemplate.title} - ${grade.name} ${cls.name}`,
+              taskTemplate.description,
+              taskTemplate.instructions,
+              taskTemplate.due_date,
+              taskTemplate.max_points,
+              grade.id,
+              cls.id,
+              req.user.id,
+              taskTemplate.task_type
+            ]);
+            
+            createdTasks.push(result.rows[0]);
+          } catch (taskError) {
+            console.error('Error creating task:', taskError);
+          }
+        }
+      }
+    }
+    
+    console.log('Sample tasks created:', createdTasks.length);
+    
+    res.json({
+      message: `Successfully created ${createdTasks.length} sample tasks`,
+      created_tasks: createdTasks
+    });
+    
+  } catch (error) {
+    console.error('Create sample tasks error:', error);
+    res.status(500).json({ 
+      message: 'Server error creating sample tasks',
+      error: error.message 
+    });
   }
 });
 
