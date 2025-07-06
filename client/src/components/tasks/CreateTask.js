@@ -96,7 +96,7 @@ const CreateTask = () => {
       return;
     }
 
-    // Additional validation for teachers
+    // Additional validation for teachers (not admins)
     if (user?.role === 'teacher') {
       const isValidAssignment = teacherAssignments?.assignments?.some(
         assignment => assignment.grade_id == formData.grade_id && assignment.class_id == formData.class_id

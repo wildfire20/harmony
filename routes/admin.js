@@ -1391,4 +1391,46 @@ router.post('/redistribute-documents', [
   }
 });
 
+// Get teacher assignments
+router.get('/teachers/:id/assignments', [
+  authenticate,
+  authorize('teacher', 'admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = req.user;
+
+    // Teachers can only get their own assignments unless they're admin
+    if (user.role === 'teacher' && user.id != id) {
+      return res.status(403).json({ 
+        success: false,
+        message: 'Access denied. You can only view your own assignments.' 
+      });
+    }
+
+    const result = await db.query(`
+      SELECT ta.grade_id, ta.class_id,
+             g.name as grade_name, c.name as class_name
+      FROM teacher_assignments ta
+      JOIN grades g ON ta.grade_id = g.id
+      JOIN classes c ON ta.class_id = c.id
+      WHERE ta.teacher_id = $1
+      ORDER BY g.name, c.name
+    `, [id]);
+
+    res.json({ 
+      success: true,
+      assignments: result.rows,
+      total: result.rows.length 
+    });
+
+  } catch (error) {
+    console.error('Get teacher assignments error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching teacher assignments' 
+    });
+  }
+});
+
 module.exports = router;

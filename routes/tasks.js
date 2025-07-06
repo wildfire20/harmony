@@ -282,6 +282,7 @@ router.post('/', [
     }
 
     // Check if teacher has access to this grade/class - MANDATORY CHECK
+    // (Admins and super_admins can create tasks for any grade/class)
     if (user.role === 'teacher') {
       console.log('Checking teacher assignment for grade:', gradeId, 'class:', classId);
       
@@ -305,6 +306,8 @@ router.post('/', [
         });
       }
       console.log('✅ Teacher assignment verified');
+    } else if (user.role === 'admin' || user.role === 'super_admin') {
+      console.log('✅ Admin access granted - can create tasks for any grade/class');
     }
 
     // Set default submission type for assignments
@@ -312,22 +315,47 @@ router.post('/', [
 
     console.log('Creating task with submission_type:', finalSubmissionType);
 
-    const result = await db.query(`
-      INSERT INTO tasks (title, description, instructions, due_date, max_points, grade_id, class_id, created_by, task_type, submission_type)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      RETURNING id, title, description, instructions, due_date, max_points, grade_id, class_id, task_type, submission_type, created_at
-    `, [
-      title, 
-      description, 
-      instructions, 
-      due_date, 
-      max_points || 100, 
-      gradeId, 
-      classId, 
-      user.id, 
-      task_type,
-      finalSubmissionType
-    ]);
+    // Try to insert with submission_type first, fall back to without if column doesn't exist
+    let result;
+    try {
+      result = await db.query(`
+        INSERT INTO tasks (title, description, instructions, due_date, max_points, grade_id, class_id, created_by, task_type, submission_type)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING id, title, description, instructions, due_date, max_points, grade_id, class_id, task_type, submission_type, created_at
+      `, [
+        title, 
+        description, 
+        instructions, 
+        due_date, 
+        max_points || 100, 
+        gradeId, 
+        classId, 
+        user.id, 
+        task_type,
+        finalSubmissionType
+      ]);
+    } catch (columnError) {
+      if (columnError.code === '42703') { // Column doesn't exist
+        console.log('submission_type column not found, creating task without it');
+        result = await db.query(`
+          INSERT INTO tasks (title, description, instructions, due_date, max_points, grade_id, class_id, created_by, task_type)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          RETURNING id, title, description, instructions, due_date, max_points, grade_id, class_id, task_type, created_at
+        `, [
+          title, 
+          description, 
+          instructions, 
+          due_date, 
+          max_points || 100, 
+          gradeId, 
+          classId, 
+          user.id, 
+          task_type
+        ]);
+      } else {
+        throw columnError;
+      }
+    }
 
     console.log('✅ Task created successfully:', result.rows[0]);
 
