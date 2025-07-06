@@ -564,7 +564,10 @@ router.get('/task/:taskId/students', [
     const studentCountResult = await db.query(`
       SELECT COUNT(*) as count
       FROM users 
-      WHERE role = 'student' AND grade_id = $1 AND class_id = $2 AND is_active = true
+      WHERE role = 'student' 
+        AND CAST(grade_id AS INTEGER) = CAST($1 AS INTEGER)
+        AND CAST(class_id AS INTEGER) = CAST($2 AS INTEGER)
+        AND is_active = true
     `, [task.grade_id, task.class_id]);
 
     console.log('Student count in grade/class:', studentCountResult.rows[0]?.count);
@@ -580,15 +583,36 @@ router.get('/task/:taskId/students', [
     console.log('All active students:', allStudentsResult.rows);
 
     // Get all students in this grade/class with their submission status
+    // Try with explicit casting to handle potential data type mismatches
     const studentsResult = await db.query(`
       SELECT u.id, u.first_name, u.last_name, u.student_number,
              s.id as submission_id, s.status as submission_status, 
              s.submitted_at, s.score, s.max_score
       FROM users u
       LEFT JOIN submissions s ON u.id = s.student_id AND s.task_id = $1
-      WHERE u.role = 'student' AND u.grade_id = $2 AND u.class_id = $3 AND u.is_active = true
+      WHERE u.role = 'student' 
+        AND CAST(u.grade_id AS INTEGER) = CAST($2 AS INTEGER)
+        AND CAST(u.class_id AS INTEGER) = CAST($3 AS INTEGER)
+        AND u.is_active = true
       ORDER BY u.last_name, u.first_name
     `, [taskId, task.grade_id, task.class_id]);
+
+    // If no students found with exact match, try a broader search for debugging
+    if (studentsResult.rows.length === 0) {
+      console.log('No students found with exact match, trying broader search...');
+      
+      // Try finding students in the same grade (any class)
+      const gradeStudentsResult = await db.query(`
+        SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id
+        FROM users u
+        WHERE u.role = 'student' 
+          AND CAST(u.grade_id AS INTEGER) = CAST($1 AS INTEGER)
+          AND u.is_active = true
+        ORDER BY u.class_id, u.last_name, u.first_name
+      `, [task.grade_id]);
+      
+      console.log('Students in same grade (any class):', gradeStudentsResult.rows);
+    }
 
     console.log('Students in task grade/class:', studentsResult.rows);
     console.log('✅ Found students:', studentsResult.rows.length);
