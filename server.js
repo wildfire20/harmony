@@ -241,7 +241,41 @@ app.post('/api/debug/run-sql', async (req, res) => {
   try {
     console.log('Running database schema updates...');
     
-    // First, check if tables exist and create them if needed
+    // Create documents table if not exists
+    await db.query(`CREATE TABLE IF NOT EXISTS documents (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      description TEXT,
+      document_type VARCHAR(50) NOT NULL,
+      file_name VARCHAR(255) NOT NULL,
+      file_path VARCHAR(500) NOT NULL,
+      file_size BIGINT NOT NULL,
+      grade_id INTEGER REFERENCES grades(id) ON DELETE CASCADE,
+      class_id INTEGER REFERENCES classes(id) ON DELETE CASCADE,
+      uploaded_by INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      is_active BOOLEAN DEFAULT true,
+      uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+    
+    // Create tasks table if not exists
+    await db.query(`CREATE TABLE IF NOT EXISTS tasks (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      description TEXT,
+      instructions TEXT,
+      due_date TIMESTAMP,
+      max_points INTEGER DEFAULT 100,
+      task_type VARCHAR(50) DEFAULT 'assignment' CHECK (task_type IN ('assignment', 'quiz')),
+      grade_id INTEGER NOT NULL REFERENCES grades(id) ON DELETE CASCADE,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+    
+    // Create submissions table if not exists
     await db.query(`CREATE TABLE IF NOT EXISTS submissions (
       id SERIAL PRIMARY KEY,
       task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -272,6 +306,10 @@ app.post('/api/debug/run-sql', async (req, res) => {
     await db.query(`UPDATE tasks SET submission_type = 'online' WHERE task_type = 'assignment' AND (submission_type IS NULL OR submission_type = '')`);
     
     // Create indexes for better performance
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_documents_grade_class ON documents(grade_id, class_id)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(document_type)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_documents_uploaded_by ON documents(uploaded_by)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(is_active)`);
     await db.query(`CREATE INDEX IF NOT EXISTS idx_tasks_submission_type ON tasks(submission_type)`);
     await db.query(`CREATE INDEX IF NOT EXISTS idx_submissions_submission_type ON submissions(submission_type)`);
     await db.query(`CREATE INDEX IF NOT EXISTS idx_submissions_task_student ON submissions(task_id, student_id)`);
@@ -280,7 +318,7 @@ app.post('/api/debug/run-sql', async (req, res) => {
     
     res.json({ 
       success: true, 
-      message: 'Database schema updated successfully for submissions',
+      message: 'Database schema updated successfully for all tables (documents, tasks, submissions)',
       timestamp: new Date().toISOString()
     });
   } catch (error) {

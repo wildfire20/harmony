@@ -165,14 +165,14 @@ router.get('/grade/:gradeId/class/:classId', [
       console.log('✅ Admin access granted');
     }
 
-    // Execute database query
+    // Execute database query with fallback for different column names
     console.log('=== EXECUTING DATABASE QUERY ===');
     console.log('Query parameters:', [requestedGradeId, requestedClassId]);
 
-    const query = `
+    let query = `
       SELECT d.id, d.title, d.description, d.document_type, 
-             d.filename, d.original_filename, d.file_size, 
-             d.created_at as uploaded_at, d.is_active,
+             d.file_name as filename, d.file_name as original_filename, d.file_size, 
+             d.uploaded_at, d.is_active,
              u.first_name as uploaded_by_first_name, 
              u.last_name as uploaded_by_last_name,
              g.name as grade_name, c.name as class_name
@@ -181,12 +181,33 @@ router.get('/grade/:gradeId/class/:classId', [
       LEFT JOIN grades g ON d.grade_id = g.id
       LEFT JOIN classes c ON d.class_id = c.id
       WHERE d.grade_id = $1 AND d.class_id = $2 AND d.is_active = true
-      ORDER BY d.document_type, d.created_at DESC
+      ORDER BY d.document_type, d.uploaded_at DESC
     `;
 
     console.log('Executing query:', query);
+    let result;
 
-    const result = await db.query(query, [requestedGradeId, requestedClassId]);
+    try {
+      result = await db.query(query, [requestedGradeId, requestedClassId]);
+    } catch (queryError) {
+      console.log('Primary query failed, trying fallback:', queryError.message);
+      // Fallback query with different column names
+      query = `
+        SELECT d.id, d.title, d.description, d.document_type, 
+               d.filename, d.original_filename, d.file_size, 
+               d.created_at as uploaded_at, d.is_active,
+               u.first_name as uploaded_by_first_name, 
+               u.last_name as uploaded_by_last_name,
+               g.name as grade_name, c.name as class_name
+        FROM documents d
+        JOIN users u ON d.uploaded_by = u.id
+        LEFT JOIN grades g ON d.grade_id = g.id
+        LEFT JOIN classes c ON d.class_id = c.id
+        WHERE d.grade_id = $1 AND d.class_id = $2 AND d.is_active = true
+        ORDER BY d.document_type, d.created_at DESC
+      `;
+      result = await db.query(query, [requestedGradeId, requestedClassId]);
+    }
 
     console.log('=== QUERY RESULTS ===');
     console.log('Rows returned:', result.rows.length);
@@ -478,8 +499,8 @@ router.get('/all', [
     const user = req.user;
 
     let query = `
-      SELECT d.id, d.title, d.description, d.document_type, d.filename, d.original_filename,
-             d.file_size, d.created_at as uploaded_at, d.is_active, d.uploaded_by,
+      SELECT d.id, d.title, d.description, d.document_type, d.file_name as filename, d.file_name as original_filename,
+             d.file_size, d.uploaded_at, d.is_active, d.uploaded_by,
              u.first_name as uploaded_by_first_name, u.last_name as uploaded_by_last_name,
              g.name as grade_name, c.name as class_name
       FROM documents d
@@ -500,9 +521,38 @@ router.get('/all', [
       queryParams.push(user.id);
     }
 
-    query += ` ORDER BY d.document_type, d.created_at DESC`;
+    query += ` ORDER BY d.document_type, d.uploaded_at DESC`;
 
-    const result = await db.query(query, queryParams);
+    console.log('Executing /all query:', query);
+    let result;
+
+    try {
+      result = await db.query(query, queryParams);
+    } catch (queryError) {
+      console.log('Primary /all query failed, trying fallback:', queryError.message);
+      // Fallback query with different column names
+      query = `
+        SELECT d.id, d.title, d.description, d.document_type, d.filename, d.original_filename,
+               d.file_size, d.created_at as uploaded_at, d.is_active, d.uploaded_by,
+               u.first_name as uploaded_by_first_name, u.last_name as uploaded_by_last_name,
+               g.name as grade_name, c.name as class_name
+        FROM documents d
+        JOIN users u ON d.uploaded_by = u.id
+        LEFT JOIN grades g ON d.grade_id = g.id
+        LEFT JOIN classes c ON d.class_id = c.id
+        WHERE d.is_active = true
+      `;
+      
+      if (user.role === 'teacher') {
+        query += ` AND EXISTS (
+          SELECT 1 FROM teacher_assignments ta 
+          WHERE ta.teacher_id = $1 AND ta.grade_id = d.grade_id AND ta.class_id = d.class_id
+        )`;
+      }
+      
+      query += ` ORDER BY d.document_type, d.created_at DESC`;
+      result = await db.query(query, queryParams);
+    }
 
     // Return as flat array for the new Documents component
     const documents = result.rows.map(doc => ({
