@@ -157,7 +157,7 @@ router.get('/:id', [
 
     let query = `
       SELECT t.id, t.title, t.description, t.instructions, t.due_date, t.max_points,
-             t.task_type, t.created_at, t.updated_at, t.grade_id, t.class_id,
+             t.task_type, t.submission_type, t.created_at, t.updated_at, t.grade_id, t.class_id,
              u.first_name as teacher_first_name, u.last_name as teacher_last_name,
              g.name as grade_name, c.name as class_name
       FROM tasks t

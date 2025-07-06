@@ -236,6 +236,40 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
+// Debug endpoint to run SQL schema updates
+app.post('/api/debug/run-sql', async (req, res) => {
+  try {
+    // Add submission_type column to tasks table if not exists
+    await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS submission_type VARCHAR(20) DEFAULT 'online'`);
+    
+    // Add submission_type column to submissions table
+    await db.query(`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS submission_type VARCHAR(20) DEFAULT 'online'`);
+    
+    // Add file_name column to submissions table
+    await db.query(`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS file_name VARCHAR(255)`);
+    
+    // Update existing tasks to have submission_type 'online' for assignments
+    await db.query(`UPDATE tasks SET submission_type = 'online' WHERE task_type = 'assignment' AND submission_type IS NULL`);
+    
+    // Create indexes for better performance
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_tasks_submission_type ON tasks(submission_type)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_submissions_submission_type ON submissions(submission_type)`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Database schema updated successfully for submissions',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('SQL update error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to update database schema',
+      error: error.message
+    });
+  }
+});
+
 // Global error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);

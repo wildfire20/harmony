@@ -105,10 +105,7 @@ export const announcementsAPI = {
 
 // Submissions API
 export const submissionsAPI = {
-  submitAssignment: (taskId, data) => {
-    const formData = new FormData();
-    if (data.content) formData.append('content', data.content);
-    if (data.file) formData.append('file', data.file);
+  submitAssignment: (taskId, formData) => {
     return api.post(`/submissions/assignment/${taskId}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
