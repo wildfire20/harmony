@@ -15,6 +15,7 @@ import TeacherDashboard from './components/dashboard/TeacherDashboard';
 import AdminDashboard from './components/dashboard/AdminDashboard';
 import Tasks from './components/tasks/Tasks';
 import TaskDetails from './components/tasks/TaskDetails';
+import CreateTask from './components/tasks/CreateTask';
 import QuizPlayer from './components/quizzes/QuizPlayer';
 import QuizResults from './components/quiz/QuizResults';
 import Announcements from './components/announcements/Announcements';
@@ -95,6 +96,11 @@ const AppContent = () => {
         <Route path="dashboard" element={<Dashboard />} />
         
         <Route path="tasks" element={<Tasks />} />
+        <Route path="tasks/create" element={
+          <ProtectedRoute roles={['teacher', 'admin', 'super_admin']}>
+            <CreateTask />
+          </ProtectedRoute>
+        } />
         <Route path="tasks/:id" element={<TaskDetails />} />
         <Route path="quiz/:taskId" element={<QuizPlayer />} />
         <Route path="quiz-results" element={<QuizResults />} />
