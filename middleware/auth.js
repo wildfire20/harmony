@@ -11,15 +11,32 @@ const authenticate = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Get user details from database
-    const result = await db.query(`
-      SELECT u.id, u.student_number, u.email, u.first_name, u.last_name, 
-             u.role, u.grade_id, u.class_id, g.name as grade_name, c.name as class_name
-      FROM users u
-      LEFT JOIN grades g ON u.grade_id = g.id
-      LEFT JOIN classes c ON u.class_id = c.id
-      WHERE u.id = $1 AND u.is_active = true
-    `, [decoded.id]);
+    // Get user details from database with retry logic
+    let result;
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    while (attempts < maxAttempts) {
+      try {
+        result = await db.query(`
+          SELECT u.id, u.student_number, u.email, u.first_name, u.last_name, 
+                 u.role, u.grade_id, u.class_id, g.name as grade_name, c.name as class_name
+          FROM users u
+          LEFT JOIN grades g ON u.grade_id = g.id
+          LEFT JOIN classes c ON u.class_id = c.id
+          WHERE u.id = $1 AND u.is_active = true
+        `, [decoded.id]);
+        break;
+      } catch (dbError) {
+        attempts++;
+        console.error(`Database query attempt ${attempts} failed:`, dbError);
+        if (attempts >= maxAttempts) {
+          throw dbError;
+        }
+        // Wait a bit before retrying
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
 
     if (result.rows.length === 0) {
       return res.status(401).json({ message: 'Invalid token. User not found.' });
@@ -160,7 +177,25 @@ const authorizeResourceAccess = (resourceType) => {
           return res.status(400).json({ message: 'Invalid resource type.' });
       }
 
-      const result = await db.query(query, params);
+      // Execute database query with retry logic
+      let result;
+      let attempts = 0;
+      const maxAttempts = 3;
+      
+      while (attempts < maxAttempts) {
+        try {
+          result = await db.query(query, params);
+          break;
+        } catch (dbError) {
+          attempts++;
+          console.error(`Database query attempt ${attempts} failed:`, dbError);
+          if (attempts >= maxAttempts) {
+            throw dbError;
+          }
+          // Wait a bit before retrying
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
       
       console.log(`Database query result: ${result.rows.length} rows found`);
       if (result.rows.length > 0) {

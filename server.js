@@ -88,10 +88,17 @@ if (process.env.NODE_ENV === 'production') {
 // Security middleware
 app.use(helmet());
 
-// Rate limiting
+// Rate limiting - more generous limits for better user experience
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  max: 1000, // increased from 100 to 1000 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  // More detailed error message
+  message: {
+    error: 'Too many requests from this IP, please try again later.',
+    retryAfter: '15 minutes'
+  }
 });
 app.use('/api/', limiter);
 
