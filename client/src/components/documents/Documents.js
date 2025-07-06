@@ -129,13 +129,28 @@ const Documents = () => {
           const errorText = await response.text();
           console.error('Documents fetch error response:', errorText);
           
-          // Handle specific error cases
+          let errorData;
+          try {
+            errorData = JSON.parse(errorText);
+          } catch (parseError) {
+            errorData = { message: errorText };
+          }
+          
+          // Handle specific error cases with better user messages
           if (response.status === 404) {
             // Return empty documents array for 404 instead of throwing error
             return { documents: [], total: 0 };
           }
           
-          throw new Error(`Failed to fetch documents: ${response.status} ${errorText}`);
+          if (response.status === 403) {
+            throw new Error(errorData.message || 'Access denied - please check your grade/class assignment');
+          }
+          
+          if (response.status === 500) {
+            throw new Error(`Server error: ${errorData.message || 'Unable to fetch documents'}. Please try again or contact support.`);
+          }
+          
+          throw new Error(`Failed to fetch documents (${response.status}): ${errorData.message || errorText}`);
         }
         
         const data = await response.json();

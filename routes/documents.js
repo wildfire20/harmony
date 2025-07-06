@@ -52,79 +52,126 @@ const upload = multer({
   }
 });
 
-// Get documents for a grade/class
+// Get documents for a grade/class - COMPLETELY REWRITTEN VERSION
 router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
   try {
     const { gradeId, classId } = req.params;
     const user = req.user;
 
-    // Convert URL parameters to integers for comparison
+    console.log('=== DOCUMENTS ENDPOINT - FULL DEBUG ===');
+    console.log('Raw params - gradeId:', gradeId, 'classId:', classId);
+    console.log('User object:', JSON.stringify(user, null, 2));
+
+    // Validate and parse parameters
     const requestedGradeId = parseInt(gradeId, 10);
     const requestedClassId = parseInt(classId, 10);
 
-    console.log('=== DOCUMENTS GRADE/CLASS ENDPOINT DEBUG ===');
-    console.log('Requested gradeId:', gradeId, typeof gradeId, '-> parsed:', requestedGradeId);
-    console.log('Requested classId:', classId, typeof classId, '-> parsed:', requestedClassId);
-    console.log('User:', user);
-    console.log('User grade_id:', user.grade_id, typeof user.grade_id);
-    console.log('User class_id:', user.class_id, typeof user.class_id);
-    console.log('User role:', user.role);
-
-    // Validate URL parameters
     if (isNaN(requestedGradeId) || isNaN(requestedClassId)) {
-      console.error('❌ Invalid grade or class ID parameters');
+      console.error('❌ Invalid parameters:', { gradeId, classId });
       return res.status(400).json({ 
-        message: 'Invalid grade or class ID',
-        debug: { gradeId, classId }
+        success: false,
+        message: 'Invalid grade or class ID parameters',
+        debug: { gradeId, classId, parsed_grade: requestedGradeId, parsed_class: requestedClassId }
       });
     }
 
-    // Check access permissions with detailed logging
+    // Validate user object
+    if (!user || !user.id) {
+      console.error('❌ Invalid user object');
+      return res.status(401).json({ 
+        success: false,
+        message: 'Invalid user authentication' 
+      });
+    }
+
+    // Check access permissions
     if (user.role === 'student') {
-      console.log('=== STUDENT ACCESS CHECK ===');
-      console.log('Comparing grade_id:', user.grade_id, '==', requestedGradeId);
-      console.log('Comparing class_id:', user.class_id, '==', requestedClassId);
-      console.log('Grade match:', user.grade_id === requestedGradeId);
-      console.log('Class match:', user.class_id === requestedClassId);
-      
-      if (user.grade_id === requestedGradeId && user.class_id === requestedClassId) {
-        console.log('✅ Student access GRANTED - exact match');
-      } else {
-        console.error('❌ Access denied for student - grade/class mismatch');
-        console.error('User grade_id:', user.grade_id, 'Requested gradeId:', requestedGradeId);
-        console.error('User class_id:', user.class_id, 'Requested classId:', requestedClassId);
+      console.log('=== STUDENT ACCESS VALIDATION ===');
+      console.log('User grade_id:', user.grade_id, typeof user.grade_id);
+      console.log('User class_id:', user.class_id, typeof user.class_id);
+      console.log('Requested grade:', requestedGradeId, typeof requestedGradeId);
+      console.log('Requested class:', requestedClassId, typeof requestedClassId);
+
+      // Convert user grade/class to integers for comparison
+      const userGradeId = parseInt(user.grade_id, 10);
+      const userClassId = parseInt(user.class_id, 10);
+
+      console.log('Parsed user grade_id:', userGradeId);
+      console.log('Parsed user class_id:', userClassId);
+
+      if (isNaN(userGradeId) || isNaN(userClassId)) {
+        console.error('❌ Student missing valid grade/class assignment');
         return res.status(403).json({ 
-          message: 'Access denied - grade/class mismatch',
+          success: false,
+          message: 'Your account is missing grade or class assignment. Please contact the administrator.',
           debug: {
-            user_grade: user.grade_id,
-            user_class: user.class_id,
+            user_grade_id: user.grade_id,
+            user_class_id: user.class_id,
+            parsed_user_grade: userGradeId,
+            parsed_user_class: userClassId
+          }
+        });
+      }
+
+      if (userGradeId !== requestedGradeId || userClassId !== requestedClassId) {
+        console.error('❌ Student access denied - grade/class mismatch');
+        return res.status(403).json({ 
+          success: false,
+          message: 'Access denied - you can only access documents for your assigned grade and class',
+          debug: {
+            user_grade: userGradeId,
+            user_class: userClassId,
             requested_grade: requestedGradeId,
             requested_class: requestedClassId
           }
         });
       }
+
+      console.log('✅ Student access granted');
     }
 
+    // Teacher access validation
     if (user.role === 'teacher') {
-      const assignmentCheck = await db.query(`
-        SELECT 1 FROM teacher_assignments 
-        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-      `, [user.id, requestedGradeId, requestedClassId]);
+      console.log('=== TEACHER ACCESS VALIDATION ===');
+      try {
+        const assignmentCheck = await db.query(`
+          SELECT 1 FROM teacher_assignments 
+          WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+        `, [user.id, requestedGradeId, requestedClassId]);
 
-      if (assignmentCheck.rows.length === 0) {
-        console.error('Access denied for teacher - no assignment');
-        return res.status(403).json({ message: 'Access denied' });
+        if (assignmentCheck.rows.length === 0) {
+          console.error('❌ Teacher access denied - no assignment');
+          return res.status(403).json({ 
+            success: false,
+            message: 'Access denied - you are not assigned to this grade/class' 
+          });
+        }
+        console.log('✅ Teacher access granted');
+      } catch (teacherError) {
+        console.error('❌ Teacher assignment check failed:', teacherError);
+        return res.status(500).json({ 
+          success: false,
+          message: 'Error checking teacher assignments',
+          error: teacherError.message 
+        });
       }
     }
 
+    // Admin/super_admin get automatic access
+    if (user.role === 'admin' || user.role === 'super_admin') {
+      console.log('✅ Admin access granted');
+    }
+
+    // Execute database query
     console.log('=== EXECUTING DATABASE QUERY ===');
     console.log('Query parameters:', [requestedGradeId, requestedClassId]);
-    
-    // Fixed: Ensure all column names match the database schema
-    const result = await db.query(`
-      SELECT d.id, d.title, d.description, d.document_type, d.filename, d.original_filename,
-             d.file_size, d.created_at as uploaded_at, d.is_active,
-             u.first_name as uploaded_by_first_name, u.last_name as uploaded_by_last_name,
+
+    const query = `
+      SELECT d.id, d.title, d.description, d.document_type, 
+             d.filename, d.original_filename, d.file_size, 
+             d.created_at as uploaded_at, d.is_active,
+             u.first_name as uploaded_by_first_name, 
+             u.last_name as uploaded_by_last_name,
              g.name as grade_name, c.name as class_name
       FROM documents d
       JOIN users u ON d.uploaded_by = u.id
@@ -132,42 +179,57 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
       LEFT JOIN classes c ON d.class_id = c.id
       WHERE d.grade_id = $1 AND d.class_id = $2 AND d.is_active = true
       ORDER BY d.document_type, d.created_at DESC
-    `, [requestedGradeId, requestedClassId]);
+    `;
+
+    console.log('Executing query:', query);
+
+    const result = await db.query(query, [requestedGradeId, requestedClassId]);
 
     console.log('=== QUERY RESULTS ===');
-    console.log('Query result rows:', result.rows.length);
+    console.log('Rows returned:', result.rows.length);
+    
     if (result.rows.length > 0) {
-      console.log('Sample document:', result.rows[0]);
+      console.log('Sample document:', JSON.stringify(result.rows[0], null, 2));
     }
-    console.log('All documents found:', result.rows);
 
-    console.log('Query result:', result.rows.length, 'documents found');
-    console.log('Documents:', result.rows);
-
-    // Return documents as array (frontend expects this format)
+    // Format documents
     const documents = result.rows.map(doc => ({
       ...doc,
-      file_size_mb: (doc.file_size / (1024 * 1024)).toFixed(2)
+      file_size_mb: doc.file_size ? (doc.file_size / (1024 * 1024)).toFixed(2) : '0.00'
     }));
 
-    console.log('Final documents array:', documents);
+    console.log('✅ Query successful, returning', documents.length, 'documents');
     console.log('=== END DEBUG ===');
 
     res.json({ 
+      success: true,
       documents: documents,
-      total: result.rows.length 
+      total: documents.length,
+      grade_id: requestedGradeId,
+      class_id: requestedClassId
     });
 
   } catch (error) {
-    console.error('❌ DOCUMENTS ENDPOINT ERROR:', error);
+    console.error('❌ CRITICAL ERROR IN DOCUMENTS ENDPOINT:', error);
+    console.error('Error name:', error.name);
     console.error('Error message:', error.message);
     console.error('Error code:', error.code);
     console.error('Error detail:', error.detail);
+    console.error('Error constraint:', error.constraint);
     console.error('Error stack:', error.stack);
+
+    // Return detailed error for debugging
     res.status(500).json({ 
+      success: false,
       message: 'Server error fetching documents',
-      error_details: error.message,
-      error_code: error.code 
+      error_details: {
+        name: error.name,
+        message: error.message,
+        code: error.code,
+        detail: error.detail,
+        constraint: error.constraint
+      },
+      timestamp: new Date().toISOString()
     });
   }
 });
