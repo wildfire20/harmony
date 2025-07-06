@@ -367,17 +367,33 @@ const SubmissionsManagement = ({ taskId }) => {
   const [activeTab, setActiveTab] = useState('overview');
   
   // Fetch task submissions
-  const { data: submissionsData, isLoading: submissionsLoading } = useQuery(
+  const { data: submissionsData, isLoading: submissionsLoading, error: submissionsError } = useQuery(
     ['taskSubmissions', taskId],
     () => submissionsAPI.getTaskSubmissions(taskId),
-    { enabled: !!taskId }
+    { 
+      enabled: !!taskId,
+      onSuccess: (data) => {
+        console.log('Submissions data received:', data);
+      },
+      onError: (error) => {
+        console.error('Submissions fetch error:', error);
+      }
+    }
   );
 
   // Fetch all students for this task
-  const { data: studentsData, isLoading: studentsLoading } = useQuery(
+  const { data: studentsData, isLoading: studentsLoading, error: studentsError } = useQuery(
     ['taskStudents', taskId],
     () => submissionsAPI.getTaskStudents(taskId),
-    { enabled: !!taskId }
+    { 
+      enabled: !!taskId,
+      onSuccess: (data) => {
+        console.log('Students data received:', data);
+      },
+      onError: (error) => {
+        console.error('Students fetch error:', error);
+      }
+    }
   );
 
   const submissions = submissionsData?.data || [];
@@ -402,6 +418,32 @@ const SubmissionsManagement = ({ taskId }) => {
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
         <div className="p-6">
           <LoadingSpinner />
+          <p className="text-gray-600 mt-2">Loading submissions data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (submissionsError || studentsError) {
+    return (
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
+        <div className="p-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+            <Users className="h-5 w-5 mr-2" />
+            Submissions Management
+          </h2>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className="flex">
+              <AlertTriangle className="h-5 w-5 text-red-400 mr-2" />
+              <div>
+                <h3 className="text-sm font-medium text-red-800">Error Loading Data</h3>
+                <div className="mt-2 text-sm text-red-700">
+                  {submissionsError && <p>Submissions error: {submissionsError.message}</p>}
+                  {studentsError && <p>Students error: {studentsError.message}</p>}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
