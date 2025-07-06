@@ -354,8 +354,8 @@ const TaskDetails = () => {
         )}
 
         {/* Teacher/Admin Submissions Management */}
-        {(user?.role === 'teacher' || user?.role === 'admin' || user?.role === 'super_admin') && (
-          <SubmissionsManagement taskId={id} />
+        {(user?.role === 'teacher' || user?.role === 'admin' || user?.role === 'super_admin') && task && (
+          <SubmissionsManagement taskId={task.id} />
         )}
       </div>
     </div>
@@ -388,16 +388,32 @@ const SubmissionsManagement = ({ taskId }) => {
     { 
       enabled: !!taskId,
       onSuccess: (data) => {
-        console.log('Students data received:', data);
+        console.log('✅ Students data received:', data);
+        console.log('✅ Students array:', data?.data?.students);
       },
       onError: (error) => {
-        console.error('Students fetch error:', error);
+        console.error('❌ Students fetch error:', error);
+        console.error('❌ Error response:', error?.response?.data);
       }
     }
   );
 
-  const submissions = submissionsData?.data || [];
+  const submissions = submissionsData?.submissions || submissionsData?.data || [];
   const students = studentsData?.data?.students || [];
+  
+  // Add detailed logging
+  console.log('=== SUBMISSIONS MANAGEMENT DEBUG ===');
+  console.log('Task ID:', taskId);
+  console.log('Submissions Data (raw):', submissionsData);
+  console.log('Students Data (raw):', studentsData);
+  console.log('Processed submissions:', submissions);
+  console.log('Processed students:', students);
+  console.log('Students from studentsData?.data?.students:', studentsData?.data?.students);
+  console.log('Submissions loading:', submissionsLoading);
+  console.log('Students loading:', studentsLoading);
+  console.log('Submissions error:', submissionsError);
+  console.log('Students error:', studentsError);
+  console.log('=== END DEBUG ===');
   
   const submittedStudents = students.filter(s => s.submission_id);
   const notSubmittedStudents = students.filter(s => !s.submission_id);

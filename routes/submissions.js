@@ -590,4 +590,87 @@ router.get('/task/:taskId/students', [
   }
 });
 
+// Debug endpoint - check student data for task
+router.get('/debug/task/:taskId/data', [
+  authenticate,
+  authorize('teacher', 'admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const user = req.user;
+
+    console.log('=== DEBUG TASK STUDENT DATA ===');
+    console.log('User:', JSON.stringify(user, null, 2));
+    console.log('Task ID:', taskId);
+
+    // Get task details
+    const taskResult = await db.query(`
+      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by,
+             g.name as grade_name, c.name as class_name
+      FROM tasks t
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
+      WHERE t.id = $1 AND t.is_active = true
+    `, [taskId]);
+
+    // Get all students in the same grade/class
+    const allStudentsResult = await db.query(`
+      SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id, u.is_active,
+             g.name as grade_name, c.name as class_name
+      FROM users u
+      LEFT JOIN grades g ON u.grade_id = g.id
+      LEFT JOIN classes c ON u.class_id = c.id
+      WHERE u.role = 'student'
+      ORDER BY u.grade_id, u.class_id, u.last_name
+    `, []);
+
+    // Get teacher assignments
+    const teacherAssignments = await db.query(`
+      SELECT ta.teacher_id, ta.grade_id, ta.class_id,
+             g.name as grade_name, c.name as class_name
+      FROM teacher_assignments ta
+      LEFT JOIN grades g ON ta.grade_id = g.id
+      LEFT JOIN classes c ON ta.class_id = c.id
+      WHERE ta.teacher_id = $1
+    `, [user.id]);
+
+    // Get submissions for this task
+    const submissions = await db.query(`
+      SELECT s.*, u.first_name, u.last_name
+      FROM submissions s
+      LEFT JOIN users u ON s.student_id = u.id
+      WHERE s.task_id = $1
+    `, [taskId]);
+
+    res.json({
+      success: true,
+      debug: {
+        user: {
+          id: user.id,
+          role: user.role,
+          name: `${user.first_name} ${user.last_name}`
+        },
+        task: taskResult.rows[0] || null,
+        allStudents: allStudentsResult.rows,
+        teacherAssignments: teacherAssignments.rows,
+        submissions: submissions.rows,
+        query_details: {
+          task_found: taskResult.rows.length > 0,
+          total_students: allStudentsResult.rows.length,
+          teacher_assignments: teacherAssignments.rows.length,
+          submissions_count: submissions.rows.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Debug endpoint error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Debug endpoint error',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
