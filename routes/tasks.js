@@ -691,4 +691,33 @@ router.post('/init-tables', [
   }
 });
 
+// Public debug endpoint (no auth required) - for testing only
+router.get('/public-debug', async (req, res) => {
+  try {
+    console.log('=== PUBLIC DEBUG ENDPOINT ===');
+    
+    // Check if tasks table exists
+    const tableCheck = await db.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_name = 'tasks'
+      );
+    `);
+    
+    res.json({
+      message: 'Public debug endpoint working',
+      tasks_table_exists: tableCheck.rows[0].exists,
+      timestamp: new Date().toISOString(),
+      server_status: 'Running'
+    });
+    
+  } catch (error) {
+    console.error('Public debug error:', error);
+    res.status(500).json({ 
+      message: 'Public debug endpoint error',
+      error: error.message 
+    });
+  }
+});
+
 module.exports = router;

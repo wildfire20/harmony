@@ -185,6 +185,50 @@ const AdminPanel = () => {
                 >
                   Create Test Document
                 </button>
+                
+                <button 
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/api/tasks/init-tables', {
+                        method: 'POST',
+                        headers: {
+                          'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                      });
+                      const data = await response.json();
+                      console.log('Init tasks tables response:', data);
+                      alert(data.message || 'Check console for details');
+                    } catch (error) {
+                      console.error('Init tasks tables error:', error);
+                      alert('Failed to initialize tasks tables. Check console for errors.');
+                    }
+                  }}
+                  className="w-full bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700 transition-colors"
+                >
+                  Initialize Tasks Tables
+                </button>
+                
+                <button 
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/api/tasks/create-sample-tasks', {
+                        method: 'POST',
+                        headers: {
+                          'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                      });
+                      const data = await response.json();
+                      console.log('Create sample tasks response:', data);
+                      alert(data.message || 'Check console for details');
+                    } catch (error) {
+                      console.error('Create sample tasks error:', error);
+                      alert('Failed to create sample tasks. Check console for errors.');
+                    }
+                  }}
+                  className="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition-colors"
+                >
+                  Create Sample Tasks
+                </button>
               </div>
             </div>
           </div>
