@@ -824,4 +824,55 @@ router.get('/public-debug', async (req, res) => {
   }
 });
 
+// Debug endpoint to check student access to specific task
+router.get('/debug-student-access/:taskId', [
+  authenticate
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const user = req.user;
+
+    // Get task data
+    const taskResult = await db.query(`
+      SELECT t.*, g.name as grade_name, c.name as class_name, u.first_name as teacher_first_name, u.last_name as teacher_last_name
+      FROM tasks t
+      JOIN grades g ON t.grade_id = g.id
+      JOIN classes c ON t.class_id = c.id
+      JOIN users u ON t.created_by = u.id
+      WHERE t.id = $1
+    `, [taskId]);
+
+    // Get user data
+    const userResult = await db.query(`
+      SELECT u.*, g.name as grade_name, c.name as class_name
+      FROM users u
+      LEFT JOIN grades g ON u.grade_id = g.id
+      LEFT JOIN classes c ON u.class_id = c.id
+      WHERE u.id = $1
+    `, [user.id]);
+
+    res.json({
+      task_id: taskId,
+      task_exists: taskResult.rows.length > 0,
+      task_data: taskResult.rows[0] || null,
+      user_data: userResult.rows[0] || null,
+      access_check: {
+        user_grade: parseInt(user.grade_id),
+        user_class: parseInt(user.class_id),
+        task_grade: taskResult.rows[0] ? parseInt(taskResult.rows[0].grade_id) : null,
+        task_class: taskResult.rows[0] ? parseInt(taskResult.rows[0].class_id) : null,
+        grade_match: taskResult.rows[0] ? parseInt(user.grade_id) === parseInt(taskResult.rows[0].grade_id) : false,
+        class_match: taskResult.rows[0] ? parseInt(user.class_id) === parseInt(taskResult.rows[0].class_id) : false
+      }
+    });
+
+  } catch (error) {
+    console.error('Debug student access error:', error);
+    res.status(500).json({ 
+      message: 'Error debugging student access',
+      error: error.message 
+    });
+  }
+});
+
 module.exports = router;

@@ -265,6 +265,19 @@ const authorizeResourceAccess = (resourceType) => {
         console.log(`Grade match: ${resourceGradeId === userGradeId}`);
         console.log(`Class match: ${resourceClassId === userClassId}`);
         
+        // IMPORTANT: Check if user has grade_id and class_id
+        if (!userGradeId || !userClassId) {
+          console.log('❌ Student access denied - missing grade/class assignment');
+          return res.status(403).json({ 
+            message: 'Access denied. Your account is missing grade or class assignment. Please contact the administrator.',
+            debug: {
+              user_grade: userGradeId,
+              user_class: userClassId,
+              user_info: user
+            }
+          });
+        }
+        
         if (resourceGradeId !== userGradeId || resourceClassId !== userClassId) {
           console.log('❌ Student access denied - grade/class mismatch');
           return res.status(403).json({ 
