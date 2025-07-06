@@ -7,13 +7,23 @@ const DebugPage = () => {
   const { user } = useAuth();
   const [selectedTaskId, setSelectedTaskId] = useState('');
 
-  // Get all tasks
+  // Get user's tasks
   const { data: tasksData } = useQuery(
-    ['allTasks'],
-    () => tasksAPI.getAllTasks(),
+    ['userTasks'],
+    () => {
+      if (user?.grade_id && user?.class_id) {
+        return tasksAPI.getTasks(user.grade_id, user.class_id);
+      } else {
+        // For teachers/admins, get all tasks
+        return fetch('/api/tasks/debug/all-tasks', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        }).then(res => res.json());
+      }
+    },
     { 
+      enabled: !!user,
       onSuccess: (data) => {
-        console.log('All tasks:', data);
+        console.log('Tasks data:', data);
       }
     }
   );
@@ -32,7 +42,7 @@ const DebugPage = () => {
     }
   );
 
-  const tasks = tasksData?.data?.tasks || [];
+  const tasks = tasksData?.data?.tasks || tasksData?.tasks || [];
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">

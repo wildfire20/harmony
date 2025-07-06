@@ -894,4 +894,61 @@ router.get('/debug-student-access/:taskId', [
   }
 });
 
+// Debug endpoint - get all tasks
+router.get('/debug/all-tasks', [
+  authenticate,
+  authorize('teacher', 'admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const user = req.user;
+    
+    let tasksQuery = `
+      SELECT t.id, t.title, t.task_type, t.grade_id, t.class_id, t.created_by,
+             g.name as grade_name, c.name as class_name,
+             u.first_name as creator_first_name, u.last_name as creator_last_name
+      FROM tasks t
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
+      LEFT JOIN users u ON t.created_by = u.id
+      WHERE t.is_active = true
+    `;
+    
+    let queryParams = [];
+    
+    // If teacher, only show their tasks or tasks they're assigned to
+    if (user.role === 'teacher') {
+      tasksQuery += ` 
+        AND (t.created_by = $1 OR EXISTS (
+          SELECT 1 FROM teacher_assignments ta 
+          WHERE ta.teacher_id = $1 AND ta.grade_id = t.grade_id AND ta.class_id = t.class_id
+        ))
+      `;
+      queryParams.push(user.id);
+    }
+    
+    tasksQuery += ` ORDER BY t.created_at DESC`;
+    
+    const tasks = await db.query(tasksQuery, queryParams);
+    
+    res.json({
+      success: true,
+      data: {
+        tasks: tasks.rows,
+        user: {
+          id: user.id,
+          role: user.role,
+          name: `${user.first_name} ${user.last_name}`
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Debug all tasks error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Debug error',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
