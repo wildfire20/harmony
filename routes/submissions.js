@@ -2,9 +2,11 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize, authorizeResourceAccess, authorizeTeacherAssignment } = require('../middleware/auth');
+const bcrypt = require('bcrypt');
 
 const router = express.Router();
 
@@ -754,6 +756,114 @@ router.get('/debug/simple', [
     res.status(500).json({ 
       success: false,
       message: 'Debug error',
+      error: error.message
+    });
+  }
+});
+
+// Debug endpoint - create test students for a task
+router.post('/debug/task/:taskId/create-students', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    
+    // Get task details
+    const taskResult = await db.query(`
+      SELECT t.id, t.title, t.grade_id, t.class_id,
+             g.name as grade_name, c.name as class_name
+      FROM tasks t
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
+      WHERE t.id = $1 AND t.is_active = true
+    `, [taskId]);
+
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Task not found' 
+      });
+    }
+
+    const task = taskResult.rows[0];
+    
+    // Check if students already exist
+    const existingStudents = await db.query(`
+      SELECT COUNT(*) as count
+      FROM users 
+      WHERE role = 'student' 
+        AND CAST(grade_id AS INTEGER) = CAST($1 AS INTEGER)
+        AND CAST(class_id AS INTEGER) = CAST($2 AS INTEGER)
+        AND is_active = true
+    `, [task.grade_id, task.class_id]);
+
+    if (existingStudents.rows[0].count > 0) {
+      return res.json({
+        success: true,
+        message: 'Students already exist for this task',
+        existing_count: existingStudents.rows[0].count,
+        task: task
+      });
+    }
+
+    // Create 3 test students for this grade/class
+    const testStudents = [
+      {
+        student_number: `TEST001_${task.grade_id}_${task.class_id}`,
+        first_name: 'John',
+        last_name: 'Doe',
+        email: `john.doe.${task.grade_id}.${task.class_id}@harmonylearning.edu`
+      },
+      {
+        student_number: `TEST002_${task.grade_id}_${task.class_id}`,
+        first_name: 'Jane',
+        last_name: 'Smith',
+        email: `jane.smith.${task.grade_id}.${task.class_id}@harmonylearning.edu`
+      },
+      {
+        student_number: `TEST003_${task.grade_id}_${task.class_id}`,
+        first_name: 'Bob',
+        last_name: 'Johnson',
+        email: `bob.johnson.${task.grade_id}.${task.class_id}@harmonylearning.edu`
+      }
+    ];
+
+    const createdStudents = [];
+    
+    for (const student of testStudents) {
+      const password = await bcrypt.hash(student.student_number, 12);
+      
+      const result = await db.query(`
+        INSERT INTO users (student_number, first_name, last_name, grade_id, class_id, password, role, email, is_active) 
+        VALUES ($1, $2, $3, $4, $5, $6, 'student', $7, true)
+        RETURNING id, student_number, first_name, last_name, grade_id, class_id
+      `, [
+        student.student_number,
+        student.first_name,
+        student.last_name,
+        task.grade_id,
+        task.class_id,
+        password,
+        student.email
+      ]);
+
+      createdStudents.push(result.rows[0]);
+    }
+
+    res.json({
+      success: true,
+      message: 'Test students created successfully',
+      task: task,
+      created_students: createdStudents,
+      instructions: 'Test students can login with their student number as password'
+    });
+
+  } catch (error) {
+    console.error('Create test students error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Error creating test students',
       error: error.message
     });
   }
