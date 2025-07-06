@@ -6,7 +6,6 @@ const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize, authorizeResourceAccess, authorizeTeacherAssignment } = require('../middleware/auth');
-const bcrypt = require('bcrypt');
 
 const router = express.Router();
 
