@@ -5,7 +5,6 @@ import { Calendar, Clock, FileText, Upload, CheckCircle, AlertTriangle, User, Us
 import { tasksAPI, submissionsAPI } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
-import SubmissionsManagement from './SubmissionsManagement';
 
 const TaskDetails = () => {
   const { id } = useParams();
