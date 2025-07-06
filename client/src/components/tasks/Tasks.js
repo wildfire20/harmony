@@ -225,10 +225,6 @@ const Tasks = () => {
           </div>
         </div>
       )}
-            <strong>Viewing tasks for:</strong> {user.grade_name || `Grade ${user.grade_id}`} - {user.class_name || `Class ${user.class_id}`}
-          </div>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 gap-6">
         {tasks.length > 0 ? (
