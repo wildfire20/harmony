@@ -1610,4 +1610,101 @@ router.get('/debug/task/:taskId/check-teacher-access', [
   }
 });
 
+// Debug endpoint - auto-assign teacher to task grade/class
+router.post('/debug/auto-assign-teacher/:taskId', [
+  authenticate,
+  authorize('admin', 'super_admin', 'teacher')
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const user = req.user;
+    const { teacherId } = req.body; // Optional: assign different teacher
+
+    const targetTeacherId = teacherId || user.id;
+
+    console.log('=== AUTO-ASSIGN TEACHER TO TASK ===');
+    console.log('Task ID:', taskId);
+    console.log('Target Teacher ID:', targetTeacherId);
+    console.log('Requesting User:', `${user.first_name} ${user.last_name} (${user.role})`);
+
+    // Get task details
+    const taskResult = await db.query(`
+      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by,
+             g.name as grade_name, c.name as class_name
+      FROM tasks t
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
+      WHERE t.id = $1 AND t.is_active = true
+    `, [taskId]);
+
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+
+    const task = taskResult.rows[0];
+    console.log('Task found:', task);
+
+    // Get teacher details
+    const teacherResult = await db.query(`
+      SELECT id, first_name, last_name, email, role
+      FROM users
+      WHERE id = $1 AND role = 'teacher' AND is_active = true
+    `, [targetTeacherId]);
+
+    if (teacherResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Teacher not found'
+      });
+    }
+
+    const teacher = teacherResult.rows[0];
+    console.log('Teacher found:', teacher);
+
+    // Check if teacher is already assigned to this grade/class
+    const existingAssignment = await db.query(`
+      SELECT * FROM teacher_assignments
+      WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+    `, [targetTeacherId, task.grade_id, task.class_id]);
+
+    if (existingAssignment.rows.length > 0) {
+      return res.json({
+        success: true,
+        message: 'Teacher is already assigned to this grade/class',
+        assignment: existingAssignment.rows[0],
+        task: task,
+        teacher: teacher
+      });
+    }
+
+    // Create the assignment
+    const assignmentResult = await db.query(`
+      INSERT INTO teacher_assignments (teacher_id, grade_id, class_id, created_at)
+      VALUES ($1, $2, $3, NOW())
+      RETURNING *
+    `, [targetTeacherId, task.grade_id, task.class_id]);
+
+    console.log('✅ Assignment created:', assignmentResult.rows[0]);
+
+    res.json({
+      success: true,
+      message: `Teacher ${teacher.first_name} ${teacher.last_name} successfully assigned to ${task.grade_name} - ${task.class_name}`,
+      assignment: assignmentResult.rows[0],
+      task: task,
+      teacher: teacher
+    });
+
+  } catch (error) {
+    console.error('Auto-assign teacher error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to auto-assign teacher',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
