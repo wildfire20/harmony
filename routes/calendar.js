@@ -94,8 +94,31 @@ router.get('/', authenticate, async (req, res) => {
     try {
       const eventResult = await db.query(eventQuery, eventParams);
       events = events.concat(eventResult.rows);
+      console.log('School events loaded:', eventResult.rows.length);
     } catch (error) {
-      console.log('School events table may not exist yet:', error.message);
+      console.log('School events table may not exist yet, creating it...', error.message);
+      // Try to create the table
+      try {
+        await db.query(`
+          CREATE TABLE IF NOT EXISTS school_events (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            start_date DATE NOT NULL,
+            end_date DATE,
+            event_type VARCHAR(50) NOT NULL CHECK (event_type IN ('holiday', 'exam', 'meeting', 'deadline', 'other')),
+            target_audience VARCHAR(50) NOT NULL CHECK (target_audience IN ('all', 'students', 'teachers', 'staff')),
+            grade_id INTEGER REFERENCES grades(id),
+            created_by INTEGER REFERENCES users(id),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_active BOOLEAN DEFAULT true
+          )
+        `);
+        console.log('School events table created successfully');
+      } catch (createError) {
+        console.error('Failed to create school events table:', createError);
+      }
     }
 
     // Sort events by date

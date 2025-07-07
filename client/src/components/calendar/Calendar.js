@@ -32,11 +32,14 @@ const CalendarComponent = () => {
     fetchCalendarEvents();
   }, [currentDate]);
 
-  const fetchCalendarEvents = async () => {
+  const fetchCalendarEvents = async (dateToFetch = currentDate) => {
     try {
       setLoading(true);
-      const month = currentDate.getMonth() + 1;
-      const year = currentDate.getFullYear();
+      setError(null); // Clear any previous errors
+      const month = dateToFetch.getMonth() + 1;
+      const year = dateToFetch.getFullYear();
+      
+      console.log('Fetching calendar events for:', month, year);
       
       const response = await api.get(`/calendar?month=${month}&year=${year}`);
       
@@ -51,11 +54,13 @@ const CalendarComponent = () => {
           type: event.event_type
         }));
         
+        console.log('Loaded events:', transformedEvents.length);
         setEvents(transformedEvents);
       }
     } catch (error) {
       console.error('Error fetching calendar events:', error);
-      setError('Failed to load calendar events');
+      const errorMessage = error.response?.data?.message || 'Failed to load calendar events';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -64,6 +69,7 @@ const CalendarComponent = () => {
   const handleCreateEvent = async (e) => {
     e.preventDefault();
     try {
+      setError(null); // Clear any previous errors
       const response = await api.post('/calendar/events', eventForm);
       
       if (response.data.success) {
@@ -77,11 +83,14 @@ const CalendarComponent = () => {
           target_audience: 'all',
           grade_id: ''
         });
-        fetchCalendarEvents();
+        await fetchCalendarEvents(); // Wait for refresh
+        // Show success message
+        console.log('Event created successfully');
       }
     } catch (error) {
       console.error('Error creating event:', error);
-      setError('Failed to create event');
+      const errorMessage = error.response?.data?.message || 'Failed to create event';
+      setError(errorMessage);
     }
   };
 
@@ -122,6 +131,12 @@ const CalendarComponent = () => {
         padding: '2px 5px'
       }
     };
+  };
+
+  const handleNavigate = (date) => {
+    console.log('Navigating to date:', date);
+    setCurrentDate(date);
+    fetchCalendarEvents(date);
   };
 
   const handleSelectEvent = (event) => {
@@ -219,7 +234,7 @@ const CalendarComponent = () => {
         endAccessor="end"
         style={{ height: 600 }}
         onSelectEvent={handleSelectEvent}
-        onNavigate={(date) => setCurrentDate(date)}
+        onNavigate={handleNavigate}
         eventPropGetter={eventStyleGetter}
         views={['month', 'week', 'day']}
         defaultView="month"
