@@ -59,7 +59,7 @@ const Login = () => {
                 onClick={() => setUserType('student')}
                 className={`flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 ${
                   userType === 'student'
-                    ? 'bg-pink-500 text-white'
+                    ? 'bg-pink-500 hover:bg-pink-600 text-white'
                     : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
                 }`}
               >
@@ -71,7 +71,7 @@ const Login = () => {
                 onClick={() => setUserType('staff')}
                 className={`flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 ${
                   userType === 'staff'
-                    ? 'bg-gray-600 text-white'
+                    ? 'bg-gray-600 hover:bg-gray-700 text-white'
                     : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
                 }`}
               >
