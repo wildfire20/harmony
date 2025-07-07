@@ -216,7 +216,7 @@ const TaskDetails = () => {
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                   <div className="flex items-center">
                     <CheckCircle className="h-5 w-5 text-green-600 mr-2" />
-                    <div>
+                    <
                       <span className="font-medium text-green-800">Submitted</span>
                       <p className="text-sm text-green-700 mt-1">
                         Submitted on {formatDate(task.submission.submitted_at)}
@@ -367,7 +367,7 @@ const SubmissionsManagement = ({ taskId }) => {
   const [activeTab, setActiveTab] = useState('overview');
   
   // Fetch task submissions
-  const { data: submissionsData, isLoading: submissionsLoading, error: submissionsError } = useQuery(
+  const { data: submissionsData, isLoading: submissionsLoading, error: submissionsError, refetch: refetchSubmissions } = useQuery(
     ['taskSubmissions', taskId],
     () => submissionsAPI.getTaskSubmissions(taskId),
     { 
@@ -584,6 +584,55 @@ const SubmissionsManagement = ({ taskId }) => {
     }
   };
 
+  // Debug function to create test students for this task
+  const createTestStudents = async () => {
+    try {
+      console.log('Creating test students for task...');
+      
+      // First, let's check the task details to see what grade/class it needs
+      const task = studentsData?.data?.task || submissionsData?.task;
+      if (!task) {
+        alert('Task data not available. Try clicking Test Endpoint first.');
+        return;
+      }
+      
+      console.log('Task details:', task);
+      
+      // For now, let's create a simple test by calling our API
+      const response = await fetch(`${process.env.REACT_APP_API_URL || 'https://harmony-learning-institute-backend-production.up.railway.app/api'}/admin/students`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          student_number: `TEST${Date.now()}`,
+          first_name: 'Test',
+          last_name: 'Student',
+          email: `teststudent${Date.now()}@harmony.edu`,
+          password: 'password123',
+          grade_id: task.grade_id,
+          class_id: task.class_id
+        })
+      });
+      
+      if (response.ok) {
+        console.log('Test student created successfully');
+        alert('Test student created! Now retry to see if students appear.');
+        // Refresh the data
+        await retryAllEndpoints();
+      } else {
+        const error = await response.text();
+        console.error('Failed to create test student:', error);
+        alert('Failed to create test student. Check console for details.');
+      }
+      
+    } catch (error) {
+      console.error('Create test student error:', error);
+      alert('Error creating test student. Check console for details.');
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
       <div className="p-6">
@@ -650,6 +699,12 @@ const SubmissionsManagement = ({ taskId }) => {
               className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
             >
               Retry All
+            </button>
+            <button
+              onClick={createTestStudents}
+              className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200"
+            >
+              Create Test Students
             </button>
           </div>
         </div>
