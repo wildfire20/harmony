@@ -20,6 +20,7 @@ const Login = () => {
   } = useForm();
 
   const onSubmit = async (data) => {
+    console.log('Current userType:', userType); // Debug log
     setLoading(true);
     try {
       const result = await login(data, userType);
@@ -45,7 +46,7 @@ const Login = () => {
             Harmony Learning Institute
           </h2>
           <p className="mt-2 text-sm text-gray-600">
-            Sign in to your account
+            Sign in to your account (Current: {userType})
           </p>
         </div>
 
@@ -56,7 +57,10 @@ const Login = () => {
             <div className="flex rounded-lg overflow-hidden border border-gray-200">
               <button
                 type="button"
-                onClick={() => setUserType('student')}
+                onClick={() => {
+                  console.log('Student button clicked');
+                  setUserType('student');
+                }}
                 className={`flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 ${
                   userType === 'student'
                     ? 'bg-pink-500 hover:bg-pink-600 text-white'
@@ -68,7 +72,10 @@ const Login = () => {
               </button>
               <button
                 type="button"
-                onClick={() => setUserType('staff')}
+                onClick={() => {
+                  console.log('Staff button clicked');
+                  setUserType('staff');
+                }}
                 className={`flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 ${
                   userType === 'staff'
                     ? 'bg-blue-500 hover:bg-blue-600 text-white'
