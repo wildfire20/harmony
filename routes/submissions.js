@@ -621,68 +621,123 @@ router.get('/task/:taskId/students', [
     console.log('All active students:', allStudentsResult.rows);
 
     // Get all students in this grade/class with their submission status
-    // Try with explicit casting to handle potential data type mismatches
-    const studentsResult = await db.query(`
-      SELECT u.id, u.first_name, u.last_name, u.student_number,
-             s.id as submission_id, s.status as submission_status, 
-             s.submitted_at, s.score, s.max_score
-      FROM users u
-      LEFT JOIN submissions s ON u.id = s.student_id AND s.task_id = $1
-      WHERE u.role = 'student' 
-        AND CAST(u.grade_id AS INTEGER) = CAST($2 AS INTEGER)
-        AND CAST(u.class_id AS INTEGER) = CAST($3 AS INTEGER)
-        AND u.is_active = true
-      ORDER BY u.last_name, u.first_name
-    `, [taskId, task.grade_id, task.class_id]);
-
-    console.log('Students query result:', studentsResult.rows.length);
+    // Try multiple approaches to handle data type and assignment issues
+    let studentsResult = { rows: [] };
     
-    // If still no students, let's try a different approach
-    if (studentsResult.rows.length === 0) {
-      console.log('No students found with exact match, trying alternative approaches...');
-      
-      // Try without casting in case the data types are different
-      const studentsResult2 = await db.query(`
+    console.log('Attempting to find students for task:', {
+      task_id: taskId,
+      task_grade_id: task.grade_id,
+      task_class_id: task.class_id,
+      task_grade_type: typeof task.grade_id,
+      task_class_type: typeof task.class_id
+    });
+
+    // Approach 1: Exact match with casting
+    try {
+      studentsResult = await db.query(`
         SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id,
                s.id as submission_id, s.status as submission_status, 
                s.submitted_at, s.score, s.max_score
         FROM users u
         LEFT JOIN submissions s ON u.id = s.student_id AND s.task_id = $1
         WHERE u.role = 'student' 
-          AND u.grade_id = $2
-          AND u.class_id = $3
+          AND CAST(u.grade_id AS INTEGER) = CAST($2 AS INTEGER)
+          AND CAST(u.class_id AS INTEGER) = CAST($3 AS INTEGER)
           AND u.is_active = true
         ORDER BY u.last_name, u.first_name
-      `, [taskId, task.grade_id.toString(), task.class_id.toString()]);
+      `, [taskId, task.grade_id, task.class_id]);
       
-      console.log('Students query result (string match):', studentsResult2.rows.length);
-      
-      if (studentsResult2.rows.length > 0) {
-        // Use the second result if it found students
-        studentsResult.rows = studentsResult2.rows;
-      } else {
-        // If still no students, get students in same grade to help debug
-        const sameGradeStudents = await db.query(`
-          SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id
+      console.log('Approach 1 (exact match with casting):', studentsResult.rows.length, 'students found');
+    } catch (error) {
+      console.log('Approach 1 failed:', error.message);
+    }
+    
+    // Approach 2: String comparison if first approach failed
+    if (studentsResult.rows.length === 0) {
+      try {
+        studentsResult = await db.query(`
+          SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id,
+                 s.id as submission_id, s.status as submission_status, 
+                 s.submitted_at, s.score, s.max_score
           FROM users u
+          LEFT JOIN submissions s ON u.id = s.student_id AND s.task_id = $1
           WHERE u.role = 'student' 
-            AND u.grade_id = $1
+            AND u.grade_id::text = $2::text
+            AND u.class_id::text = $3::text
             AND u.is_active = true
-          ORDER BY u.class_id, u.last_name, u.first_name
-        `, [task.grade_id]);
+          ORDER BY u.last_name, u.first_name
+        `, [taskId, task.grade_id, task.class_id]);
         
-        console.log('Students in same grade (different classes):', sameGradeStudents.rows);
-        
-        // Let's also get all active students to see what's available
-        const allStudents = await db.query(`
-          SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id
-          FROM users u
-          WHERE u.role = 'student' AND u.is_active = true
-          ORDER BY u.grade_id, u.class_id, u.last_name, u.first_name
-        `);
-        
-        console.log('All active students:', allStudents.rows);
+        console.log('Approach 2 (string comparison):', studentsResult.rows.length, 'students found');
+      } catch (error) {
+        console.log('Approach 2 failed:', error.message);
       }
+    }
+    
+    // Approach 3: If teacher created the task, show all students who have submitted to this task
+    if (studentsResult.rows.length === 0 && task.created_by === user.id) {
+      try {
+        console.log('Teacher created this task, showing all students with submissions');
+        studentsResult = await db.query(`
+          SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id,
+                 s.id as submission_id, s.status as submission_status, 
+                 s.submitted_at, s.score, s.max_score
+          FROM users u
+          JOIN submissions s ON u.id = s.student_id AND s.task_id = $1
+          WHERE u.role = 'student' AND u.is_active = true
+          ORDER BY u.last_name, u.first_name
+        `, [taskId]);
+        
+        console.log('Approach 3 (students with submissions to this task):', studentsResult.rows.length, 'students found');
+      } catch (error) {
+        console.log('Approach 3 failed:', error.message);
+      }
+    }
+    
+    // Approach 4: For admins, show all students in any grade/class if no specific match
+    if (studentsResult.rows.length === 0 && (user.role === 'admin' || user.role === 'super_admin')) {
+      try {
+        console.log('Admin user, showing all students with submissions to this task');
+        studentsResult = await db.query(`
+          SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id,
+                 s.id as submission_id, s.status as submission_status, 
+                 s.submitted_at, s.score, s.max_score
+          FROM users u
+          LEFT JOIN submissions s ON u.id = s.student_id AND s.task_id = $1
+          WHERE u.role = 'student' AND u.is_active = true
+          ORDER BY u.last_name, u.first_name
+        `, [taskId]);
+        
+        console.log('Approach 4 (all students for admin):', studentsResult.rows.length, 'students found');
+      } catch (error) {
+        console.log('Approach 4 failed:', error.message);
+      }
+    }
+
+    // Debug logging
+    console.log('Final students result:', studentsResult.rows.length);
+    
+    if (studentsResult.rows.length === 0) {
+      // Get more debug info about what's in the database
+      const allStudents = await db.query(`
+        SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id, u.is_active
+        FROM users u
+        WHERE u.role = 'student'
+        ORDER BY u.grade_id, u.class_id, u.last_name, u.first_name
+      `);
+      
+      const allSubmissions = await db.query(`
+        SELECT s.id, s.task_id, s.student_id, u.first_name, u.last_name, u.grade_id, u.class_id
+        FROM submissions s
+        JOIN users u ON s.student_id = u.id
+        WHERE s.task_id = $1
+      `, [taskId]);
+      
+      console.log('=== DEBUG INFO ===');
+      console.log('All students in database:', allStudents.rows);
+      console.log('All submissions for this task:', allSubmissions.rows);
+      console.log('Task details:', task);
+      console.log('User details:', { id: user.id, role: user.role, name: `${user.first_name} ${user.last_name}` });
     }
 
     // If no students found with exact match, try a broader search for debugging
@@ -1217,6 +1272,125 @@ router.post('/debug/ensure-students/:taskId', [
     res.status(500).json({
       success: false,
       message: 'Error ensuring students for task',
+      error: error.message
+    });
+  }
+});
+
+// Auto-fix data relationships for teacher-task-student visibility
+router.post('/debug/auto-fix/:taskId', [
+  authenticate,
+  authorize('admin', 'super_admin', 'teacher')
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const user = req.user;
+
+    console.log('=== AUTO-FIX TASK RELATIONSHIPS ===');
+    console.log('Task ID:', taskId);
+    console.log('User:', { id: user.id, role: user.role, name: `${user.first_name} ${user.last_name}` });
+
+    // Get task details
+    const taskResult = await db.query(`
+      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by,
+             g.name as grade_name, c.name as class_name
+      FROM tasks t
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
+      WHERE t.id = $1
+    `, [taskId]);
+
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+
+    const task = taskResult.rows[0];
+    console.log('Task:', task);
+
+    // Get all submissions for this task
+    const submissions = await db.query(`
+      SELECT s.id, s.student_id, u.first_name, u.last_name, u.grade_id, u.class_id
+      FROM submissions s
+      JOIN users u ON s.student_id = u.id
+      WHERE s.task_id = $1
+    `, [taskId]);
+
+    console.log('Submissions:', submissions.rows);
+
+    const fixes = [];
+
+    // Fix 1: Ensure teacher is assigned to the task's grade/class
+    const teacherId = task.created_by;
+    if (teacherId) {
+      const teacherAssignment = await db.query(`
+        SELECT 1 FROM teacher_assignments 
+        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+      `, [teacherId, task.grade_id, task.class_id]);
+
+      if (teacherAssignment.rows.length === 0) {
+        await db.query(`
+          INSERT INTO teacher_assignments (teacher_id, grade_id, class_id)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (teacher_id, grade_id, class_id) DO NOTHING
+        `, [teacherId, task.grade_id, task.class_id]);
+        
+        fixes.push(`Added teacher assignment: teacher_id=${teacherId} to grade=${task.grade_id}, class=${task.class_id}`);
+      }
+    }
+
+    // Fix 2: Move students who submitted to the task's grade/class
+    for (const submission of submissions.rows) {
+      if (submission.grade_id !== task.grade_id || submission.class_id !== task.class_id) {
+        await db.query(`
+          UPDATE users 
+          SET grade_id = $1, class_id = $2
+          WHERE id = $3
+        `, [task.grade_id, task.class_id, submission.student_id]);
+        
+        fixes.push(`Moved student ${submission.first_name} ${submission.last_name} from grade=${submission.grade_id}, class=${submission.class_id} to grade=${task.grade_id}, class=${task.class_id}`);
+      }
+    }
+
+    // Fix 3: If no submissions but user is a teacher who created the task, 
+    // move any students to this grade/class so they can submit
+    if (submissions.rows.length === 0 && task.created_by === user.id) {
+      const anyActiveStudents = await db.query(`
+        SELECT id, first_name, last_name, grade_id, class_id
+        FROM users 
+        WHERE role = 'student' AND is_active = true
+        LIMIT 3
+      `);
+
+      for (const student of anyActiveStudents.rows) {
+        await db.query(`
+          UPDATE users 
+          SET grade_id = $1, class_id = $2
+          WHERE id = $3
+        `, [task.grade_id, task.class_id, student.id]);
+        
+        fixes.push(`Moved student ${student.first_name} ${student.last_name} to grade=${task.grade_id}, class=${task.class_id} for task access`);
+      }
+    }
+
+    console.log('Fixes applied:', fixes);
+
+    res.json({
+      success: true,
+      message: 'Auto-fix completed',
+      fixes_applied: fixes.length,
+      fixes: fixes,
+      task: task,
+      submissions_count: submissions.rows.length
+    });
+
+  } catch (error) {
+    console.error('Auto-fix error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error during auto-fix',
       error: error.message
     });
   }
