@@ -209,7 +209,7 @@ router.get('/task/:taskId', [
 
       // Allow if teacher created the task OR is assigned to the grade/class
       if (assignmentCheck.rows.length === 0 && task.created_by !== user.id) {
-        console.log('Teacher not assigned and did not create task, denying submissions access');
+        console.log('❌ Teacher not assigned and did not create task, denying submissions access');
         
         // For debugging, let's get all teacher assignments
         const allAssignments = await db.query(`
@@ -226,11 +226,12 @@ router.get('/task/:taskId', [
             task_grade: task.grade_id,
             task_class: task.class_id,
             teacher_assignments: allAssignments.rows,
-            task_created_by: task.created_by
+            task_created_by: task.created_by,
+            solution: 'The teacher needs to be assigned to the grade/class for this task, or the task should be created by this teacher'
           }
         });
       } else {
-        console.log('Teacher access granted - either assigned or created the task');
+        console.log('✅ Teacher access granted - either assigned or created the task');
       }
     }
 
@@ -472,52 +473,6 @@ router.get('/:id/download', [
   }
 });
 
-// Get submissions for a specific task (teacher view)
-router.get('/task/:taskId', [
-  authenticate,
-  authorize('teacher', 'admin', 'super_admin'),
-  authorizeResourceAccess('task')
-], async (req, res) => {
-  try {
-    const { taskId } = req.params;
-    const { status } = req.query;
-
-    let query = `
-      SELECT s.id, s.content, s.file_path, s.score, s.max_score, s.feedback,
-             s.status, s.submitted_at, s.graded_at, s.attempt_number,
-             u.id as student_id, u.student_number, u.first_name, u.last_name
-      FROM submissions s
-      JOIN users u ON s.student_id = u.id
-      WHERE s.task_id = $1
-    `;
-
-    const params = [taskId];
-
-    if (status) {
-      query += ' AND s.status = $2';
-      params.push(status);
-    }
-
-    query += ' ORDER BY s.submitted_at DESC';
-
-    const result = await db.query(query, params);
-
-    // Get task details
-    const taskResult = await db.query(`
-      SELECT title, task_type, max_points FROM tasks WHERE id = $1
-    `, [taskId]);
-
-    res.json({
-      submissions: result.rows,
-      task: taskResult.rows[0] || null
-    });
-
-  } catch (error) {
-    console.error('Get task submissions error:', error);
-    res.status(500).json({ message: 'Server error fetching task submissions' });
-  }
-});
-
 // Get all students for a task's grade/class (to show who hasn't submitted)
 router.get('/task/:taskId/students', [
   authenticate,
@@ -555,7 +510,7 @@ router.get('/task/:taskId/students', [
     if (user.role === 'teacher') {
       // First check if teacher created this task - if so, allow access regardless of assignments
       if (task.created_by === user.id) {
-        console.log('Teacher created this task, granting full access');
+        console.log('✅ Teacher created this task, granting full access');
       } else {
         // If teacher didn't create the task, check assignments
         const assignmentCheck = await db.query(`
@@ -572,7 +527,7 @@ router.get('/task/:taskId/students', [
         });
 
         if (assignmentCheck.rows.length === 0) {
-          console.log('Teacher not assigned and did not create task, denying access');
+          console.log('❌ Teacher not assigned and did not create task, denying access');
           
           // For debugging, let's get all teacher assignments
           const allAssignments = await db.query(`
@@ -589,13 +544,14 @@ router.get('/task/:taskId/students', [
               task_grade: task.grade_id,
               task_class: task.class_id,
               teacher_assignments: allAssignments.rows,
-              task_created_by: task.created_by
+              task_created_by: task.created_by,
+              solution: 'The teacher needs to be assigned to the grade/class for this task, or the task should be created by this teacher'
             }
           });
         }
       }
       
-      console.log('Teacher access granted - either assigned or created the task');
+      console.log('✅ Teacher access granted - either assigned or created the task');
     }
 
     // Debug: First check how many students exist in this grade/class
@@ -677,7 +633,7 @@ router.get('/task/:taskId/students', [
     // Approach 3: If teacher created the task, show all students who have submitted to this task
     if (studentsResult.rows.length === 0 && task.created_by === user.id) {
       try {
-        console.log('Teacher created this task, showing all students with submissions');
+        console.log('✅ Teacher created this task, showing all students with submissions');
         studentsResult = await db.query(`
           SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id,
                  s.id as submission_id, s.status as submission_status, 
@@ -689,6 +645,28 @@ router.get('/task/:taskId/students', [
         `, [taskId]);
         
         console.log('Approach 3 (students with submissions to this task):', studentsResult.rows.length, 'students found');
+        
+        // Also get students in the same grade/class who haven't submitted
+        const nonSubmittedStudents = await db.query(`
+          SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id,
+                 NULL as submission_id, NULL as submission_status, 
+                 NULL as submitted_at, NULL as score, NULL as max_score
+          FROM users u
+          WHERE u.role = 'student' 
+            AND CAST(u.grade_id AS INTEGER) = CAST($2 AS INTEGER)
+            AND CAST(u.class_id AS INTEGER) = CAST($3 AS INTEGER)
+            AND u.is_active = true
+            AND u.id NOT IN (
+              SELECT s.student_id FROM submissions s WHERE s.task_id = $1
+            )
+          ORDER BY u.last_name, u.first_name
+        `, [taskId, task.grade_id, task.class_id]);
+        
+        console.log('Non-submitted students in same grade/class:', nonSubmittedStudents.rows.length);
+        
+        // Combine submitted and non-submitted students
+        studentsResult.rows = [...studentsResult.rows, ...nonSubmittedStudents.rows];
+        
       } catch (error) {
         console.log('Approach 3 failed:', error.message);
       }
@@ -740,21 +718,34 @@ router.get('/task/:taskId/students', [
       console.log('User details:', { id: user.id, role: user.role, name: `${user.first_name} ${user.last_name}` });
     }
 
-    // If no students found with exact match, try a broader search for debugging
-    if (studentsResult.rows.length === 0) {
-      console.log('No students found with exact match, trying broader search...');
-      
-      // Try finding students in the same grade (any class)
-      const gradeStudentsResult = await db.query(`
-        SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id
-        FROM users u
-        WHERE u.role = 'student' 
-          AND CAST(u.grade_id AS INTEGER) = CAST($1 AS INTEGER)
-          AND u.is_active = true
-        ORDER BY u.class_id, u.last_name, u.first_name
-      `, [task.grade_id]);
-      
-      console.log('Students in same grade (any class):', gradeStudentsResult.rows);
+    // Final fallback: If teacher created the task and still no students found, get all students who have interacted with this task
+    if (studentsResult.rows.length === 0 && task.created_by === user.id) {
+      try {
+        console.log('🔧 FINAL FALLBACK: Teacher created task, getting all students with activity');
+        
+        // Get all students who have submissions for this task
+        const submissionStudents = await db.query(`
+          SELECT DISTINCT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id,
+                 s.id as submission_id, s.status as submission_status, 
+                 s.submitted_at, s.score, s.max_score
+          FROM users u
+          JOIN submissions s ON u.id = s.student_id
+          WHERE u.role = 'student' AND u.is_active = true AND s.task_id = $1
+          ORDER BY u.last_name, u.first_name
+        `, [taskId]);
+        
+        console.log('Submission students found:', submissionStudents.rows.length);
+        
+        if (submissionStudents.rows.length > 0) {
+          studentsResult.rows = submissionStudents.rows;
+          console.log('✅ Using submission students as fallback');
+        } else {
+          console.log('⚠️  No submission students found either');
+        }
+        
+      } catch (error) {
+        console.log('Final fallback failed:', error.message);
+      }
     }
 
     console.log('Students in task grade/class:', studentsResult.rows);
