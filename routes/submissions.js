@@ -1396,4 +1396,98 @@ router.post('/debug/auto-fix/:taskId', [
   }
 });
 
+// Simple GET endpoint to trigger auto-fix (for testing)
+router.get('/debug/auto-fix-get/:taskId', [
+  authenticate,
+  authorize('admin', 'super_admin', 'teacher')
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const user = req.user;
+
+    console.log('=== AUTO-FIX GET ENDPOINT ===');
+    console.log('Task ID:', taskId);
+    console.log('User:', { id: user.id, role: user.role, name: `${user.first_name} ${user.last_name}` });
+
+    // Get task details
+    const taskResult = await db.query(`
+      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by,
+             g.name as grade_name, c.name as class_name
+      FROM tasks t
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
+      WHERE t.id = $1
+    `, [taskId]);
+
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+
+    const task = taskResult.rows[0];
+
+    // Get all submissions for this task
+    const submissions = await db.query(`
+      SELECT s.id, s.student_id, u.first_name, u.last_name, u.grade_id, u.class_id
+      FROM submissions s
+      JOIN users u ON s.student_id = u.id
+      WHERE s.task_id = $1
+    `, [taskId]);
+
+    const fixes = [];
+
+    // Fix 1: Ensure teacher is assigned to the task's grade/class
+    const teacherId = task.created_by;
+    if (teacherId) {
+      const teacherAssignment = await db.query(`
+        SELECT 1 FROM teacher_assignments 
+        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+      `, [teacherId, task.grade_id, task.class_id]);
+
+      if (teacherAssignment.rows.length === 0) {
+        await db.query(`
+          INSERT INTO teacher_assignments (teacher_id, grade_id, class_id)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (teacher_id, grade_id, class_id) DO NOTHING
+        `, [teacherId, task.grade_id, task.class_id]);
+        
+        fixes.push(`Added teacher assignment: teacher_id=${teacherId} to grade=${task.grade_id}, class=${task.class_id}`);
+      }
+    }
+
+    // Fix 2: Move students who submitted to the task's grade/class
+    for (const submission of submissions.rows) {
+      if (submission.grade_id !== task.grade_id || submission.class_id !== task.class_id) {
+        await db.query(`
+          UPDATE users 
+          SET grade_id = $1, class_id = $2
+          WHERE id = $3
+        `, [task.grade_id, task.class_id, submission.student_id]);
+        
+        fixes.push(`Moved student ${submission.first_name} ${submission.last_name} from grade=${submission.grade_id}, class=${submission.class_id} to grade=${task.grade_id}, class=${task.class_id}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Auto-fix completed successfully!',
+      fixes_applied: fixes.length,
+      fixes: fixes,
+      task: task,
+      submissions_count: submissions.rows.length,
+      instructions: 'Please refresh the task page to see the changes'
+    });
+
+  } catch (error) {
+    console.error('Auto-fix GET error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error during auto-fix',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
