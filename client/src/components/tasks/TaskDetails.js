@@ -382,18 +382,23 @@ const SubmissionsManagement = ({ taskId }) => {
   );
 
   // Fetch all students for this task
-  const { data: studentsData, isLoading: studentsLoading, error: studentsError } = useQuery(
+  const { data: studentsData, isLoading: studentsLoading, error: studentsError, refetch: refetchStudents } = useQuery(
     ['taskStudents', taskId],
     () => submissionsAPI.getTaskStudents(taskId),
     { 
       enabled: !!taskId,
+      retry: 3,
+      retryDelay: 1000,
       onSuccess: (data) => {
         console.log('✅ Students data received:', data);
         console.log('✅ Students array:', data?.data?.students);
+        console.log('✅ Full response structure:', JSON.stringify(data, null, 2));
       },
       onError: (error) => {
         console.error('❌ Students fetch error:', error);
         console.error('❌ Error response:', error?.response?.data);
+        console.error('❌ Error status:', error?.response?.status);
+        console.error('❌ Error message:', error?.message);
       }
     }
   );
@@ -401,9 +406,30 @@ const SubmissionsManagement = ({ taskId }) => {
   const submissions = submissionsData?.submissions || [];
   let students = studentsData?.data?.students || studentsData?.students || [];
   
+  // Debug: Log all possible response formats
+  console.log('=== DETAILED API RESPONSE DEBUG ===');
+  console.log('Submissions Data (full):', JSON.stringify(submissionsData, null, 2));
+  console.log('Students Data (full):', JSON.stringify(studentsData, null, 2));
+  console.log('Submissions extracted:', submissions);
+  console.log('Students extracted:', students);
+  
+  // Additional fallback: Try different response formats
+  if (students.length === 0 && studentsData) {
+    if (studentsData.data && Array.isArray(studentsData.data)) {
+      students = studentsData.data;
+      console.log('✅ Using studentsData.data as array');
+    } else if (Array.isArray(studentsData)) {
+      students = studentsData;
+      console.log('✅ Using studentsData as array');
+    } else if (studentsData.success && studentsData.data) {
+      students = studentsData.data.students || [];
+      console.log('✅ Using studentsData.data.students');
+    }
+  }
+  
   // Fallback: If no students found but we have submissions, create student entries from submissions
   if (students.length === 0 && submissions.length > 0) {
-    console.log('No students found via students API, creating from submissions data');
+    console.log('🔄 No students found via students API, creating from submissions data');
     students = submissions.map(submission => ({
       id: submission.student_id || submission.id,
       first_name: submission.first_name,
@@ -415,6 +441,17 @@ const SubmissionsManagement = ({ taskId }) => {
       score: submission.score,
       max_score: submission.max_score
     }));
+    console.log('✅ Created students from submissions:', students);
+  }
+  
+  // Final fallback: If still no students, create a comprehensive debug log
+  if (students.length === 0) {
+    console.log('⚠️  NO STUDENTS FOUND - Final Debug:');
+    console.log('- Submissions count:', submissions.length);
+    console.log('- Students API error:', studentsError);
+    console.log('- Students API loading:', studentsLoading);
+    console.log('- Raw students data:', studentsData);
+    console.log('- API endpoint called:', `getTaskStudents(${taskId})`);
   }
   
   // Add detailed logging
@@ -469,11 +506,30 @@ const SubmissionsManagement = ({ taskId }) => {
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <div className="flex">
               <AlertTriangle className="h-5 w-5 text-red-400 mr-2" />
-              <div>
+              <div className="flex-1">
                 <h3 className="text-sm font-medium text-red-800">Error Loading Data</h3>
                 <div className="mt-2 text-sm text-red-700">
                   {submissionsError && <p>Submissions error: {submissionsError.message}</p>}
                   {studentsError && <p>Students error: {studentsError.message}</p>}
+                  {studentsError?.response?.status === 403 && (
+                    <p className="mt-2 text-sm text-red-600">
+                      Access denied. You may not be assigned to this task's grade/class.
+                    </p>
+                  )}
+                </div>
+                <div className="mt-4 flex space-x-2">
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="px-4 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm"
+                  >
+                    Reload Page
+                  </button>
+                  <button
+                    onClick={() => refetchStudents()}
+                    className="px-4 py-2 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 text-sm"
+                  >
+                    Retry Students
+                  </button>
                 </div>
               </div>
             </div>
