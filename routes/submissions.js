@@ -553,44 +553,49 @@ router.get('/task/:taskId/students', [
 
     // Check authorization for teachers
     if (user.role === 'teacher') {
-      const assignmentCheck = await db.query(`
-        SELECT 1 FROM teacher_assignments 
-        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-      `, [user.id, task.grade_id, task.class_id]);
-
-      console.log('Teacher assignment check:', {
-        teacher_id: user.id,
-        task_grade_id: task.grade_id,
-        task_class_id: task.class_id,
-        assignments_found: assignmentCheck.rows.length,
-        task_created_by: task.created_by
-      });
-
-      // Allow if teacher created the task OR is assigned to the grade/class
-      if (assignmentCheck.rows.length === 0 && task.created_by !== user.id) {
-        console.log('Teacher not assigned and did not create task, denying access');
-        
-        // For debugging, let's get all teacher assignments
-        const allAssignments = await db.query(`
-          SELECT grade_id, class_id FROM teacher_assignments WHERE teacher_id = $1
-        `, [user.id]);
-        
-        console.log('Teacher all assignments:', allAssignments.rows);
-        
-        return res.status(403).json({ 
-          success: false,
-          message: 'Access denied. You can only view students for tasks in your assigned grades/classes.',
-          debug: {
-            teacher_id: user.id,
-            task_grade: task.grade_id,
-            task_class: task.class_id,
-            teacher_assignments: allAssignments.rows,
-            task_created_by: task.created_by
-          }
-        });
+      // First check if teacher created this task - if so, allow access regardless of assignments
+      if (task.created_by === user.id) {
+        console.log('Teacher created this task, granting full access');
       } else {
-        console.log('Teacher access granted - either assigned or created the task');
+        // If teacher didn't create the task, check assignments
+        const assignmentCheck = await db.query(`
+          SELECT 1 FROM teacher_assignments 
+          WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+        `, [user.id, task.grade_id, task.class_id]);
+
+        console.log('Teacher assignment check:', {
+          teacher_id: user.id,
+          task_grade_id: task.grade_id,
+          task_class_id: task.class_id,
+          assignments_found: assignmentCheck.rows.length,
+          task_created_by: task.created_by
+        });
+
+        if (assignmentCheck.rows.length === 0) {
+          console.log('Teacher not assigned and did not create task, denying access');
+          
+          // For debugging, let's get all teacher assignments
+          const allAssignments = await db.query(`
+            SELECT grade_id, class_id FROM teacher_assignments WHERE teacher_id = $1
+          `, [user.id]);
+          
+          console.log('Teacher all assignments:', allAssignments.rows);
+          
+          return res.status(403).json({ 
+            success: false,
+            message: 'Access denied. You can only view students for tasks in your assigned grades/classes.',
+            debug: {
+              teacher_id: user.id,
+              task_grade: task.grade_id,
+              task_class: task.class_id,
+              teacher_assignments: allAssignments.rows,
+              task_created_by: task.created_by
+            }
+          });
+        }
       }
+      
+      console.log('Teacher access granted - either assigned or created the task');
     }
 
     // Debug: First check how many students exist in this grade/class
@@ -629,6 +634,56 @@ router.get('/task/:taskId/students', [
         AND u.is_active = true
       ORDER BY u.last_name, u.first_name
     `, [taskId, task.grade_id, task.class_id]);
+
+    console.log('Students query result:', studentsResult.rows.length);
+    
+    // If still no students, let's try a different approach
+    if (studentsResult.rows.length === 0) {
+      console.log('No students found with exact match, trying alternative approaches...');
+      
+      // Try without casting in case the data types are different
+      const studentsResult2 = await db.query(`
+        SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id,
+               s.id as submission_id, s.status as submission_status, 
+               s.submitted_at, s.score, s.max_score
+        FROM users u
+        LEFT JOIN submissions s ON u.id = s.student_id AND s.task_id = $1
+        WHERE u.role = 'student' 
+          AND u.grade_id = $2
+          AND u.class_id = $3
+          AND u.is_active = true
+        ORDER BY u.last_name, u.first_name
+      `, [taskId, task.grade_id.toString(), task.class_id.toString()]);
+      
+      console.log('Students query result (string match):', studentsResult2.rows.length);
+      
+      if (studentsResult2.rows.length > 0) {
+        // Use the second result if it found students
+        studentsResult.rows = studentsResult2.rows;
+      } else {
+        // If still no students, get students in same grade to help debug
+        const sameGradeStudents = await db.query(`
+          SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id
+          FROM users u
+          WHERE u.role = 'student' 
+            AND u.grade_id = $1
+            AND u.is_active = true
+          ORDER BY u.class_id, u.last_name, u.first_name
+        `, [task.grade_id]);
+        
+        console.log('Students in same grade (different classes):', sameGradeStudents.rows);
+        
+        // Let's also get all active students to see what's available
+        const allStudents = await db.query(`
+          SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id
+          FROM users u
+          WHERE u.role = 'student' AND u.is_active = true
+          ORDER BY u.grade_id, u.class_id, u.last_name, u.first_name
+        `);
+        
+        console.log('All active students:', allStudents.rows);
+      }
+    }
 
     // If no students found with exact match, try a broader search for debugging
     if (studentsResult.rows.length === 0) {
