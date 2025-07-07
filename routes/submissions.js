@@ -900,4 +900,78 @@ router.post('/debug/task/:taskId/create-students', [
   }
 });
 
+// Debug endpoint - quick check for task and students
+router.get('/debug/quick/:taskId', [
+  authenticate,
+  authorize('teacher', 'admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const user = req.user;
+
+    console.log('=== QUICK DEBUG ===');
+    console.log('User:', { id: user.id, role: user.role, name: `${user.first_name} ${user.last_name}` });
+    console.log('Task ID:', taskId);
+
+    // Get task details
+    const taskResult = await db.query(`
+      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by,
+             g.name as grade_name, c.name as class_name
+      FROM tasks t
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
+      WHERE t.id = $1
+    `, [taskId]);
+
+    const task = taskResult.rows[0];
+    console.log('Task:', task);
+
+    // Get teacher assignments
+    const teacherAssignments = await db.query(`
+      SELECT grade_id, class_id FROM teacher_assignments WHERE teacher_id = $1
+    `, [user.id]);
+    console.log('Teacher assignments:', teacherAssignments.rows);
+
+    // Get students in the task's grade/class
+    const studentsInGradeClass = await db.query(`
+      SELECT id, first_name, last_name, grade_id, class_id
+      FROM users 
+      WHERE role = 'student' 
+        AND grade_id = $1
+        AND class_id = $2
+        AND is_active = true
+    `, [task.grade_id, task.class_id]);
+    console.log('Students in task grade/class:', studentsInGradeClass.rows);
+
+    // Get submissions for this task
+    const submissions = await db.query(`
+      SELECT s.id, s.student_id, u.first_name, u.last_name
+      FROM submissions s
+      JOIN users u ON s.student_id = u.id
+      WHERE s.task_id = $1
+    `, [taskId]);
+    console.log('Submissions:', submissions.rows);
+
+    res.json({
+      success: true,
+      debug: {
+        user: { id: user.id, role: user.role, name: `${user.first_name} ${user.last_name}` },
+        task,
+        teacher_assignments: teacherAssignments.rows,
+        students_in_grade_class: studentsInGradeClass.rows,
+        submissions: submissions.rows,
+        task_created_by_user: task.created_by === user.id
+      }
+    });
+
+  } catch (error) {
+    console.error('Quick debug error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Debug error',
+      error: error.message 
+    });
+  }
+});
+
 module.exports = router;
