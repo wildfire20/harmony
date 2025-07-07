@@ -63,9 +63,13 @@ const Login = () => {
                 }}
                 className={`flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 ${
                   userType === 'student'
-                    ? 'bg-pink-500 hover:bg-pink-600 text-white'
-                    : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                    ? 'bg-pink-500 hover:bg-pink-600 text-white border-pink-500'
+                    : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border-gray-200'
                 }`}
+                style={{
+                  backgroundColor: userType === 'student' ? '#ec4899' : '#f9fafb',
+                  color: userType === 'student' ? 'white' : '#374151'
+                }}
               >
                 <GraduationCap className="h-4 w-4" />
                 <span>Student</span>
@@ -78,9 +82,13 @@ const Login = () => {
                 }}
                 className={`flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 ${
                   userType === 'staff'
-                    ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                    : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                    ? 'bg-blue-500 hover:bg-blue-600 text-white border-blue-500'
+                    : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border-gray-200'
                 }`}
+                style={{
+                  backgroundColor: userType === 'staff' ? '#3b82f6' : '#f9fafb',
+                  color: userType === 'staff' ? 'white' : '#374151'
+                }}
               >
                 <Users className="h-4 w-4" />
                 <span>Staff</span>
