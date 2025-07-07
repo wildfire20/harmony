@@ -1029,4 +1029,197 @@ router.get('/debug/quick/:taskId', [
   }
 });
 
+// Fix teacher assignment for tasks they created
+router.post('/debug/fix-teacher-assignment/:taskId', [
+  authenticate,
+  authorize('admin', 'super_admin', 'teacher')
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const user = req.user;
+
+    console.log('=== FIX TEACHER ASSIGNMENT ===');
+    console.log('User:', { id: user.id, role: user.role, name: `${user.first_name} ${user.last_name}` });
+    console.log('Task ID:', taskId);
+
+    // Get task details
+    const taskResult = await db.query(`
+      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by,
+             g.name as grade_name, c.name as class_name
+      FROM tasks t
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
+      WHERE t.id = $1
+    `, [taskId]);
+
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+
+    const task = taskResult.rows[0];
+    console.log('Task:', task);
+
+    // Check if user can perform this action
+    if (user.role === 'teacher' && task.created_by !== user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only fix assignments for tasks you created'
+      });
+    }
+
+    const teacherId = user.role === 'teacher' ? user.id : task.created_by;
+
+    // Check if teacher is already assigned to this grade/class
+    const existingAssignment = await db.query(`
+      SELECT 1 FROM teacher_assignments 
+      WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+    `, [teacherId, task.grade_id, task.class_id]);
+
+    if (existingAssignment.rows.length > 0) {
+      return res.json({
+        success: true,
+        message: 'Teacher is already assigned to this grade/class',
+        assignment_exists: true
+      });
+    }
+
+    // Add teacher assignment
+    await db.query(`
+      INSERT INTO teacher_assignments (teacher_id, grade_id, class_id)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (teacher_id, grade_id, class_id) DO NOTHING
+    `, [teacherId, task.grade_id, task.class_id]);
+
+    console.log(`✅ Added teacher assignment: teacher_id=${teacherId}, grade_id=${task.grade_id}, class_id=${task.class_id}`);
+
+    res.json({
+      success: true,
+      message: 'Teacher assignment added successfully',
+      assignment: {
+        teacher_id: teacherId,
+        grade_id: task.grade_id,
+        class_id: task.class_id,
+        grade_name: task.grade_name,
+        class_name: task.class_name
+      }
+    });
+
+  } catch (error) {
+    console.error('Fix teacher assignment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fixing teacher assignment',
+      error: error.message
+    });
+  }
+});
+
+// Check or create students for a task's grade/class
+router.post('/debug/ensure-students/:taskId', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+
+    console.log('=== ENSURE STUDENTS FOR TASK ===');
+    console.log('Task ID:', taskId);
+
+    // Get task details
+    const taskResult = await db.query(`
+      SELECT t.id, t.title, t.grade_id, t.class_id,
+             g.name as grade_name, c.name as class_name
+      FROM tasks t
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
+      WHERE t.id = $1
+    `, [taskId]);
+
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+
+    const task = taskResult.rows[0];
+    console.log('Task:', task);
+
+    // Check how many students exist in this grade/class
+    const studentCount = await db.query(`
+      SELECT COUNT(*) as count
+      FROM users 
+      WHERE role = 'student' 
+        AND grade_id = $1
+        AND class_id = $2
+        AND is_active = true
+    `, [task.grade_id, task.class_id]);
+
+    const existingStudents = parseInt(studentCount.rows[0].count);
+    console.log('Existing students in grade/class:', existingStudents);
+
+    if (existingStudents > 0) {
+      return res.json({
+        success: true,
+        message: `Grade ${task.grade_name} Class ${task.class_name} already has ${existingStudents} students`,
+        existing_students: existingStudents
+      });
+    }
+
+    // Get the existing student 'kelly kellu' and move them to this grade/class
+    const kellyResult = await db.query(`
+      SELECT id, first_name, last_name, grade_id, class_id
+      FROM users 
+      WHERE role = 'student' 
+        AND (first_name ILIKE 'kelly' OR student_number LIKE '%kelly%')
+        AND is_active = true
+      LIMIT 1
+    `);
+
+    if (kellyResult.rows.length > 0) {
+      const kelly = kellyResult.rows[0];
+      console.log('Found kelly:', kelly);
+
+      // Move kelly to the task's grade/class
+      await db.query(`
+        UPDATE users 
+        SET grade_id = $1, class_id = $2
+        WHERE id = $3
+      `, [task.grade_id, task.class_id, kelly.id]);
+
+      console.log(`✅ Moved kelly (ID: ${kelly.id}) to grade ${task.grade_id}, class ${task.class_id}`);
+
+      res.json({
+        success: true,
+        message: `Successfully moved kelly kellu to Grade ${task.grade_name} Class ${task.class_name}`,
+        student_moved: {
+          id: kelly.id,
+          name: `${kelly.first_name} ${kelly.last_name}`,
+          from_grade: kelly.grade_id,
+          from_class: kelly.class_id,
+          to_grade: task.grade_id,
+          to_class: task.class_id
+        }
+      });
+    } else {
+      res.json({
+        success: false,
+        message: 'Could not find kelly kellu student to move',
+        suggestion: 'Create a student in this grade/class manually'
+      });
+    }
+
+  } catch (error) {
+    console.error('Ensure students error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error ensuring students for task',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
