@@ -21,6 +21,8 @@ const announcementRoutes = require('./routes/announcements');
 const submissionRoutes = require('./routes/submissions');
 const adminRoutes = require('./routes/admin');
 const documentRoutes = require('./routes/documents');
+const calendarRoutes = require('./routes/calendar');
+const analyticsRoutes = require('./routes/analytics');
 
 // Import database
 const db = require('./config/database');
@@ -166,6 +168,8 @@ app.use('/api/announcements', announcementRoutes);
 app.use('/api/submissions', submissionRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/documents', documentRoutes);
+app.use('/api/calendar', calendarRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Health check endpoint (before static files)
 app.get('/api/health', (req, res) => {
