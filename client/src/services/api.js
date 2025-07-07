@@ -285,4 +285,22 @@ class ApiService {
   }
 }
 
-export default new ApiService();
+// Create main API service instance
+const apiService = new ApiService();
+
+// Create admin-specific API object
+export const adminAPI = {
+  getStudents: (params = {}) => apiService.getStudents(params),
+  getTeachers: (params = {}) => apiService.getTeachers(params),
+  getGrades: () => apiService.getGrades(),
+  getClasses: () => apiService.getClasses(),
+  createStudent: (data) => apiService.createStudent(data),
+  updateStudent: (id, data) => apiService.updateStudent(id, data),
+  deleteStudent: (id) => apiService.deleteStudent(id),
+  createTeacher: (data) => apiService.createTeacher(data),
+  updateTeacher: (id, data) => apiService.updateTeacher(id, data),
+  deleteTeacher: (id) => apiService.deleteTeacher(id),
+  getAdminAnalytics: (params = {}) => apiService.getAdminAnalytics(params)
+};
+
+export default apiService;

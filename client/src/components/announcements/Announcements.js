@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import ApiService from '../../services/api';
 import './Announcements.css';
 
 const Announcements = () => {
@@ -31,17 +32,10 @@ const Announcements = () => {
   const fetchAnnouncements = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/announcements?page=${currentPage}&limit=10`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+      const data = await ApiService.getAnnouncements({
+        page: currentPage,
+        limit: 10
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch announcements');
-      }
-
-      const data = await response.json();
       setAnnouncements(data.announcements);
       setTotalPages(data.pagination.totalPages);
       setError(null);
@@ -54,17 +48,7 @@ const Announcements = () => {
 
   const fetchAvailableTargets = async () => {
     try {
-      const response = await fetch('/api/announcements/meta/targets', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch available targets');
-      }
-
-      const data = await response.json();
+      const data = await ApiService.getAnnouncementTargets();
       setAvailableTargets(data.targets);
       setCanCreateGlobal(data.canCreateGlobal);
     } catch (err) {
@@ -76,21 +60,7 @@ const Announcements = () => {
     e.preventDefault();
     
     try {
-      const response = await fetch('/api/announcements', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify(formData)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to create announcement');
-      }
-
-      const data = await response.json();
+      const data = await ApiService.createAnnouncement(formData);
       setAnnouncements([data.announcement, ...announcements]);
       setShowCreateForm(false);
       setFormData({
@@ -113,17 +83,7 @@ const Announcements = () => {
     }
 
     try {
-      const response = await fetch(`/api/announcements/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete announcement');
-      }
-
+      await ApiService.deleteAnnouncement(id);
       setAnnouncements(announcements.filter(announcement => announcement.id !== id));
     } catch (err) {
       setError(err.message);
