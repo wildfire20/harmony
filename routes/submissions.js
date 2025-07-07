@@ -850,6 +850,13 @@ router.get('/task/:taskId/students-simple', [
     }
 
     const task = taskResult.rows[0];
+    console.log('Task info:', { 
+      id: task.id, 
+      title: task.title, 
+      grade_id: task.grade_id, 
+      class_id: task.class_id, 
+      created_by: task.created_by 
+    });
 
     // For teachers, only allow if they created the task (simplified access control)
     if (user.role === 'teacher' && task.created_by !== user.id) {
@@ -875,7 +882,7 @@ router.get('/task/:taskId/students-simple', [
       }
     }
 
-    // Get ALL students who have submitted to this task (no grade/class filtering for now)
+    // Step 1: Get ALL students who have submitted to this task
     const studentsWithSubmissions = await db.query(`
       SELECT DISTINCT 
         u.id, 
@@ -900,8 +907,32 @@ router.get('/task/:taskId/students-simple', [
 
     console.log(`✅ Found ${studentsWithSubmissions.rows.length} students with submissions`);
 
-    // Get students in the same grade/class who haven't submitted (if we can determine the grade/class)
+    // Step 2: Get students in the same grade/class who haven't submitted
     let studentsWithoutSubmissions = [];
+    
+    // First, let's debug: Check how many students exist in the target grade/class
+    const studentsInGradeClass = await db.query(`
+      SELECT COUNT(*) as count, grade_id, class_id
+      FROM users 
+      WHERE role = 'student' 
+        AND grade_id = $1 
+        AND class_id = $2 
+        AND is_active = true
+      GROUP BY grade_id, class_id
+    `, [task.grade_id, task.class_id]);
+
+    console.log('Students in target grade/class:', studentsInGradeClass.rows);
+
+    // Also check: How many students exist in total
+    const totalStudents = await db.query(`
+      SELECT COUNT(*) as count
+      FROM users 
+      WHERE role = 'student' AND is_active = true
+    `);
+
+    console.log('Total active students in system:', totalStudents.rows[0]?.count || 0);
+
+    // Now try to get non-submitted students
     if (task.grade_id && task.class_id) {
       try {
         const nonSubmittedResult = await db.query(`
@@ -938,12 +969,56 @@ router.get('/task/:taskId/students-simple', [
       }
     }
 
+    // Step 3: If no students found in grade/class, try a broader search for active students
+    if (studentsWithoutSubmissions.length === 0 && studentsWithSubmissions.rows.length === 0) {
+      console.log('⚠️  No students found in target grade/class, trying broader search...');
+      
+      try {
+        const allActiveStudents = await db.query(`
+          SELECT 
+            u.id, 
+            u.first_name, 
+            u.last_name, 
+            u.student_number, 
+            u.grade_id, 
+            u.class_id,
+            NULL as submission_id,
+            NULL as submission_status,
+            NULL as submitted_at,
+            NULL as score,
+            NULL as max_score,
+            NULL as feedback,
+            NULL as file_name,
+            NULL as content
+          FROM users u
+          WHERE u.role = 'student' 
+            AND u.is_active = true
+            AND u.id NOT IN (
+              SELECT student_id FROM submissions WHERE task_id = $1
+            )
+          ORDER BY u.grade_id, u.class_id, u.last_name, u.first_name
+          LIMIT 20
+        `, [taskId]);
+
+        console.log(`🔍 Found ${allActiveStudents.rows.length} active students across all grades/classes`);
+        
+        // Use these students if available
+        if (allActiveStudents.rows.length > 0) {
+          studentsWithoutSubmissions = allActiveStudents.rows;
+          console.log('✅ Using broad search results as fallback');
+        }
+      } catch (error) {
+        console.log('❌ Broad search failed:', error.message);
+      }
+    }
+
     // Combine all students
     const allStudents = [...studentsWithSubmissions.rows, ...studentsWithoutSubmissions];
 
     console.log(`✅ Total students: ${allStudents.length}`);
 
-    res.json({
+    // Debug response
+    const response = {
       success: true,
       data: {
         task: task,
@@ -953,8 +1028,21 @@ router.get('/task/:taskId/students-simple', [
           submitted: studentsWithSubmissions.rows.length,
           pending: studentsWithoutSubmissions.length
         }
+      },
+      debug: {
+        task_grade_id: task.grade_id,
+        task_class_id: task.class_id,
+        students_with_submissions: studentsWithSubmissions.rows.length,
+        students_without_submissions: studentsWithoutSubmissions.length,
+        total_students: allStudents.length,
+        system_total_students: totalStudents.rows[0]?.count || 0,
+        students_in_target_grade_class: studentsInGradeClass.rows[0]?.count || 0
       }
-    });
+    };
+
+    console.log('Response debug info:', response.debug);
+
+    res.json(response);
 
   } catch (error) {
     console.error('❌ Simple students endpoint error:', error);
@@ -1124,7 +1212,7 @@ router.post('/debug/task/:taskId/create-students', [
     if (existingStudents.rows[0].count > 0) {
       return res.json({
         success: true,
-        message: 'Students already exist for this task',
+        message: 'Grade ${task.grade_name} Class ${task.class_name} already has ${existingStudents.rows[0].count} students',
         existing_count: existingStudents.rows[0].count,
         task: task
       });
@@ -2029,6 +2117,114 @@ router.get('/task/:taskId/test-all', [
       message: 'Test endpoint failed',
       error: error.message,
       stack: error.stack
+    });
+  }
+});
+
+// Debug endpoint: Check students and their grade/class distribution
+router.get('/debug/students-overview', [
+  authenticate,
+  authorize('admin', 'super_admin', 'teacher')
+], async (req, res) => {
+  try {
+    const user = req.user;
+    
+    console.log('=== STUDENTS OVERVIEW DEBUG ===');
+    console.log('User:', `${user.first_name} ${user.last_name} (${user.role})`);
+    
+    // Get all students with their grade/class info
+    const allStudents = await db.query(`
+      SELECT 
+        u.id, 
+        u.first_name, 
+        u.last_name, 
+        u.student_number, 
+        u.grade_id, 
+        u.class_id, 
+        u.is_active,
+        g.name as grade_name,
+        c.name as class_name
+      FROM users u
+      LEFT JOIN grades g ON u.grade_id = g.id
+      LEFT JOIN classes c ON u.class_id = c.id
+      WHERE u.role = 'student'
+      ORDER BY u.grade_id, u.class_id, u.last_name
+    `);
+    
+    // Get grade/class distribution
+    const gradeClassDistribution = await db.query(`
+      SELECT 
+        u.grade_id,
+        u.class_id,
+        g.name as grade_name,
+        c.name as class_name,
+        COUNT(*) as student_count
+      FROM users u
+      LEFT JOIN grades g ON u.grade_id = g.id
+      LEFT JOIN classes c ON u.class_id = c.id
+      WHERE u.role = 'student' AND u.is_active = true
+      GROUP BY u.grade_id, u.class_id, g.name, c.name
+      ORDER BY u.grade_id, u.class_id
+    `);
+    
+    // Get all tasks with their grade/class requirements
+    const allTasks = await db.query(`
+      SELECT 
+        t.id,
+        t.title,
+        t.grade_id,
+        t.class_id,
+        t.created_by,
+        g.name as grade_name,
+        c.name as class_name,
+        creator.first_name as creator_first_name,
+        creator.last_name as creator_last_name
+      FROM tasks t
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
+      LEFT JOIN users creator ON t.created_by = creator.id
+      WHERE t.is_active = true
+      ORDER BY t.id
+    `);
+    
+    // Get submission statistics
+    const submissionStats = await db.query(`
+      SELECT 
+        s.task_id,
+        COUNT(*) as submission_count,
+        COUNT(DISTINCT s.student_id) as unique_students
+      FROM submissions s
+      GROUP BY s.task_id
+      ORDER BY s.task_id
+    `);
+    
+    console.log('All students:', allStudents.rows.length);
+    console.log('Grade/class distribution:', gradeClassDistribution.rows);
+    console.log('All tasks:', allTasks.rows.length);
+    console.log('Submission stats:', submissionStats.rows);
+    
+    res.json({
+      success: true,
+      data: {
+        students: allStudents.rows,
+        grade_class_distribution: gradeClassDistribution.rows,
+        tasks: allTasks.rows,
+        submission_stats: submissionStats.rows,
+        summary: {
+          total_students: allStudents.rows.length,
+          active_students: allStudents.rows.filter(s => s.is_active).length,
+          total_tasks: allTasks.rows.length,
+          tasks_with_submissions: submissionStats.rows.length
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('Students overview debug error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Debug endpoint error',
+      error: error.message
     });
   }
 });

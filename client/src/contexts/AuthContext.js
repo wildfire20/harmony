@@ -1,91 +1,206 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { authAPI } from '../services/api';
-import toast from 'react-hot-toast';
+import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import ApiService from '../services/api';
 
-const AuthContext = createContext();
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
+// Initial state
+const initialState = {
+  user: null,
+  token: localStorage.getItem('token'),
+  loading: true,
+  error: null
 };
 
+// Auth actions
+const authActions = {
+  SET_LOADING: 'SET_LOADING',
+  SET_USER: 'SET_USER',
+  SET_TOKEN: 'SET_TOKEN',
+  SET_ERROR: 'SET_ERROR',
+  LOGOUT: 'LOGOUT'
+};
+
+// Auth reducer
+const authReducer = (state, action) => {
+  switch (action.type) {
+    case authActions.SET_LOADING:
+      return {
+        ...state,
+        loading: action.payload
+      };
+    case authActions.SET_USER:
+      return {
+        ...state,
+        user: action.payload,
+        loading: false,
+        error: null
+      };
+    case authActions.SET_TOKEN:
+      return {
+        ...state,
+        token: action.payload
+      };
+    case authActions.SET_ERROR:
+      return {
+        ...state,
+        error: action.payload,
+        loading: false
+      };
+    case authActions.LOGOUT:
+      return {
+        ...state,
+        user: null,
+        token: null,
+        loading: false,
+        error: null
+      };
+    default:
+      return state;
+  }
+};
+
+// Create context
+const AuthContext = createContext();
+
+// Auth provider component
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('token'));
-  const [loading, setLoading] = useState(true);
+  const [state, dispatch] = useReducer(authReducer, initialState);
 
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      verifyToken(token);
-    } else {
-      setLoading(false);
-    }
-  }, []);
+  // Set loading state
+  const setLoading = (loading) => {
+    dispatch({ type: authActions.SET_LOADING, payload: loading });
+  };
 
-  const verifyToken = async (token) => {
+  // Set error state
+  const setError = (error) => {
+    dispatch({ type: authActions.SET_ERROR, payload: error });
+  };
+
+  // Login function
+  const login = async (credentials) => {
     try {
-      const response = await authAPI.verifyToken(token);
-      setUser(response.data.user);
-      setLoading(false);
+      setLoading(true);
+      setError(null);
+
+      const response = await ApiService.login(credentials);
+      
+      if (response.success) {
+        const { token, user } = response;
+        
+        // Store token in localStorage
+        localStorage.setItem('token', token);
+        
+        // Update state
+        dispatch({ type: authActions.SET_TOKEN, payload: token });
+        dispatch({ type: authActions.SET_USER, payload: user });
+        
+        return { success: true };
+      } else {
+        throw new Error(response.message || 'Login failed');
+      }
     } catch (error) {
-      console.error('Token verification failed:', error);
-      localStorage.removeItem('token');
-      setToken(null);
+      setError(error.message);
+      return { success: false, error: error.message };
+    } finally {
       setLoading(false);
     }
   };
 
-  const login = async (credentials, userType) => {
+  // Register function
+  const register = async (userData) => {
     try {
-      const response = await authAPI.login(credentials, userType);
-      const { token: newToken, user } = response.data;
+      setLoading(true);
+      setError(null);
+
+      const response = await ApiService.register(userData);
       
-      localStorage.setItem('token', newToken);
-      setToken(newToken);
-      setUser(user);
-      
-      toast.success(`Welcome back, ${user.first_name}!`);
-      return { success: true };
+      if (response.success) {
+        const { token, user } = response;
+        
+        // Store token in localStorage
+        localStorage.setItem('token', token);
+        
+        // Update state
+        dispatch({ type: authActions.SET_TOKEN, payload: token });
+        dispatch({ type: authActions.SET_USER, payload: user });
+        
+        return { success: true };
+      } else {
+        throw new Error(response.message || 'Registration failed');
+      }
     } catch (error) {
-      const message = error.response?.data?.message || 'Login failed';
-      toast.error(message);
-      return { success: false, error: message };
+      setError(error.message);
+      return { success: false, error: error.message };
+    } finally {
+      setLoading(false);
     }
   };
 
+  // Logout function
   const logout = async () => {
     try {
-      await authAPI.logout();
+      // Call logout API (optional)
+      await ApiService.logout();
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('Logout API error:', error);
     } finally {
+      // Clear token from localStorage
       localStorage.removeItem('token');
-      setToken(null);
-      setUser(null);
-      toast.success('Logged out successfully');
+      
+      // Update state
+      dispatch({ type: authActions.LOGOUT });
     }
   };
 
-  const updateUser = (userData) => {
-    setUser(prev => ({ ...prev, ...userData }));
+  // Get current user
+  const getCurrentUser = async () => {
+    try {
+      if (!state.token) {
+        setLoading(false);
+        return;
+      }
+
+      const response = await ApiService.getCurrentUser();
+      
+      if (response.success) {
+        dispatch({ type: authActions.SET_USER, payload: response.user });
+      } else {
+        // Token might be invalid, logout
+        logout();
+      }
+    } catch (error) {
+      console.error('Get current user error:', error);
+      // Token might be invalid, logout
+      logout();
+    } finally {
+      setLoading(false);
+    }
   };
 
+  // Check authentication status on app load
+  useEffect(() => {
+    getCurrentUser();
+  }, [state.token]);
+
+  // Update user data
+  const updateUser = (userData) => {
+    dispatch({ type: authActions.SET_USER, payload: userData });
+  };
+
+  // Context value
   const value = {
-    user,
-    token,
-    loading,
+    user: state.user,
+    token: state.token,
+    loading: state.loading,
+    error: state.error,
     login,
+    register,
     logout,
     updateUser,
-    isAuthenticated: !!user,
-    isStudent: user?.role === 'student',
-    isTeacher: user?.role === 'teacher',
-    isAdmin: user?.role === 'admin' || user?.role === 'super_admin',
-    isSuperAdmin: user?.role === 'super_admin',
+    setError,
+    setLoading,
+    isAuthenticated: !!state.user,
+    isAdmin: state.user?.role === 'admin' || state.user?.role === 'super_admin',
+    isTeacher: state.user?.role === 'teacher',
+    isStudent: state.user?.role === 'student'
   };
 
   return (
@@ -94,3 +209,14 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
+
+// Custom hook to use auth context
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
+export default AuthContext;

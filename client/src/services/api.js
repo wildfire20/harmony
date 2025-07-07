@@ -1,159 +1,288 @@
-import axios from 'axios';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
-// In production, use relative paths since frontend and backend are on same domain
-// In development, use localhost:5000
-const API_BASE_URL = process.env.NODE_ENV === 'production' 
-  ? '/api' 
-  : (process.env.REACT_APP_API_URL || 'http://localhost:5000/api');
-
-console.log('API Base URL:', API_BASE_URL);
-
-// Create axios instance
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 10000,
-  withCredentials: true, // Include cookies for CORS
-});
-
-// Request interceptor to add token
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
+class ApiService {
+  constructor() {
+    this.baseURL = API_BASE_URL;
   }
-);
 
-// Response interceptor to handle errors
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    console.error('API Error:', error.response?.data || error.message);
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
-    }
-    return Promise.reject(error);
+  // Get auth token from localStorage
+  getAuthToken() {
+    return localStorage.getItem('token');
   }
-);
 
-// Auth API
-export const authAPI = {
-  login: (credentials, userType) => {
-    const endpoint = userType === 'student' ? '/auth/login/student' : '/auth/login/staff';
-    return api.post(endpoint, credentials);
-  },
-  logout: () => api.post('/auth/logout'),
-  verifyToken: (token) => api.get('/auth/verify', {
-    headers: { Authorization: `Bearer ${token}` }
-  }),
-  changePassword: (passwords) => api.put('/auth/change-password', passwords),
-  getProfile: () => api.get('/auth/profile'),
-};
+  // Get auth headers
+  getAuthHeaders() {
+    const token = this.getAuthToken();
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
+  }
 
-// Users API
-export const usersAPI = {
-  getProfile: () => api.get('/users/profile'),
-  updateProfile: (data) => api.put('/users/profile', data),
-};
+  // Generic fetch wrapper
+  async fetch(endpoint, options = {}) {
+    const url = `${this.baseURL}${endpoint}`;
+    const config = {
+      headers: this.getAuthHeaders(),
+      ...options
+    };
 
-// Classes API
-export const classesAPI = {
-  getGrades: () => api.get('/classes/grades'),
-  getClasses: (gradeId) => api.get(`/classes/classes${gradeId ? `?grade_id=${gradeId}` : ''}`),
-  getClassesByGrade: (gradeId) => api.get(`/classes/grades/${gradeId}/classes`),
-  getClassStudents: (classId) => api.get(`/classes/classes/${classId}/students`),
-  createGrade: (data) => api.post('/classes/grades', data),
-  createClass: (data) => api.post('/classes/classes', data),
-  updateClass: (id, data) => api.put(`/classes/classes/${id}`, data),
-  deleteClass: (id) => api.delete(`/classes/classes/${id}`),
-};
+    try {
+      const response = await fetch(url, config);
+      const data = await response.json();
 
-// Tasks API
-export const tasksAPI = {
-  getTasks: (gradeId, classId) => api.get(`/tasks/grade/${gradeId}/class/${classId}`),
-  getTask: (id) => api.get(`/tasks/${id}`),
-  createTask: (data) => api.post('/tasks', data),
-  updateTask: (id, data) => api.put(`/tasks/${id}`, data),
-  deleteTask: (id) => api.delete(`/tasks/${id}`),
-  getTaskSubmissions: (id, status) => api.get(`/tasks/${id}/submissions${status ? `?status=${status}` : ''}`),
-};
+      if (!response.ok) {
+        throw new Error(data.message || `HTTP error! status: ${response.status}`);
+      }
 
-// Quizzes API
-export const quizzesAPI = {
-  createQuiz: (data) => api.post('/quizzes', data),
-  getQuiz: (taskId) => api.get(`/quizzes/${taskId}`),
-  submitQuiz: (taskId, answers) => api.post(`/quizzes/${taskId}/submit`, { answers }),
-  getQuizResults: (taskId) => api.get(`/quizzes/${taskId}/results`),
-  deleteQuiz: (taskId) => api.delete(`/quizzes/${taskId}`),
-};
+      return data;
+    } catch (error) {
+      console.error('API Error:', error);
+      throw error;
+    }
+  }
 
-// Announcements API
-export const announcementsAPI = {
-  getAnnouncements: (gradeId, classId) => api.get(`/announcements/grade/${gradeId}/class/${classId}`),
-  getAnnouncement: (id) => api.get(`/announcements/${id}`),
-  createAnnouncement: (data) => api.post('/announcements', data),
-  updateAnnouncement: (id, data) => api.put(`/announcements/${id}`, data),
-  deleteAnnouncement: (id) => api.delete(`/announcements/${id}`),
-  getRecentAnnouncements: (limit) => api.get(`/announcements/recent/${limit || 5}`),
-};
+  // GET request
+  async get(endpoint, params = {}) {
+    const searchParams = new URLSearchParams(params);
+    const url = searchParams.toString() ? `${endpoint}?${searchParams}` : endpoint;
+    return this.fetch(url);
+  }
 
-// Submissions API
-export const submissionsAPI = {
-  submitAssignment: (taskId, formData) => {
-    return api.post(`/submissions/assignment/${taskId}`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+  // POST request
+  async post(endpoint, data = {}) {
+    return this.fetch(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(data)
     });
-  },
-  getStudentSubmissions: (params) => api.get('/submissions/student', { params }),
-  getSubmission: (id) => api.get(`/submissions/${id}`),
-  gradeSubmission: (id, data) => api.put(`/submissions/${id}/grade`, data),
-  returnSubmission: (id, data) => api.put(`/submissions/${id}/return`, data),
-  downloadSubmission: (id) => api.get(`/submissions/${id}/download`, { responseType: 'blob' }),
-  getTaskSubmissions: (taskId, status) => api.get(`/submissions/task/${taskId}${status ? `?status=${status}` : ''}`),
-  getTaskStudents: (taskId) => api.get(`/submissions/task/${taskId}/students-simple`),
-  getTaskStudentsForce: (taskId) => api.get(`/submissions/task/${taskId}/force-students`),
-  getTaskStudentsTest: (taskId) => api.get(`/submissions/task/${taskId}/test-all`),
-};
+  }
 
-// Admin API
-export const adminAPI = {
-  // Students
-  addStudent: (data) => api.post('/admin/students', data),
-  bulkAddStudents: (students) => api.post('/admin/students/bulk', { students }),
-  getStudents: (params) => api.get('/admin/students', { params }),
-  updateStudent: (id, data) => api.put(`/admin/students/${id}`, data),
-  deleteStudent: (id) => api.delete(`/admin/students/${id}`),
-  exportCredentials: (params) => api.get('/admin/students/export-credentials', { 
-    params, 
-    responseType: 'blob' 
-  }),
-  
-  // Teachers
-  addTeacher: (data) => api.post('/admin/teachers', data),
-  getTeachers: (params) => api.get('/admin/teachers', { params }),
-  updateTeacher: (id, data) => api.put(`/admin/teachers/${id}`, data),
-  deleteTeacher: (id) => api.delete(`/admin/teachers/${id}`),
-  
-  // Grades (System Settings)
-  getGrades: () => api.get('/admin/grades'),
-  addGrade: (data) => api.post('/admin/grades', data),
-  updateGrade: (id, data) => api.put(`/admin/grades/${id}`, data),
-  deleteGrade: (id) => api.delete(`/admin/grades/${id}`),
-  
-  // Classes (System Settings)
-  getClasses: () => api.get('/admin/classes'),
-  addClass: (data) => api.post('/admin/classes', data),
-  updateClass: (id, data) => api.put(`/admin/classes/${id}`, data),
-  deleteClass: (id) => api.delete(`/admin/classes/${id}`),
-  
-  // Statistics
-  getStatistics: () => api.get('/admin/statistics'),
-};
+  // PUT request
+  async put(endpoint, data = {}) {
+    return this.fetch(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
 
-export default api;
+  // DELETE request
+  async delete(endpoint) {
+    return this.fetch(endpoint, {
+      method: 'DELETE'
+    });
+  }
+
+  // File upload
+  async uploadFile(endpoint, formData) {
+    const token = this.getAuthToken();
+    const url = `${this.baseURL}${endpoint}`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        ...(token && { 'Authorization': `Bearer ${token}` })
+      },
+      body: formData
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || `HTTP error! status: ${response.status}`);
+    }
+
+    return data;
+  }
+
+  // Authentication endpoints
+  async login(credentials) {
+    return this.post('/auth/login', credentials);
+  }
+
+  async register(userData) {
+    return this.post('/auth/register', userData);
+  }
+
+  async logout() {
+    return this.post('/auth/logout');
+  }
+
+  async getCurrentUser() {
+    return this.get('/auth/me');
+  }
+
+  // Announcements endpoints
+  async getAnnouncements(params = {}) {
+    return this.get('/announcements', params);
+  }
+
+  async getAnnouncement(id) {
+    return this.get(`/announcements/${id}`);
+  }
+
+  async createAnnouncement(data) {
+    return this.post('/announcements', data);
+  }
+
+  async updateAnnouncement(id, data) {
+    return this.put(`/announcements/${id}`, data);
+  }
+
+  async deleteAnnouncement(id) {
+    return this.delete(`/announcements/${id}`);
+  }
+
+  async getAnnouncementTargets() {
+    return this.get('/announcements/meta/targets');
+  }
+
+  // Tasks endpoints
+  async getTasks(params = {}) {
+    return this.get('/tasks', params);
+  }
+
+  async getTask(id) {
+    return this.get(`/tasks/${id}`);
+  }
+
+  async createTask(data) {
+    return this.post('/tasks', data);
+  }
+
+  async updateTask(id, data) {
+    return this.put(`/tasks/${id}`, data);
+  }
+
+  async deleteTask(id) {
+    return this.delete(`/tasks/${id}`);
+  }
+
+  // Submissions endpoints
+  async getSubmissions(params = {}) {
+    return this.get('/submissions/student', params);
+  }
+
+  async getTaskSubmissions(taskId) {
+    return this.get(`/submissions/task/${taskId}`);
+  }
+
+  async submitAssignment(taskId, formData) {
+    return this.uploadFile(`/submissions/assignment/${taskId}`, formData);
+  }
+
+  async gradeSubmission(id, data) {
+    return this.put(`/submissions/${id}/grade`, data);
+  }
+
+  // Documents endpoints
+  async getDocuments(params = {}) {
+    return this.get('/documents', params);
+  }
+
+  async uploadDocument(formData) {
+    return this.uploadFile('/documents/upload', formData);
+  }
+
+  async downloadDocument(id) {
+    const token = this.getAuthToken();
+    const url = `${this.baseURL}/documents/${id}/download`;
+    
+    const response = await fetch(url, {
+      headers: {
+        ...(token && { 'Authorization': `Bearer ${token}` })
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to download document');
+    }
+
+    return response.blob();
+  }
+
+  async deleteDocument(id) {
+    return this.delete(`/documents/${id}`);
+  }
+
+  // Admin endpoints
+  async getStudents(params = {}) {
+    return this.get('/admin/students', params);
+  }
+
+  async getTeachers(params = {}) {
+    return this.get('/admin/teachers', params);
+  }
+
+  async getGrades() {
+    return this.get('/admin/grades');
+  }
+
+  async getClasses() {
+    return this.get('/admin/classes');
+  }
+
+  async createStudent(data) {
+    return this.post('/admin/students', data);
+  }
+
+  async updateStudent(id, data) {
+    return this.put(`/admin/students/${id}`, data);
+  }
+
+  async deleteStudent(id) {
+    return this.delete(`/admin/students/${id}`);
+  }
+
+  async createTeacher(data) {
+    return this.post('/admin/teachers', data);
+  }
+
+  async updateTeacher(id, data) {
+    return this.put(`/admin/teachers/${id}`, data);
+  }
+
+  async deleteTeacher(id) {
+    return this.delete(`/admin/teachers/${id}`);
+  }
+
+  // Calendar endpoints
+  async getCalendarEvents(params = {}) {
+    return this.get('/calendar/events', params);
+  }
+
+  async createCalendarEvent(data) {
+    return this.post('/calendar/events', data);
+  }
+
+  async updateCalendarEvent(id, data) {
+    return this.put(`/calendar/events/${id}`, data);
+  }
+
+  async deleteCalendarEvent(id) {
+    return this.delete(`/calendar/events/${id}`);
+  }
+
+  // Analytics endpoints
+  async getAnalytics(params = {}) {
+    return this.get('/analytics', params);
+  }
+
+  async getStudentAnalytics(params = {}) {
+    return this.get('/analytics/student', params);
+  }
+
+  async getTeacherAnalytics(params = {}) {
+    return this.get('/analytics/teacher', params);
+  }
+
+  async getAdminAnalytics(params = {}) {
+    return this.get('/analytics/admin', params);
+  }
+
+  // Health check
+  async checkHealth() {
+    return this.get('/health');
+  }
+}
+
+export default new ApiService();
