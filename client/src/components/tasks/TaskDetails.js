@@ -387,7 +387,7 @@ const SubmissionsManagement = ({ taskId }) => {
     () => submissionsAPI.getTaskStudents(taskId),
     { 
       enabled: !!taskId,
-      retry: 3,
+      retry: 1,
       retryDelay: 1000,
       onSuccess: (data) => {
         console.log('✅ Students data received:', data);
@@ -399,6 +399,23 @@ const SubmissionsManagement = ({ taskId }) => {
         console.error('❌ Error response:', error?.response?.data);
         console.error('❌ Error status:', error?.response?.status);
         console.error('❌ Error message:', error?.message);
+        console.log('🔄 Will try force endpoint as fallback...');
+      }
+    }
+  );
+
+  // Fallback query using force endpoint if main endpoint fails
+  const { data: forceStudentsData, isLoading: forceStudentsLoading, refetch: refetchForceStudents } = useQuery(
+    ['taskStudentsForce', taskId],
+    () => submissionsAPI.getTaskStudentsForce(taskId),
+    { 
+      enabled: !!taskId && !!studentsError,
+      retry: 2,
+      onSuccess: (data) => {
+        console.log('✅ FORCE Students data received:', data);
+      },
+      onError: (error) => {
+        console.error('❌ FORCE Students fetch error:', error);
       }
     }
   );

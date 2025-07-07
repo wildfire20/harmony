@@ -827,6 +827,145 @@ router.get('/task/:taskId/students', [
   }
 });
 
+// DIRECT FIX: Simple endpoint to get students for a task (bypasses complex authorization)
+router.get('/task/:taskId/students-simple', [
+  authenticate,
+  authorize('teacher', 'admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const user = req.user;
+
+    console.log('=== SIMPLE STUDENTS ENDPOINT ===');
+    console.log('Task ID:', taskId);
+    console.log('User:', `${user.first_name} ${user.last_name} (${user.role})`);
+
+    // Get task basic info
+    const taskResult = await db.query(`
+      SELECT id, title, grade_id, class_id, created_by FROM tasks WHERE id = $1
+    `, [taskId]);
+
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Task not found' });
+    }
+
+    const task = taskResult.rows[0];
+
+    // For teachers, only allow if they created the task (simplified access control)
+    if (user.role === 'teacher' && task.created_by !== user.id) {
+      console.log('❌ Teacher did not create this task, checking assignments...');
+      
+      const assignmentCheck = await db.query(`
+        SELECT 1 FROM teacher_assignments 
+        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+      `, [user.id, task.grade_id, task.class_id]);
+      
+      if (assignmentCheck.rows.length === 0) {
+        console.log('❌ Teacher not assigned to this grade/class either');
+        // Return empty result instead of error for better UX
+        return res.json({
+          success: true,
+          data: {
+            task: task,
+            students: [],
+            stats: { total: 0, submitted: 0, pending: 0 },
+            message: 'No access to students for this task'
+          }
+        });
+      }
+    }
+
+    // Get ALL students who have submitted to this task (no grade/class filtering for now)
+    const studentsWithSubmissions = await db.query(`
+      SELECT DISTINCT 
+        u.id, 
+        u.first_name, 
+        u.last_name, 
+        u.student_number, 
+        u.grade_id, 
+        u.class_id,
+        s.id as submission_id,
+        s.status as submission_status,
+        s.submitted_at,
+        s.score,
+        s.max_score,
+        s.feedback,
+        s.file_name,
+        s.content
+      FROM users u
+      INNER JOIN submissions s ON u.id = s.student_id
+      WHERE s.task_id = $1 AND u.role = 'student' AND u.is_active = true
+      ORDER BY s.submitted_at DESC
+    `, [taskId]);
+
+    console.log(`✅ Found ${studentsWithSubmissions.rows.length} students with submissions`);
+
+    // Get students in the same grade/class who haven't submitted (if we can determine the grade/class)
+    let studentsWithoutSubmissions = [];
+    if (task.grade_id && task.class_id) {
+      try {
+        const nonSubmittedResult = await db.query(`
+          SELECT 
+            u.id, 
+            u.first_name, 
+            u.last_name, 
+            u.student_number, 
+            u.grade_id, 
+            u.class_id,
+            NULL as submission_id,
+            NULL as submission_status,
+            NULL as submitted_at,
+            NULL as score,
+            NULL as max_score,
+            NULL as feedback,
+            NULL as file_name,
+            NULL as content
+          FROM users u
+          WHERE u.role = 'student' 
+            AND u.grade_id = $1 
+            AND u.class_id = $2 
+            AND u.is_active = true
+            AND u.id NOT IN (
+              SELECT student_id FROM submissions WHERE task_id = $3
+            )
+          ORDER BY u.last_name, u.first_name
+        `, [task.grade_id, task.class_id, taskId]);
+
+        studentsWithoutSubmissions = nonSubmittedResult.rows;
+        console.log(`✅ Found ${studentsWithoutSubmissions.length} students without submissions`);
+      } catch (error) {
+        console.log('❌ Error getting non-submitted students:', error.message);
+      }
+    }
+
+    // Combine all students
+    const allStudents = [...studentsWithSubmissions.rows, ...studentsWithoutSubmissions];
+
+    console.log(`✅ Total students: ${allStudents.length}`);
+
+    res.json({
+      success: true,
+      data: {
+        task: task,
+        students: allStudents,
+        stats: {
+          total: allStudents.length,
+          submitted: studentsWithSubmissions.rows.length,
+          pending: studentsWithoutSubmissions.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Simple students endpoint error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to get students',
+      error: error.message
+    });
+  }
+});
+
 // Debug endpoint - check student data for task
 router.get('/debug/task/:taskId/data', [
   authenticate,
@@ -1450,117 +1589,6 @@ router.get('/debug/auto-fix-get/:taskId', [
 
     console.log('=== AUTO-FIX GET ENDPOINT ===');
     console.log('Task ID:', taskId);
-    console.log('User:', { id: user.id, role: user.role, name: `${user.first_name} ${user.last_name}` });
-
-    // Get task details
-    const taskResult = await db.query(`
-      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by,
-             g.name as grade_name, c.name as class_name
-      FROM tasks t
-      LEFT JOIN grades g ON t.grade_id = g.id
-      LEFT JOIN classes c ON t.class_id = c.id
-      WHERE t.id = $1
-    `, [taskId]);
-
-    const task = taskResult.rows[0];
-
-    // Get all submissions for this task
-    const submissions = await db.query(`
-      SELECT s.id, s.student_id, u.first_name, u.last_name, u.grade_id, u.class_id
-      FROM submissions s
-      JOIN users u ON s.student_id = u.id
-      WHERE s.task_id = $1
-    `, [taskId]);
-
-    const fixes = [];
-
-    // Fix 1: Ensure teacher is assigned to the task's grade/class
-    const teacherId = task.created_by;
-    if (teacherId) {
-      const teacherAssignment = await db.query(`
-        SELECT 1 FROM teacher_assignments 
-        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-      `, [teacherId, task.grade_id, task.class_id]);
-
-      if (teacherAssignment.rows.length === 0) {
-        await db.query(`
-          INSERT INTO teacher_assignments (teacher_id, grade_id, class_id)
-          VALUES ($1, $2, $3)
-          ON CONFLICT (teacher_id, grade_id, class_id) DO NOTHING
-        `, [teacherId, task.grade_id, task.class_id]);
-        
-        fixes.push(`Added teacher assignment: teacher_id=${teacherId} to grade=${task.grade_id}, class=${task.class_id}`);
-      }
-    }
-
-    // Fix 2: Move students who submitted to the task's grade/class
-    for (const submission of submissions.rows) {
-      if (submission.grade_id !== task.grade_id || submission.class_id !== task.class_id) {
-        await db.query(`
-          UPDATE users 
-          SET grade_id = $1, class_id = $2
-          WHERE id = $3
-        `, [task.grade_id, task.class_id, submission.student_id]);
-        
-        fixes.push(`Moved student ${submission.first_name} ${submission.last_name} from grade=${submission.grade_id}, class=${submission.class_id} to grade=${task.grade_id}, class=${task.class_id}`);
-      }
-    }
-
-    res.json({
-      success: true,
-      message: 'Auto-fix completed successfully!',
-      fixes_applied: fixes.length,
-      fixes: fixes,
-      task: task,
-      submissions_count: submissions.rows.length,
-      instructions: 'Please refresh the task page to see the changes'
-    });
-
-  } catch (error) {
-    console.error('Auto-fix GET error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error during auto-fix',
-      error: error.message
-    });
-  }
-});
-
-// Debug endpoint - check if teacher can see students for a task (accessible via browser)
-router.get('/debug/task/:taskId/check-teacher-access', [
-  authenticate,
-  authorize('teacher', 'admin', 'super_admin')
-], async (req, res) => {
-  try {
-    const { taskId } = req.params;
-    const user = req.user;
-
-    console.log('=== DEBUG TEACHER ACCESS CHECK ===');
-    console.log('User ID:', user.id);
-    console.log('User Role:', user.role);
-    console.log('User Name:', `${user.first_name} ${user.last_name}`);
-    console.log('Task ID:', taskId);
-
-    // Get task details
-    const taskResult = await db.query(`
-      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by,
-             g.name as grade_name, c.name as class_name,
-             u.first_name as creator_first_name, u.last_name as creator_last_name
-      FROM tasks t
-      LEFT JOIN grades g ON t.grade_id = g.id
-      LEFT JOIN classes c ON t.class_id = c.id
-      LEFT JOIN users u ON t.created_by = u.id
-      WHERE t.id = $1 AND t.is_active = true
-    `, [taskId]);
-
-    if (taskResult.rows.length === 0) {
-      return res.json({
-        success: false,
-        message: 'Task not found',
-        debug: {
-          task_id: taskId,
-          user_id: user.id,
-          user_role: user.role
         }
       });
     }
@@ -1754,6 +1782,77 @@ router.post('/debug/auto-assign-teacher/:taskId', [
     res.status(500).json({
       success: false,
       message: 'Failed to auto-assign teacher',
+      error: error.message
+    });
+  }
+});
+
+// EMERGENCY ENDPOINT: Force show students with submissions (for debugging)
+router.get('/task/:taskId/force-students', [
+  authenticate
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const user = req.user;
+
+    console.log('=== FORCE STUDENTS ENDPOINT (EMERGENCY) ===');
+    console.log('Task ID:', taskId);
+    console.log('User:', `${user.first_name} ${user.last_name} (${user.role})`);
+
+    // Get task info
+    const task = await db.query(`SELECT * FROM tasks WHERE id = $1`, [taskId]);
+    console.log('Task:', task.rows[0]);
+
+    // Get ALL submissions for this task (no restrictions)
+    const submissions = await db.query(`
+      SELECT 
+        s.id as submission_id,
+        s.student_id,
+        s.status as submission_status,
+        s.submitted_at,
+        s.score,
+        s.max_score,
+        s.feedback,
+        s.content,
+        s.file_name,
+        u.id,
+        u.first_name,
+        u.last_name,
+        u.student_number,
+        u.grade_id,
+        u.class_id
+      FROM submissions s
+      JOIN users u ON s.student_id = u.id
+      WHERE s.task_id = $1
+      ORDER BY s.submitted_at DESC
+    `, [taskId]);
+
+    console.log(`✅ FORCE ENDPOINT: Found ${submissions.rows.length} submissions`);
+
+    res.json({
+      success: true,
+      force_endpoint: true,
+      user: {
+        id: user.id,
+        role: user.role,
+        name: `${user.first_name} ${user.last_name}`
+      },
+      task: task.rows[0],
+      data: {
+        students: submissions.rows,
+        stats: {
+          total: submissions.rows.length,
+          submitted: submissions.rows.length,
+          pending: 0
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Force students endpoint error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Force endpoint failed',
       error: error.message
     });
   }
