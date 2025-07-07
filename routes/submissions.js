@@ -1410,13 +1410,6 @@ router.get('/debug/auto-fix-get/:taskId', [
       WHERE t.id = $1
     `, [taskId]);
 
-    if (taskResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Task not found'
-      });
-    }
-
     const task = taskResult.rows[0];
 
     // Get all submissions for this task
@@ -1476,6 +1469,142 @@ router.get('/debug/auto-fix-get/:taskId', [
     res.status(500).json({
       success: false,
       message: 'Error during auto-fix',
+      error: error.message
+    });
+  }
+});
+
+// Debug endpoint - check if teacher can see students for a task (accessible via browser)
+router.get('/debug/task/:taskId/check-teacher-access', [
+  authenticate,
+  authorize('teacher', 'admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const user = req.user;
+
+    console.log('=== DEBUG TEACHER ACCESS CHECK ===');
+    console.log('User ID:', user.id);
+    console.log('User Role:', user.role);
+    console.log('User Name:', `${user.first_name} ${user.last_name}`);
+    console.log('Task ID:', taskId);
+
+    // Get task details
+    const taskResult = await db.query(`
+      SELECT t.id, t.title, t.grade_id, t.class_id, t.created_by,
+             g.name as grade_name, c.name as class_name,
+             u.first_name as creator_first_name, u.last_name as creator_last_name
+      FROM tasks t
+      LEFT JOIN grades g ON t.grade_id = g.id
+      LEFT JOIN classes c ON t.class_id = c.id
+      LEFT JOIN users u ON t.created_by = u.id
+      WHERE t.id = $1 AND t.is_active = true
+    `, [taskId]);
+
+    if (taskResult.rows.length === 0) {
+      return res.json({
+        success: false,
+        message: 'Task not found',
+        debug: {
+          task_id: taskId,
+          user_id: user.id,
+          user_role: user.role
+        }
+      });
+    }
+
+    const task = taskResult.rows[0];
+    console.log('Task found:', task);
+
+    // Check if teacher created the task
+    const teacherCreatedTask = task.created_by === user.id;
+    console.log('Teacher created task:', teacherCreatedTask);
+
+    // Check teacher assignments
+    const teacherAssignments = await db.query(`
+      SELECT ta.grade_id, ta.class_id,
+             g.name as grade_name, c.name as class_name
+      FROM teacher_assignments ta
+      LEFT JOIN grades g ON ta.grade_id = g.id
+      LEFT JOIN classes c ON ta.class_id = c.id
+      WHERE ta.teacher_id = $1
+    `, [user.id]);
+
+    console.log('Teacher assignments:', teacherAssignments.rows);
+
+    // Check if teacher is assigned to task's grade/class
+    const isAssignedToTaskGradeClass = teacherAssignments.rows.some(
+      assignment => assignment.grade_id === task.grade_id && assignment.class_id === task.class_id
+    );
+
+    console.log('Is assigned to task grade/class:', isAssignedToTaskGradeClass);
+
+    // Check for submissions
+    const submissions = await db.query(`
+      SELECT s.id, s.student_id, s.status, s.submitted_at,
+             u.first_name, u.last_name, u.student_number
+      FROM submissions s
+      JOIN users u ON s.student_id = u.id
+      WHERE s.task_id = $1
+    `, [taskId]);
+
+    console.log('Submissions found:', submissions.rows.length);
+
+    // Get all students in the task's grade/class
+    const studentsInGradeClass = await db.query(`
+      SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade_id, u.class_id
+      FROM users u
+      WHERE u.role = 'student' 
+        AND CAST(u.grade_id AS INTEGER) = CAST($1 AS INTEGER)
+        AND CAST(u.class_id AS INTEGER) = CAST($2 AS INTEGER)
+        AND u.is_active = true
+      ORDER BY u.last_name, u.first_name
+    `, [task.grade_id, task.class_id]);
+
+    console.log('Students in grade/class:', studentsInGradeClass.rows.length);
+
+    // Return comprehensive debug info
+    const debugInfo = {
+      success: true,
+      debug: {
+        user: {
+          id: user.id,
+          role: user.role,
+          name: `${user.first_name} ${user.last_name}`
+        },
+        task: {
+          id: task.id,
+          title: task.title,
+          grade_id: task.grade_id,
+          class_id: task.class_id,
+          grade_name: task.grade_name,
+          class_name: task.class_name,
+          created_by: task.created_by,
+          creator_name: `${task.creator_first_name} ${task.creator_last_name}`
+        },
+        access_check: {
+          teacher_created_task: teacherCreatedTask,
+          is_assigned_to_task_grade_class: isAssignedToTaskGradeClass,
+          should_have_access: teacherCreatedTask || isAssignedToTaskGradeClass || user.role === 'admin' || user.role === 'super_admin'
+        },
+        teacher_assignments: teacherAssignments.rows,
+        submissions: submissions.rows,
+        students_in_grade_class: studentsInGradeClass.rows,
+        counts: {
+          teacher_assignments: teacherAssignments.rows.length,
+          submissions: submissions.rows.length,
+          students_in_grade_class: studentsInGradeClass.rows.length
+        }
+      }
+    };
+
+    res.json(debugInfo);
+
+  } catch (error) {
+    console.error('Debug teacher access check error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Debug endpoint error',
       error: error.message
     });
   }
