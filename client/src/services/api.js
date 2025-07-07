@@ -118,6 +118,7 @@ export const submissionsAPI = {
   getTaskSubmissions: (taskId, status) => api.get(`/submissions/task/${taskId}${status ? `?status=${status}` : ''}`),
   getTaskStudents: (taskId) => api.get(`/submissions/task/${taskId}/students-simple`),
   getTaskStudentsForce: (taskId) => api.get(`/submissions/task/${taskId}/force-students`),
+  getTaskStudentsTest: (taskId) => api.get(`/submissions/task/${taskId}/test-all`),
 };
 
 // Admin API

@@ -556,6 +556,34 @@ const SubmissionsManagement = ({ taskId }) => {
     );
   }
 
+  // Debug function to test the comprehensive endpoint
+  const testEndpoint = async () => {
+    try {
+      console.log('🔍 Testing comprehensive endpoint...');
+      const response = await submissionsAPI.getTaskStudentsTest(taskId);
+      console.log('✅ Test endpoint response:', response);
+      alert('Test endpoint executed successfully! Check console for details.');
+    } catch (error) {
+      console.error('❌ Test endpoint error:', error);
+      alert('Test endpoint failed! Check console for details.');
+    }
+  };
+
+  // Debug function to retry all endpoints
+  const retryAllEndpoints = async () => {
+    try {
+      console.log('🔄 Retrying all endpoints...');
+      await Promise.all([
+        refetchSubmissions(),
+        refetchStudents(),
+        refetchForceStudents()
+      ]);
+      console.log('✅ All endpoints retried');
+    } catch (error) {
+      console.error('❌ Retry failed:', error);
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
       <div className="p-6">
@@ -604,6 +632,25 @@ const SubmissionsManagement = ({ taskId }) => {
                 <p className="text-2xl font-bold text-purple-900">{gradedSubmissions.length}</p>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Debug Controls */}
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+          <h3 className="text-sm font-medium text-gray-900 mb-2">Debug Controls</h3>
+          <div className="flex gap-2">
+            <button
+              onClick={testEndpoint}
+              className="px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded hover:bg-blue-200"
+            >
+              Test Endpoint
+            </button>
+            <button
+              onClick={retryAllEndpoints}
+              className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
+            >
+              Retry All
+            </button>
           </div>
         </div>
 
