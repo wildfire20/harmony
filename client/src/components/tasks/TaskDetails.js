@@ -398,8 +398,24 @@ const SubmissionsManagement = ({ taskId }) => {
     }
   );
 
-  const submissions = submissionsData?.submissions || submissionsData?.data || [];
-  const students = studentsData?.data?.students || [];
+  const submissions = submissionsData?.submissions || [];
+  let students = studentsData?.data?.students || studentsData?.students || [];
+  
+  // Fallback: If no students found but we have submissions, create student entries from submissions
+  if (students.length === 0 && submissions.length > 0) {
+    console.log('No students found via students API, creating from submissions data');
+    students = submissions.map(submission => ({
+      id: submission.student_id || submission.id,
+      first_name: submission.first_name,
+      last_name: submission.last_name,
+      student_number: submission.student_number,
+      submission_id: submission.id,
+      submission_status: submission.status,
+      submitted_at: submission.submitted_at,
+      score: submission.score,
+      max_score: submission.max_score
+    }));
+  }
   
   // Add detailed logging
   console.log('=== SUBMISSIONS MANAGEMENT DEBUG ===');
@@ -408,7 +424,9 @@ const SubmissionsManagement = ({ taskId }) => {
   console.log('Students Data (raw):', studentsData);
   console.log('Processed submissions:', submissions);
   console.log('Processed students:', students);
-  console.log('Students from studentsData?.data?.students:', studentsData?.data?.students);
+  console.log('Submissions count:', submissions.length);
+  console.log('Students count:', students.length);
+  console.log('Students with submissions:', students.filter(s => s.submission_id).length);
   console.log('Submissions loading:', submissionsLoading);
   console.log('Students loading:', studentsLoading);
   console.log('Submissions error:', submissionsError);
