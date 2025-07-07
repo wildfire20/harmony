@@ -203,20 +203,34 @@ router.get('/task/:taskId', [
         teacher_id: user.id,
         task_grade_id: task.grade_id,
         task_class_id: task.class_id,
-        assignments_found: assignmentCheck.rows.length
+        assignments_found: assignmentCheck.rows.length,
+        task_created_by: task.created_by
       });
 
-      if (assignmentCheck.rows.length === 0) {
-        // For debugging, let's be more permissive and check if this teacher created the task
-        if (task.created_by === user.id) {
-          console.log('Teacher created this task, allowing submissions access even without formal assignment');
-        } else {
-          console.log('Teacher not assigned and did not create task, denying submissions access');
-          return res.status(403).json({ 
-            success: false,
-            message: 'Access denied. You can only view submissions for tasks in your assigned grades/classes.' 
-          });
-        }
+      // Allow if teacher created the task OR is assigned to the grade/class
+      if (assignmentCheck.rows.length === 0 && task.created_by !== user.id) {
+        console.log('Teacher not assigned and did not create task, denying submissions access');
+        
+        // For debugging, let's get all teacher assignments
+        const allAssignments = await db.query(`
+          SELECT grade_id, class_id FROM teacher_assignments WHERE teacher_id = $1
+        `, [user.id]);
+        
+        console.log('Teacher all assignments:', allAssignments.rows);
+        
+        return res.status(403).json({ 
+          success: false,
+          message: 'Access denied. You can only view submissions for tasks in your assigned grades/classes.',
+          debug: {
+            teacher_id: user.id,
+            task_grade: task.grade_id,
+            task_class: task.class_id,
+            teacher_assignments: allAssignments.rows,
+            task_created_by: task.created_by
+          }
+        });
+      } else {
+        console.log('Teacher access granted - either assigned or created the task');
       }
     }
 
@@ -548,16 +562,34 @@ router.get('/task/:taskId/students', [
         teacher_id: user.id,
         task_grade_id: task.grade_id,
         task_class_id: task.class_id,
-        assignments_found: assignmentCheck.rows.length
+        assignments_found: assignmentCheck.rows.length,
+        task_created_by: task.created_by
       });
 
       // Allow if teacher created the task OR is assigned to the grade/class
       if (assignmentCheck.rows.length === 0 && task.created_by !== user.id) {
         console.log('Teacher not assigned and did not create task, denying access');
+        
+        // For debugging, let's get all teacher assignments
+        const allAssignments = await db.query(`
+          SELECT grade_id, class_id FROM teacher_assignments WHERE teacher_id = $1
+        `, [user.id]);
+        
+        console.log('Teacher all assignments:', allAssignments.rows);
+        
         return res.status(403).json({ 
           success: false,
-          message: 'Access denied. You can only view students for tasks in your assigned grades/classes.' 
+          message: 'Access denied. You can only view students for tasks in your assigned grades/classes.',
+          debug: {
+            teacher_id: user.id,
+            task_grade: task.grade_id,
+            task_class: task.class_id,
+            teacher_assignments: allAssignments.rows,
+            task_created_by: task.created_by
+          }
         });
+      } else {
+        console.log('Teacher access granted - either assigned or created the task');
       }
     }
 
