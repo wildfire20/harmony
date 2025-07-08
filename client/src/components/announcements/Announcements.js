@@ -95,19 +95,33 @@ const Announcements = () => {
   const handleSubmit = (e) => {
     e.preventDefault();
     
+    console.log('📝 Form submission started');
+    console.log('Form data:', formData);
+    console.log('Current user:', user);
+    
     // Validate form data
     if (!formData.title || !formData.content) {
+      console.log('❌ Validation failed: Missing required fields');
       toast.error('Please fill in all required fields');
+      return;
+    }
+
+    if (!formData.title.trim() || !formData.content.trim()) {
+      console.log('❌ Validation failed: Empty required fields');
+      toast.error('Title and content cannot be empty');
       return;
     }
 
     // For teachers, announcements are created for their assigned grade/class
     // For admins, announcements are global with target_audience setting
     const submitData = {
-      ...formData
+      title: formData.title.trim(),
+      content: formData.content.trim(),
+      priority: formData.priority || 'normal',
+      target_audience: formData.target_audience || 'everyone'
     };
 
-    console.log('Submitting announcement data:', submitData);
+    console.log('📤 Submitting announcement data:', submitData);
     createAnnouncementMutation.mutate(submitData);
   };
 
@@ -160,6 +174,36 @@ const Announcements = () => {
   const isNewAnnouncement = (announcementDate) => {
     if (!lastVisit) return false;
     return new Date(announcementDate) > lastVisit;
+  };
+
+  // Function to detect URLs and make them clickable
+  const linkifyText = (text) => {
+    if (!text) return text;
+    
+    // Enhanced regular expression to detect various URL formats
+    const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
+    
+    // Split text by URLs and create clickable links
+    const parts = text.split(urlRegex);
+    
+    return parts.map((part, index) => {
+      if (urlRegex.test(part)) {
+        // Add https:// if the URL starts with www
+        const href = part.startsWith('www.') ? `https://${part}` : part;
+        return (
+          <a
+            key={index}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800 underline break-all transition-colors duration-200"
+          >
+            {part}
+          </a>
+        );
+      }
+      return part;
+    });
   };
 
   const newAnnouncementsCount = announcements.filter(announcement => 
@@ -243,8 +287,12 @@ const Announcements = () => {
                     rows="4"
                     value={formData.content}
                     onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+                    placeholder="Enter your announcement content here. URLs will automatically become clickable links."
                     required
                   />
+                  <p className="mt-1 text-xs text-gray-500">
+                    💡 Tip: You can paste URLs (like https://example.com) and they'll automatically become clickable links
+                  </p>
                 </div>
 
                 <div>
@@ -336,7 +384,7 @@ const Announcements = () => {
                         </span>
                       )}
                     </div>
-                    <p className="text-gray-600 mb-4">{announcement.content}</p>
+                    <div className="text-gray-600 mb-4 whitespace-pre-wrap">{linkifyText(announcement.content)}</div>
                     <div className="flex items-center space-x-4 text-sm text-gray-500">
                       <div className="flex items-center">
                         <Clock className="h-4 w-4 mr-1" />

@@ -53,6 +53,36 @@ const TeacherDashboard = () => {
     return diffHours < 24; // Consider announcements less than 24 hours old as "new"
   };
 
+  // Function to detect URLs and make them clickable
+  const linkifyText = (text) => {
+    if (!text) return text;
+    
+    // Enhanced regular expression to detect various URL formats
+    const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
+    
+    // Split text by URLs and create clickable links
+    const parts = text.split(urlRegex);
+    
+    return parts.map((part, index) => {
+      if (urlRegex.test(part)) {
+        // Add https:// if the URL starts with www
+        const href = part.startsWith('www.') ? `https://${part}` : part;
+        return (
+          <a
+            key={index}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800 underline break-all transition-colors duration-200"
+          >
+            {part}
+          </a>
+        );
+      }
+      return part;
+    });
+  };
+
   if (announcementsLoading) {
     return <LoadingSpinner />;
   }
@@ -224,9 +254,9 @@ const TeacherDashboard = () => {
                         </span>
                       </div>
                       <h3 className="font-medium text-gray-900 mt-1">{announcement.title}</h3>
-                      <p className="text-sm text-gray-600 mt-1 line-clamp-2">
-                        {announcement.content}
-                      </p>
+                      <div className="text-sm text-gray-600 mt-1 line-clamp-2 whitespace-pre-wrap">
+                        {linkifyText(announcement.content)}
+                      </div>
                     </div>
                   ))}
                 </div>
