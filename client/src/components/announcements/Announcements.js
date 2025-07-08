@@ -62,10 +62,15 @@ const Announcements = () => {
       },
       onError: (error) => {
         console.error('Create announcement error:', error);
+        console.error('Error response:', error.response);
+        console.error('Error data:', error.response?.data);
+        
         const errorMessage = error.response?.data?.message || 
                             (error.response?.data?.errors ? 
                              error.response.data.errors.map(e => e.msg).join(', ') : 
                              'Failed to create announcement');
+        
+        console.log('Showing error message:', errorMessage);
         toast.error(errorMessage);
       }
     }
