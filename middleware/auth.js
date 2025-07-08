@@ -61,6 +61,64 @@ const authenticate = async (req, res, next) => {
   }
 };
 
+// Authentication middleware that supports both header and query parameter tokens
+const authenticateFlexible = async (req, res, next) => {
+  try {
+    // Try to get token from Authorization header first, then from query parameter
+    let token = req.header('Authorization')?.replace('Bearer ', '');
+    if (!token) {
+      token = req.query.token;
+    }
+    
+    if (!token) {
+      console.log('❌ No token provided in header or query');
+      return res.status(401).json({ message: 'Access denied. No token provided.' });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('✅ Token decoded successfully:', { id: decoded.id, email: decoded.email });
+    
+    // Get user details from database with retry logic
+    let result;
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    while (attempts < maxAttempts) {
+      try {
+        result = await db.query(`
+          SELECT u.id, u.student_number, u.email, u.first_name, u.last_name, 
+                 u.role, u.grade_id, u.class_id, g.name as grade_name, c.name as class_name
+          FROM users u
+          LEFT JOIN grades g ON u.grade_id = g.id
+          LEFT JOIN classes c ON u.class_id = c.id
+          WHERE u.id = $1 AND u.is_active = true
+        `, [decoded.id]);
+        break;
+      } catch (dbError) {
+        attempts++;
+        console.error(`Database query attempt ${attempts} failed:`, dbError);
+        if (attempts >= maxAttempts) {
+          throw dbError;
+        }
+        // Wait a bit before retrying
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    if (result.rows.length === 0) {
+      console.log('❌ User not found in database for id:', decoded.id);
+      return res.status(401).json({ message: 'Invalid token. User not found.' });
+    }
+
+    req.user = result.rows[0];
+    console.log('✅ User authenticated (flexible):', { id: req.user.id, email: req.user.email, role: req.user.role });
+    next();
+  } catch (error) {
+    console.error('❌ Authentication error:', error);
+    res.status(401).json({ message: 'Invalid token.' });
+  }
+};
+
 const authorize = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {
@@ -420,6 +478,7 @@ const requireTeacherAssignment = async (req, res, next) => {
 
 module.exports = {
   authenticate,
+  authenticateFlexible,
   authorize,
   authorizeGradeClass,
   authorizeResourceAccess,

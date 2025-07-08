@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
-const { authenticate, authorize, authorizeTeacherAssignment, requireTeacherAssignment } = require('../middleware/auth');
+const { authenticate, authorize, authorizeTeacherAssignment, requireTeacherAssignment, authenticateFlexible } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -463,6 +463,10 @@ router.get('/download/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const user = req.user;
 
+    console.log('=== DOWNLOAD DOCUMENT ===');
+    console.log('Document ID:', id);
+    console.log('User:', { id: user.id, role: user.role, grade_id: user.grade_id, class_id: user.class_id });
+
     // Get document information
     const result = await db.query(`
       SELECT d.*, g.name as grade_name, c.name as class_name
@@ -473,34 +477,72 @@ router.get('/download/:id', authenticate, async (req, res) => {
     `, [id]);
 
     if (result.rows.length === 0) {
+      console.log('❌ Document not found');
       return res.status(404).json({ message: 'Document not found' });
     }
 
     const document = result.rows[0];
+    console.log('Document:', { 
+      id: document.id, 
+      title: document.title, 
+      grade_id: document.grade_id, 
+      class_id: document.class_id, 
+      target_audience: document.target_audience 
+    });
 
-    // Check access permissions
-    if (user.role === 'student' && (user.grade_id != document.grade_id || user.class_id != document.class_id)) {
-      return res.status(403).json({ message: 'Access denied' });
+    // Enhanced access permissions check that supports target_audience
+    let hasAccess = false;
+
+    if (user.role === 'admin' || user.role === 'super_admin') {
+      hasAccess = true;
+      console.log('✅ Admin access granted');
+    } else if (document.target_audience) {
+      // Target audience based documents (admin uploads)
+      if (document.target_audience === 'everyone') {
+        hasAccess = true;
+        console.log('✅ Everyone audience access granted');
+      } else if (document.target_audience === 'student' && user.role === 'student') {
+        hasAccess = true;
+        console.log('✅ Student audience access granted');
+      } else if (document.target_audience === 'staff' && ['teacher', 'admin', 'super_admin'].includes(user.role)) {
+        hasAccess = true;
+        console.log('✅ Staff audience access granted');
+      }
+    } else {
+      // Class-specific documents (traditional teacher uploads)
+      if (user.role === 'student') {
+        if (user.grade_id == document.grade_id && user.class_id == document.class_id) {
+          hasAccess = true;
+          console.log('✅ Student class access granted');
+        }
+      } else if (user.role === 'teacher') {
+        // Check teacher assignments
+        const assignmentCheck = await db.query(`
+          SELECT 1 FROM teacher_assignments 
+          WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+        `, [user.id, document.grade_id, document.class_id]);
+
+        if (assignmentCheck.rows.length > 0) {
+          hasAccess = true;
+          console.log('✅ Teacher assignment access granted');
+        }
+      }
     }
 
-    if (user.role === 'teacher') {
-      const assignmentCheck = await db.query(`
-        SELECT 1 FROM teacher_assignments 
-        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-      `, [user.id, document.grade_id, document.class_id]);
-
-      if (assignmentCheck.rows.length === 0) {
-        return res.status(403).json({ message: 'Access denied' });
-      }
+    if (!hasAccess) {
+      console.log('❌ Access denied');
+      return res.status(403).json({ message: 'Access denied' });
     }
 
     // Check if file exists
     if (!fs.existsSync(document.file_path)) {
+      console.log('❌ File not found on server:', document.file_path);
       return res.status(404).json({ message: 'File not found on server' });
     }
 
+    console.log('✅ Downloading file:', document.file_path);
     // Send file
-    res.download(document.file_path, document.filename);
+    res.download(document.file_path, document.file_name);
 
   } catch (error) {
     console.error('Download document error:', error);
@@ -509,10 +551,14 @@ router.get('/download/:id', authenticate, async (req, res) => {
 });
 
 // View document in browser
-router.get('/view/:id', authenticate, async (req, res) => {
+router.get('/view/:id', authenticateFlexible, async (req, res) => {
   try {
     const { id } = req.params;
     const user = req.user;
+
+    console.log('=== VIEW DOCUMENT ===');
+    console.log('Document ID:', id);
+    console.log('User:', { id: user.id, role: user.role, grade_id: user.grade_id, class_id: user.class_id });
 
     // Get document information
     const result = await db.query(`
@@ -524,34 +570,73 @@ router.get('/view/:id', authenticate, async (req, res) => {
     `, [id]);
 
     if (result.rows.length === 0) {
+      console.log('❌ Document not found');
       return res.status(404).json({ message: 'Document not found' });
     }
 
     const document = result.rows[0];
+    console.log('Document:', { 
+      id: document.id, 
+      title: document.title, 
+      grade_id: document.grade_id, 
+      class_id: document.class_id, 
+      target_audience: document.target_audience 
+    });
 
-    // Check access permissions
-    if (user.role === 'student' && (user.grade_id != document.grade_id || user.class_id != document.class_id)) {
-      return res.status(403).json({ message: 'Access denied' });
+    // Enhanced access permissions check that supports target_audience
+    let hasAccess = false;
+
+    if (user.role === 'admin' || user.role === 'super_admin') {
+      hasAccess = true;
+      console.log('✅ Admin access granted');
+    } else if (document.target_audience) {
+      // Target audience based documents (admin uploads)
+      if (document.target_audience === 'everyone') {
+        hasAccess = true;
+        console.log('✅ Everyone audience access granted');
+      } else if (document.target_audience === 'student' && user.role === 'student') {
+        hasAccess = true;
+        console.log('✅ Student audience access granted');
+      } else if (document.target_audience === 'staff' && ['teacher', 'admin', 'super_admin'].includes(user.role)) {
+        hasAccess = true;
+        console.log('✅ Staff audience access granted');
+      }
+    } else {
+      // Class-specific documents (traditional teacher uploads)
+      if (user.role === 'student') {
+        if (user.grade_id == document.grade_id && user.class_id == document.class_id) {
+          hasAccess = true;
+          console.log('✅ Student class access granted');
+        }
+      } else if (user.role === 'teacher') {
+        // Check teacher assignments
+        const assignmentCheck = await db.query(`
+          SELECT 1 FROM teacher_assignments 
+          WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+        `, [user.id, document.grade_id, document.class_id]);
+
+        if (assignmentCheck.rows.length > 0) {
+          hasAccess = true;
+          console.log('✅ Teacher assignment access granted');
+        }
+      }
     }
 
-    if (user.role === 'teacher') {
-      const assignmentCheck = await db.query(`
-        SELECT 1 FROM teacher_assignments 
-        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-      `, [user.id, document.grade_id, document.class_id]);
-
-      if (assignmentCheck.rows.length === 0) {
-        return res.status(403).json({ message: 'Access denied' });
-      }
+    if (!hasAccess) {
+      console.log('❌ Access denied');
+      return res.status(403).json({ message: 'Access denied' });
     }
 
     // Check if file exists
     if (!fs.existsSync(document.file_path)) {
+      console.log('❌ File not found on server:', document.file_path);
       return res.status(404).json({ message: 'File not found on server' });
     }
 
+    console.log('✅ Viewing file:', document.file_path);
+
     // Set appropriate content type based on file extension
-    const ext = path.extname(document.filename).toLowerCase();
+    const ext = path.extname(document.file_name).toLowerCase();
     let contentType = 'application/octet-stream';
     
     switch (ext) {
@@ -573,12 +658,12 @@ router.get('/view/:id', authenticate, async (req, res) => {
         break;
       default:
         // For other file types, force download
-        return res.download(document.file_path, document.filename);
+        return res.download(document.file_path, document.file_name);
     }
 
     // Set headers for inline viewing
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `inline; filename="${document.filename}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${document.file_name}"`);
     
     // Stream the file
     const fileStream = fs.createReadStream(document.file_path);
