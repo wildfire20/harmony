@@ -1,6 +1,5 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const moment = require('moment');
 const db = require('../config/database');
 const { authenticate, authorize, authorizeResourceAccess } = require('../middleware/auth');
 
@@ -147,8 +146,11 @@ router.post('/events', [
   body('description').optional().trim(),
   body('start_date').isISO8601().withMessage('Start date must be a valid date'),
   body('end_date').optional().custom((value) => {
-    if (value && !moment(value).isValid()) {
-      throw new Error('End date must be a valid date');
+    if (value && value !== '') {
+      const date = new Date(value);
+      if (isNaN(date.getTime())) {
+        throw new Error('End date must be a valid date');
+      }
     }
     return true;
   }),
