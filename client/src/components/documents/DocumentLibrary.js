@@ -474,7 +474,7 @@ const DocumentLibrary = ({ gradeId, classId }) => {
                         </div>
 
                         <div className="flex items-center space-x-2">
-                          {isViewableInBrowser(doc.file_name) && (
+                          {isViewableInBrowser(doc.filename) && (
                             <button
                               onClick={() => handleViewDocument(doc)}
                               className="flex-1 bg-blue-50 text-blue-600 px-3 py-2 rounded text-sm hover:bg-blue-100 transition-colors flex items-center justify-center space-x-1"
@@ -486,7 +486,7 @@ const DocumentLibrary = ({ gradeId, classId }) => {
                           )}
                           
                           <button
-                            onClick={() => handleDownload(doc.id, doc.file_name)}
+                            onClick={() => handleDownload(doc.id, doc.filename)}
                             className="flex-1 bg-gray-50 text-gray-600 px-3 py-2 rounded text-sm hover:bg-gray-100 transition-colors flex items-center justify-center space-x-1"
                             title="Download"
                           >
@@ -534,7 +534,7 @@ const DocumentLibrary = ({ gradeId, classId }) => {
                         </div>
 
                         <div className="flex items-center space-x-2 ml-4">
-                          {isViewableInBrowser(doc.file_name) && (
+                          {isViewableInBrowser(doc.filename) && (
                             <button
                               onClick={() => handleViewDocument(doc)}
                               className="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
@@ -545,7 +545,7 @@ const DocumentLibrary = ({ gradeId, classId }) => {
                           )}
                           
                           <button
-                            onClick={() => handleDownload(doc.id, doc.file_name)}
+                            onClick={() => handleDownload(doc.id, doc.filename)}
                             className="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
                             title="Download"
                           >
@@ -592,7 +592,7 @@ const DocumentLibrary = ({ gradeId, classId }) => {
                   <ExternalLink className="h-4 w-4" />
                 </a>
                 <button
-                  onClick={() => handleDownload(viewingDocument.id, viewingDocument.file_name)}
+                  onClick={() => handleDownload(viewingDocument.id, viewingDocument.filename)}
                   className="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
                   title="Download"
                 >
@@ -608,13 +608,13 @@ const DocumentLibrary = ({ gradeId, classId }) => {
             </div>
             
             <div className="flex-1 overflow-hidden">
-              {getFileExtension(viewingDocument.file_name) === 'pdf' ? (
+              {getFileExtension(viewingDocument.filename) === 'pdf' ? (
                 <iframe
                   src={getDocumentUrl(viewingDocument.id)}
                   className="w-full h-full"
                   title={viewingDocument.title}
                 />
-              ) : ['jpg', 'jpeg', 'png', 'gif'].includes(getFileExtension(viewingDocument.file_name)) ? (
+              ) : ['jpg', 'jpeg', 'png', 'gif'].includes(getFileExtension(viewingDocument.filename)) ? (
                 <div className="h-full flex items-center justify-center p-4">
                   <img
                     src={getDocumentUrl(viewingDocument.id)}
@@ -628,7 +628,7 @@ const DocumentLibrary = ({ gradeId, classId }) => {
                     <File className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                     <p className="text-gray-600">This file type cannot be previewed in the browser.</p>
                     <button
-                      onClick={() => handleDownload(viewingDocument.id, viewingDocument.file_name)}
+                      onClick={() => handleDownload(viewingDocument.id, viewingDocument.filename)}
                       className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2 mx-auto"
                     >
                       <Download className="h-4 w-4" />

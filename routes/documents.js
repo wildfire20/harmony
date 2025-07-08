@@ -194,8 +194,8 @@ router.get('/grade/:gradeId/class/:classId', [
       // Fallback query with different column names
       query = `
         SELECT d.id, d.title, d.description, d.document_type, 
-               d.filename, d.original_filename, d.file_size, 
-               d.created_at as uploaded_at, d.is_active,
+               d.file_name as filename, d.file_name as original_filename, d.file_size, 
+               d.uploaded_at, d.is_active,
                u.first_name as uploaded_by_first_name, 
                u.last_name as uploaded_by_last_name,
                g.name as grade_name, c.name as class_name
@@ -323,20 +323,20 @@ router.post('/upload', [
 
     // Insert document record
     const result = await db.query(`
-      INSERT INTO documents (title, description, document_type, filename, original_filename, file_size, 
-                           grade_id, class_id, uploaded_by)
+      INSERT INTO documents (title, description, document_type, file_name, file_size, 
+                           grade_id, class_id, uploaded_by, file_path)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id, title, description, document_type, filename, original_filename, file_size, created_at as uploaded_at
+      RETURNING id, title, description, document_type, file_name, file_size, uploaded_at
     `, [
       title,
       description,
       document_type,
       req.file.filename,
-      req.file.originalname,
       req.file.size,
       gradeId,
       classId,
-      user.id
+      user.id,
+      req.file.path
     ]);
 
     console.log('✅ Document uploaded successfully:', result.rows[0]);
@@ -614,8 +614,8 @@ router.get('/all', [
       console.log('Primary /all query failed, trying fallback:', queryError.message);
       // Fallback query with different column names
       query = `
-        SELECT d.id, d.title, d.description, d.document_type, d.filename, d.original_filename,
-               d.file_size, d.created_at as uploaded_at, d.is_active, d.uploaded_by,
+        SELECT d.id, d.title, d.description, d.document_type, d.file_name as filename, d.file_name as original_filename,
+               d.file_size, d.uploaded_at, d.is_active, d.uploaded_by,
                u.first_name as uploaded_by_first_name, u.last_name as uploaded_by_last_name,
                g.name as grade_name, c.name as class_name
         FROM documents d
@@ -682,8 +682,8 @@ router.get('/grade/:gradeId', authenticate, async (req, res) => {
     }
 
     const result = await db.query(`
-      SELECT d.id, d.title, d.description, d.document_type, d.filename, d.original_filename,
-             d.file_size, d.created_at as uploaded_at, d.is_active,
+      SELECT d.id, d.title, d.description, d.document_type, d.file_name as filename, d.file_name as original_filename,
+             d.file_size, d.uploaded_at, d.is_active,
              u.first_name as uploaded_by_first_name, u.last_name as uploaded_by_last_name,
              g.name as grade_name, c.name as class_name
       FROM documents d
@@ -691,7 +691,7 @@ router.get('/grade/:gradeId', authenticate, async (req, res) => {
       LEFT JOIN grades g ON d.grade_id = g.id
       LEFT JOIN classes c ON d.class_id = c.id
       WHERE d.grade_id = $1 AND d.is_active = true
-      ORDER BY d.document_type, d.created_at DESC
+      ORDER BY d.document_type, d.uploaded_at DESC
     `, [gradeId]);
 
     console.log('Query result for grade-only:', result.rows.length, 'documents found');
