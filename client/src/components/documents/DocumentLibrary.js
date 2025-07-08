@@ -253,7 +253,14 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
 
   const isViewableInBrowser = (fileName) => {
     const ext = getFileExtension(fileName);
+    // These file types can be viewed directly in the browser
     return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'txt'].includes(ext);
+  };
+
+  const isDocumentFile = (fileName) => {
+    const ext = getFileExtension(fileName);
+    // These are document files that should have a view option (even if they download)
+    return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'txt', 'doc', 'docx', 'xls', 'xlsx'].includes(ext);
   };
 
   // Filter documents based on search and type
@@ -583,11 +590,11 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
                         </div>
 
                         <div className="flex items-center space-x-2">
-                          {isViewableInBrowser(doc.filename) && (
+                          {isDocumentFile(doc.filename) && (
                             <button
                               onClick={() => handleViewDocument(doc)}
                               className="flex-1 bg-blue-50 text-blue-600 px-3 py-2 rounded text-sm hover:bg-blue-100 transition-colors flex items-center justify-center space-x-1"
-                              title="View in browser"
+                              title={isViewableInBrowser(doc.filename) ? "View in browser" : "View/Download document"}
                             >
                               <Eye className="h-3 w-3" />
                               <span>View</span>
@@ -643,11 +650,11 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
                         </div>
 
                         <div className="flex items-center space-x-2 ml-4">
-                          {isViewableInBrowser(doc.filename) && (
+                          {isDocumentFile(doc.filename) && (
                             <button
                               onClick={() => handleViewDocument(doc)}
                               className="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                              title="View in browser"
+                              title={isViewableInBrowser(doc.filename) ? "View in browser" : "View/Download document"}
                             >
                               <Eye className="h-4 w-4" />
                             </button>
