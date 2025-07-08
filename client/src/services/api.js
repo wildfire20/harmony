@@ -95,12 +95,12 @@ export const quizzesAPI = {
 
 // Announcements API
 export const announcementsAPI = {
-  getAnnouncements: (gradeId, classId) => api.get(`/announcements/grade/${gradeId}/class/${classId}`),
+  getAnnouncements: () => api.get('/announcements'),
+  getAnnouncementsByGradeClass: (gradeId, classId) => api.get(`/announcements/grade/${gradeId}/class/${classId}`),
   getAnnouncement: (id) => api.get(`/announcements/${id}`),
   createAnnouncement: (data) => api.post('/announcements', data),
   deleteAnnouncement: (id) => api.delete(`/announcements/${id}`),
   updateAnnouncement: (id, data) => api.put(`/announcements/${id}`, data),
-  deleteAnnouncement: (id) => api.delete(`/announcements/${id}`),
   getRecentAnnouncements: (limit) => api.get(`/announcements/recent/${limit || 5}`),
 };
 

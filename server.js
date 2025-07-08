@@ -98,6 +98,16 @@ const initializeTargetAudienceColumn = async () => {
     } else {
       console.log('✅ Target audience column already exists');
     }
+
+    // Allow null values for grade_id and class_id for admin announcements
+    await db.query(`
+      ALTER TABLE announcements 
+      ALTER COLUMN grade_id DROP NOT NULL,
+      ALTER COLUMN class_id DROP NOT NULL;
+    `);
+    
+    console.log('✅ Updated announcements table to allow null grade/class for admin announcements');
+    
   } catch (error) {
     console.log('❌ Target audience column initialization failed:', error.message);
   }

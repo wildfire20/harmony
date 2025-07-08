@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { MessageSquare, AlertCircle, Clock, Plus, Trash2, X } from 'lucide-react';
+import { MessageSquare, AlertCircle, Clock, Plus, Trash2, X, Bell } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { announcementsAPI, classesAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -11,39 +11,39 @@ const Announcements = () => {
   const queryClient = useQueryClient();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
+  const [lastVisit, setLastVisit] = useState(null);
   const [formData, setFormData] = useState({
     title: '',
     content: '',
     priority: 'normal',
-    grade_id: '',
-    class_id: '',
     target_audience: 'everyone'
   });
 
+  // Load last visit time from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('announcements_last_visit');
+    if (saved) {
+      setLastVisit(new Date(saved));
+    }
+  }, []);
+
+  // Update last visit time when component loads
+  useEffect(() => {
+    const now = new Date();
+    localStorage.setItem('announcements_last_visit', now.toISOString());
+  }, []);
+
   const canCreateAnnouncement = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'teacher';
 
-  // Fetch user's assigned grades and classes
-  const { data: gradesData } = useQuery(
-    ['grades'],
-    () => classesAPI.getGrades(),
-    { enabled: canCreateAnnouncement }
-  );
-
-  const { data: classesData } = useQuery(
-    ['classes', formData.grade_id],
-    () => classesAPI.getClassesByGrade(formData.grade_id),
-    { enabled: !!formData.grade_id }
-  );
+  // Remove the grades and classes queries since we don't need them anymore
 
   const { data: announcementsData, isLoading } = useQuery(
-    ['announcements', user?.grade_id, user?.class_id],
-    () => user?.grade_id && user?.class_id ? announcementsAPI.getAnnouncements(user.grade_id, user.class_id) : null,
-    { enabled: !!(user?.grade_id && user?.class_id) }
+    ['announcements'],
+    () => announcementsAPI.getAnnouncements(),
+    { enabled: !!user }
   );
 
   const announcements = announcementsData?.data?.announcements || [];
-  const grades = gradesData?.data?.grades || [];
-  const classes = classesData?.data?.classes || [];
 
   // Create announcement mutation
   const createAnnouncementMutation = useMutation(
@@ -56,8 +56,6 @@ const Announcements = () => {
           title: '',
           content: '',
           priority: 'normal',
-          grade_id: '',
-          class_id: '',
           target_audience: 'everyone'
         });
         toast.success('Announcement created successfully!');
@@ -93,16 +91,15 @@ const Announcements = () => {
     e.preventDefault();
     
     // Validate form data
-    if (!formData.title || !formData.content || !formData.grade_id || !formData.class_id) {
+    if (!formData.title || !formData.content) {
       toast.error('Please fill in all required fields');
       return;
     }
 
-    // Convert IDs to integers
+    // For teachers, announcements are created for their assigned grade/class
+    // For admins, announcements are global with target_audience setting
     const submitData = {
-      ...formData,
-      grade_id: parseInt(formData.grade_id, 10),
-      class_id: parseInt(formData.class_id, 10)
+      ...formData
     };
 
     console.log('Submitting announcement data:', submitData);
@@ -155,6 +152,15 @@ const Announcements = () => {
     }
   };
 
+  const isNewAnnouncement = (announcementDate) => {
+    if (!lastVisit) return false;
+    return new Date(announcementDate) > lastVisit;
+  };
+
+  const newAnnouncementsCount = announcements.filter(announcement => 
+    isNewAnnouncement(announcement.created_at)
+  ).length;
+
   if (isLoading) {
     return <LoadingSpinner />;
   }
@@ -162,7 +168,15 @@ const Announcements = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Announcements</h1>
+        <div className="flex items-center space-x-3">
+          <h1 className="text-3xl font-bold text-gray-900">Announcements</h1>
+          {newAnnouncementsCount > 0 && (
+            <div className="flex items-center bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-medium">
+              <Bell className="h-4 w-4 mr-1" />
+              {newAnnouncementsCount} New
+            </div>
+          )}
+        </div>
         {canCreateAnnouncement && (
           <button
             onClick={() => setShowCreateModal(true)}
@@ -205,37 +219,6 @@ const Announcements = () => {
                     </p>
                   </div>
                 )}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Grade</label>
-                  <select
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    value={formData.grade_id}
-                    onChange={(e) => setFormData({ ...formData, grade_id: e.target.value, class_id: '' })}
-                    required
-                  >
-                    <option value="">Select Grade</option>
-                    {grades.map((grade) => (
-                      <option key={grade.id} value={grade.id}>{grade.name}</option>
-                    ))}
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Class</label>
-                  <select
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    value={formData.class_id}
-                    onChange={(e) => setFormData({ ...formData, class_id: e.target.value })}
-                    required
-                    disabled={!formData.grade_id}
-                  >
-                    <option value="">Select Class</option>
-                    {classes.map((cls) => (
-                      <option key={cls.id} value={cls.id}>{cls.name}</option>
-                    ))}
-                  </select>
-                </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Title</label>
@@ -326,13 +309,19 @@ const Announcements = () => {
         {announcements.length > 0 ? (
           announcements.map((announcement) => {
             const IconComponent = getPriorityIcon(announcement.priority);
+            const isNew = isNewAnnouncement(announcement.created_at);
             return (
-              <div key={announcement.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div key={announcement.id} className={`bg-white rounded-lg shadow-sm border border-gray-200 p-6 ${isNew ? 'ring-2 ring-blue-200 bg-blue-50' : ''}`}>
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center space-x-3 mb-2">
                       <IconComponent className="h-5 w-5 text-blue-600" />
                       <h2 className="text-xl font-semibold text-gray-900">{announcement.title}</h2>
+                      {isNew && (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                          NEW
+                        </span>
+                      )}
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(announcement.priority)}`}>
                         {announcement.priority}
                       </span>

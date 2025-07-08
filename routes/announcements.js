@@ -5,7 +5,65 @@ const { authenticate, authorize, authorizeResourceAccess, authorizeTeacherAssign
 
 const router = express.Router();
 
-// Get announcements for a grade/class
+// Get announcements for current user
+router.get('/', authenticate, async (req, res) => {
+  try {
+    const user = req.user;
+    
+    // Build query based on user role
+    let query = `
+      SELECT a.id, a.title, a.content, a.priority, a.target_audience, a.created_at, a.updated_at,
+             u.first_name as author_first_name, u.last_name as author_last_name,
+             g.name as grade_name, c.name as class_name
+      FROM announcements a
+      JOIN users u ON a.created_by = u.id
+      LEFT JOIN grades g ON a.grade_id = g.id
+      LEFT JOIN classes c ON a.class_id = c.id
+      WHERE a.is_active = true
+    `;
+    
+    const params = [];
+    
+    if (user.role === 'student') {
+      // Students see announcements for their grade/class or global announcements for students/everyone
+      query += ` AND (
+        (a.grade_id = $1 AND a.class_id = $2) OR 
+        (a.grade_id IS NULL AND a.class_id IS NULL AND a.target_audience IN ($3, $4))
+      )`;
+      params.push(user.grade_id, user.class_id, 'everyone', 'students');
+    } else if (user.role === 'teacher') {
+      // Teachers see announcements for their assigned grade/class or global announcements for staff/everyone
+      query += ` AND (
+        (a.grade_id = $1 AND a.class_id = $2) OR 
+        (a.grade_id IS NULL AND a.class_id IS NULL AND a.target_audience IN ($3, $4))
+      )`;
+      params.push(user.grade_id, user.class_id, 'everyone', 'staff');
+    } else if (user.role === 'admin' || user.role === 'super_admin') {
+      // Admins see all announcements
+      query += ' AND a.target_audience IN ($1, $2, $3)';
+      params.push('everyone', 'staff', 'students');
+    }
+    
+    query += ' ORDER BY a.priority DESC, a.created_at DESC';
+    
+    const result = await db.query(query, params);
+
+    res.json({ 
+      success: true,
+      announcements: result.rows,
+      total: result.rows.length
+    });
+
+  } catch (error) {
+    console.error('Get announcements error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching announcements' 
+    });
+  }
+});
+
+// Get announcements for a grade/class (legacy route)
 router.get('/grade/:gradeId/class/:classId', [
   authenticate,
   authorizeTeacherAssignment
@@ -106,12 +164,9 @@ router.get('/:id', [
 router.post('/', [
   authenticate,
   authorize('teacher', 'admin', 'super_admin'),
-  requireTeacherAssignment,
   body('title').notEmpty().withMessage('Title is required'),
   body('content').notEmpty().withMessage('Content is required'),
   body('priority').optional().isIn(['low', 'normal', 'high', 'urgent']).withMessage('Invalid priority'),
-  body('grade_id').isInt().withMessage('Grade ID is required'),
-  body('class_id').isInt().withMessage('Class ID is required'),
   body('target_audience').optional().isIn(['everyone', 'staff', 'students']).withMessage('Invalid target audience')
 ], async (req, res) => {
   try {
@@ -123,33 +178,35 @@ router.post('/', [
       });
     }
 
-    const { title, content, priority, grade_id, class_id, target_audience } = req.body;
+    const { title, content, priority, target_audience } = req.body;
     const user = req.user;
 
-    // Convert to integers
-    const gradeId = parseInt(grade_id, 10);
-    const classId = parseInt(class_id, 10);
+    let gradeId = null;
+    let classId = null;
 
-    if (isNaN(gradeId) || isNaN(classId)) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Invalid grade or class ID' 
-      });
-    }
-
-    // Check if teacher has access to this grade/class
+    // For teachers, use their assigned grade/class
     if (user.role === 'teacher') {
-      const assignmentCheck = await db.query(`
-        SELECT 1 FROM teacher_assignments 
-        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
-      `, [user.id, gradeId, classId]);
+      // Get teacher's assignment
+      const assignment = await db.query(`
+        SELECT grade_id, class_id FROM teacher_assignments 
+        WHERE teacher_id = $1 LIMIT 1
+      `, [user.id]);
 
-      if (assignmentCheck.rows.length === 0) {
+      if (assignment.rows.length === 0) {
         return res.status(403).json({ 
           success: false,
-          message: 'Access denied. You are not assigned to this grade/class. Please contact an administrator for assignment.' 
+          message: 'Access denied. You are not assigned to any grade/class. Please contact an administrator for assignment.' 
         });
       }
+
+      gradeId = assignment.rows[0].grade_id;
+      classId = assignment.rows[0].class_id;
+    }
+    // For admins, announcements are global (no specific grade/class)
+    else if (user.role === 'admin' || user.role === 'super_admin') {
+      // Admin announcements are global, so grade_id and class_id can be null
+      gradeId = null;
+      classId = null;
     }
 
     const result = await db.query(`
