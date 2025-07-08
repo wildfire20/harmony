@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
-import { useQuery } from 'react-query';
+import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { Link } from 'react-router-dom';
-import { BookOpen, Clock, CheckCircle, AlertTriangle, Plus } from 'lucide-react';
+import { BookOpen, Clock, CheckCircle, AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { tasksAPI, classesAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
+import toast from 'react-hot-toast';
 
 const Tasks = () => {
   const { user } = useAuth();
   const [selectedGrade, setSelectedGrade] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
+  const queryClient = useQueryClient();
 
   console.log('=== TASKS COMPONENT DEBUG ===');
   console.log('User:', user);
@@ -103,6 +105,27 @@ const Tasks = () => {
       }
     }
   );
+
+  // Add delete mutation
+  const deleteTaskMutation = useMutation(
+    (taskId) => tasksAPI.deleteTask(taskId),
+    {
+      onSuccess: () => {
+        toast.success('Task deleted successfully');
+        queryClient.invalidateQueries(['tasks', gradeToFetch, classToFetch]);
+      },
+      onError: (error) => {
+        toast.error(error.response?.data?.message || 'Failed to delete task');
+      }
+    }
+  );
+
+  // Delete confirmation handler
+  const handleDeleteTask = (taskId, taskTitle) => {
+    if (window.confirm(`Are you sure you want to delete the task "${taskTitle}"? This action cannot be undone.`)) {
+      deleteTaskMutation.mutate(taskId);
+    }
+  };
 
   // Filter available grades/classes for teachers
   let availableGrades = grades;
@@ -274,6 +297,15 @@ const Tasks = () => {
                   >
                     View Details
                   </Link>
+                  {(user?.role === 'teacher' || user?.role === 'admin' || user?.role === 'super_admin') && (
+                    <button
+                      onClick={() => handleDeleteTask(task.id, task.title)}
+                      className="inline-flex items-center p-2 border border-transparent text-sm font-medium rounded-md text-red-600 bg-red-100 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                    >
+                      <Trash2 className="h-5 w-5 mr-1" />
+                      Delete
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

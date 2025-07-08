@@ -894,7 +894,7 @@ const Documents = () => {
                             >
                               <Download className="h-4 w-4" />
                             </button>
-                            {(user?.role === 'admin' || user?.role === 'super_admin' || doc.uploaded_by === user?.id) && (
+                            {(user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'teacher' || doc.uploaded_by === user?.id) && (
                               <button
                                 onClick={() => handleDelete(doc.id)}
                                 className="text-red-600 hover:text-red-800"

@@ -156,4 +156,18 @@ export const adminAPI = {
   getStatistics: () => api.get('/admin/statistics'),
 };
 
+// Documents API
+export const documentsAPI = {
+  getDocuments: (gradeId, classId) => api.get(`/documents/grade/${gradeId}/class/${classId}`),
+  getAllDocuments: () => api.get('/documents/all'),
+  getDocument: (id) => api.get(`/documents/${id}`),
+  uploadDocument: (formData) => api.post('/documents/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  updateDocument: (id, data) => api.put(`/documents/${id}`, data),
+  deleteDocument: (id) => api.delete(`/documents/${id}`),
+  downloadDocument: (id) => api.get(`/documents/${id}/download`, { responseType: 'blob' }),
+  getDocumentTypes: () => api.get('/documents/types'),
+};
+
 export default api;
