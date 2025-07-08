@@ -24,8 +24,9 @@ router.get('/grade/:gradeId/class/:classId', [
       });
     }
 
-    const result = await db.query(`
-      SELECT a.id, a.title, a.content, a.priority, a.created_at, a.updated_at,
+    // Build query with target audience filtering
+    let query = `
+      SELECT a.id, a.title, a.content, a.priority, a.target_audience, a.created_at, a.updated_at,
              u.first_name as author_first_name, u.last_name as author_last_name,
              g.name as grade_name, c.name as class_name
       FROM announcements a
@@ -33,8 +34,26 @@ router.get('/grade/:gradeId/class/:classId', [
       JOIN grades g ON a.grade_id = g.id
       JOIN classes c ON a.class_id = c.id
       WHERE a.grade_id = $1 AND a.class_id = $2 AND a.is_active = true
-      ORDER BY a.priority DESC, a.created_at DESC
-    `, [requestedGradeId, requestedClassId]);
+    `;
+    
+    const params = [requestedGradeId, requestedClassId];
+    
+    // Add target audience filtering based on user role
+    if (req.user.role === 'student') {
+      query += ' AND (a.target_audience = $3 OR a.target_audience = $4)';
+      params.push('everyone', 'students');
+    } else if (req.user.role === 'teacher') {
+      query += ' AND (a.target_audience = $3 OR a.target_audience = $4)';
+      params.push('everyone', 'staff');
+    } else if (req.user.role === 'admin' || req.user.role === 'super_admin') {
+      // Admins can see all announcements
+      query += ' AND a.target_audience IN ($3, $4, $5)';
+      params.push('everyone', 'staff', 'students');
+    }
+    
+    query += ' ORDER BY a.priority DESC, a.created_at DESC';
+    
+    const result = await db.query(query, params);
 
     res.json({ 
       success: true,
@@ -60,7 +79,7 @@ router.get('/:id', [
     const { id } = req.params;
 
     const result = await db.query(`
-      SELECT a.id, a.title, a.content, a.priority, a.created_at, a.updated_at,
+      SELECT a.id, a.title, a.content, a.priority, a.target_audience, a.created_at, a.updated_at,
              a.grade_id, a.class_id,
              u.first_name as author_first_name, u.last_name as author_last_name,
              g.name as grade_name, c.name as class_name
@@ -92,7 +111,8 @@ router.post('/', [
   body('content').notEmpty().withMessage('Content is required'),
   body('priority').optional().isIn(['low', 'normal', 'high', 'urgent']).withMessage('Invalid priority'),
   body('grade_id').isInt().withMessage('Grade ID is required'),
-  body('class_id').isInt().withMessage('Class ID is required')
+  body('class_id').isInt().withMessage('Class ID is required'),
+  body('target_audience').optional().isIn(['everyone', 'staff', 'students']).withMessage('Invalid target audience')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -103,7 +123,7 @@ router.post('/', [
       });
     }
 
-    const { title, content, priority, grade_id, class_id } = req.body;
+    const { title, content, priority, grade_id, class_id, target_audience } = req.body;
     const user = req.user;
 
     // Convert to integers
@@ -133,10 +153,10 @@ router.post('/', [
     }
 
     const result = await db.query(`
-      INSERT INTO announcements (title, content, priority, grade_id, class_id, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, title, content, priority, grade_id, class_id, created_at
-    `, [title, content, priority || 'normal', gradeId, classId, user.id]);
+      INSERT INTO announcements (title, content, priority, grade_id, class_id, target_audience, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, title, content, priority, grade_id, class_id, target_audience, created_at
+    `, [title, content, priority || 'normal', gradeId, classId, target_audience || 'everyone', user.id]);
 
     res.status(201).json({
       success: true,
@@ -160,7 +180,8 @@ router.put('/:id', [
   authorizeResourceAccess('announcement'),
   body('title').optional().notEmpty().withMessage('Title cannot be empty'),
   body('content').optional().notEmpty().withMessage('Content cannot be empty'),
-  body('priority').optional().isIn(['low', 'normal', 'high', 'urgent']).withMessage('Invalid priority')
+  body('priority').optional().isIn(['low', 'normal', 'high', 'urgent']).withMessage('Invalid priority'),
+  body('target_audience').optional().isIn(['everyone', 'staff', 'students']).withMessage('Invalid target audience')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -169,7 +190,7 @@ router.put('/:id', [
     }
 
     const { id } = req.params;
-    const { title, content, priority } = req.body;
+    const { title, content, priority, target_audience } = req.body;
 
     const updateFields = [];
     const params = [];
@@ -193,6 +214,12 @@ router.put('/:id', [
       params.push(priority);
     }
 
+    if (target_audience !== undefined) {
+      paramCount++;
+      updateFields.push(`target_audience = $${paramCount}`);
+      params.push(target_audience);
+    }
+
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'No fields to update' });
     }
@@ -205,7 +232,7 @@ router.put('/:id', [
       UPDATE announcements 
       SET ${updateFields.join(', ')}
       WHERE id = $${paramCount}
-      RETURNING id, title, content, priority, updated_at
+      RETURNING id, title, content, priority, target_audience, updated_at
     `, params);
 
     if (result.rows.length === 0) {
@@ -261,7 +288,7 @@ router.get('/recent/:limit?', authenticate, async (req, res) => {
     const limit = parseInt(req.params.limit) || 5;
 
     let query = `
-      SELECT a.id, a.title, a.content, a.priority, a.created_at,
+      SELECT a.id, a.title, a.content, a.priority, a.target_audience, a.created_at,
              u.first_name as author_first_name, u.last_name as author_last_name,
              g.name as grade_name, c.name as class_name
       FROM announcements a
@@ -273,15 +300,22 @@ router.get('/recent/:limit?', authenticate, async (req, res) => {
 
     const params = [];
 
+    // Add target audience filtering
     if (user.role === 'student') {
       query += ' AND a.grade_id = $1 AND a.class_id = $2';
-      params.push(user.grade_id, user.class_id);
+      query += ' AND (a.target_audience = $3 OR a.target_audience = $4)';
+      params.push(user.grade_id, user.class_id, 'everyone', 'students');
     } else if (user.role === 'teacher') {
       query += ` AND EXISTS (
         SELECT 1 FROM teacher_assignments ta 
         WHERE ta.teacher_id = $1 AND ta.grade_id = a.grade_id AND ta.class_id = a.class_id
       )`;
-      params.push(user.id);
+      query += ' AND (a.target_audience = $2 OR a.target_audience = $3)';
+      params.push(user.id, 'everyone', 'staff');
+    } else if (user.role === 'admin' || user.role === 'super_admin') {
+      // Admins can see all announcements
+      query += ' AND a.target_audience IN ($1, $2, $3)';
+      params.push('everyone', 'staff', 'students');
     }
 
     query += ' ORDER BY a.priority DESC, a.created_at DESC LIMIT $' + (params.length + 1);

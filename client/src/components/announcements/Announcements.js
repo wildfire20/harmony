@@ -16,7 +16,8 @@ const Announcements = () => {
     content: '',
     priority: 'normal',
     grade_id: '',
-    class_id: ''
+    class_id: '',
+    target_audience: 'everyone'
   });
 
   const canCreateAnnouncement = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'teacher';
@@ -56,7 +57,8 @@ const Announcements = () => {
           content: '',
           priority: 'normal',
           grade_id: '',
-          class_id: ''
+          class_id: '',
+          target_audience: 'everyone'
         });
         toast.success('Announcement created successfully!');
       },
@@ -135,6 +137,24 @@ const Announcements = () => {
     }
   };
 
+  const getTargetAudienceColor = (targetAudience) => {
+    switch (targetAudience) {
+      case 'staff': return 'bg-purple-100 text-purple-800 border-purple-200';
+      case 'students': return 'bg-green-100 text-green-800 border-green-200';
+      case 'everyone': return 'bg-blue-100 text-blue-800 border-blue-200';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
+  };
+
+  const getTargetAudienceLabel = (targetAudience) => {
+    switch (targetAudience) {
+      case 'staff': return 'Staff Only';
+      case 'students': return 'Students Only';
+      case 'everyone': return 'Everyone';
+      default: return targetAudience;
+    }
+  };
+
   if (isLoading) {
     return <LoadingSpinner />;
   }
@@ -167,6 +187,25 @@ const Announcements = () => {
             
             <form onSubmit={handleSubmit}>
               <div className="space-y-4">
+                {(user?.role === 'admin' || user?.role === 'super_admin') && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Target Audience</label>
+                    <select
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      value={formData.target_audience}
+                      onChange={(e) => setFormData({ ...formData, target_audience: e.target.value })}
+                      required
+                    >
+                      <option value="everyone">Everyone</option>
+                      <option value="staff">Staff Only</option>
+                      <option value="students">Students Only</option>
+                    </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Choose who can see this announcement
+                    </p>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Grade</label>
                   <select
@@ -297,6 +336,11 @@ const Announcements = () => {
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(announcement.priority)}`}>
                         {announcement.priority}
                       </span>
+                      {announcement.target_audience && (
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getTargetAudienceColor(announcement.target_audience)}`}>
+                          {getTargetAudienceLabel(announcement.target_audience)}
+                        </span>
+                      )}
                     </div>
                     <p className="text-gray-600 mb-4">{announcement.content}</p>
                     <div className="flex items-center space-x-4 text-sm text-gray-500">
