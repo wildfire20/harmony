@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { usersAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 
-const DocumentLibrary = ({ gradeId, classId }) => {
+const DocumentLibrary = ({ gradeId = null, classId = null }) => {
   const { user, token } = useAuth();
   const [documents, setDocuments] = useState({});
   const [documentTypes, setDocumentTypes] = useState([]);
@@ -24,6 +24,10 @@ const DocumentLibrary = ({ gradeId, classId }) => {
   const [selectedType, setSelectedType] = useState('all');
   const [assignedGrades, setAssignedGrades] = useState([]);
 
+  // For main documents page (no specific grade/class), use first available assignment for teachers
+  const [activeGradeId, setActiveGradeId] = useState(gradeId);
+  const [activeClassId, setActiveClassId] = useState(classId);
+
   const documentIcons = {
     timetable: Calendar,
     past_paper: FileText,
@@ -36,16 +40,47 @@ const DocumentLibrary = ({ gradeId, classId }) => {
   };
 
   useEffect(() => {
-    fetchDocuments();
     fetchDocumentTypes();
     if (user?.role === 'teacher') {
       fetchTeacherAssignments();
     }
-  }, [gradeId, classId]);
+    // Delay document fetching until we have grade/class info
+  }, []);
+
+  useEffect(() => {
+    // Set up active grade/class for document fetching
+    if (gradeId && classId) {
+      // Specific grade/class provided (e.g., from class page)
+      setActiveGradeId(gradeId);
+      setActiveClassId(classId);
+    } else if (user?.role === 'teacher' && assignedGrades.length > 0) {
+      // Teacher on main documents page - use first assignment
+      const firstAssignment = assignedGrades[0];
+      setActiveGradeId(firstAssignment.grade_id);
+      setActiveClassId(firstAssignment.class_id);
+    } else if (user?.role === 'student') {
+      // Student - use their assigned grade/class
+      setActiveGradeId(user.grade_id);
+      setActiveClassId(user.class_id);
+    } else if (user?.role === 'admin' || user?.role === 'super_admin') {
+      // Admin - use grade 1, class 1 as default for fetching (they see all anyway)
+      setActiveGradeId(1);
+      setActiveClassId(1);
+    }
+  }, [gradeId, classId, user, assignedGrades]);
+
+  useEffect(() => {
+    // Fetch documents when we have active grade/class
+    if (activeGradeId && activeClassId) {
+      fetchDocuments();
+    }
+  }, [activeGradeId, activeClassId]);
 
   const fetchDocuments = async () => {
+    if (!activeGradeId || !activeClassId) return;
+    
     try {
-      const response = await fetch(`/api/documents/grade/${gradeId}/class/${classId}`, {
+      const response = await fetch(`/api/documents/grade/${activeGradeId}/class/${activeClassId}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -104,7 +139,7 @@ const DocumentLibrary = ({ gradeId, classId }) => {
     // Validate teacher access to this grade/class
     if (user.role === 'teacher') {
       const hasAccess = assignedGrades.some(assignment => 
-        assignment.grade_id === parseInt(gradeId) && assignment.class_id === parseInt(classId)
+        assignment.grade_id === parseInt(activeGradeId) && assignment.class_id === parseInt(activeClassId)
       );
       
       if (!hasAccess) {
@@ -124,8 +159,8 @@ const DocumentLibrary = ({ gradeId, classId }) => {
     if (user.role === 'admin' || user.role === 'super_admin') {
       formData.append('target_audience', uploadForm.target_audience);
     } else {
-      formData.append('grade_id', gradeId);
-      formData.append('class_id', classId);
+      formData.append('grade_id', activeGradeId);
+      formData.append('class_id', activeClassId);
     }
 
     try {

@@ -21,7 +21,7 @@ import QuizResults from './components/quiz/QuizResults';
 import Announcements from './components/announcements/Announcements';
 import Profile from './components/profile/Profile';
 import AdminPanel from './components/admin/AdminPanel';
-import Documents from './components/documents/Documents';
+import Documents from './components/documents/DocumentLibrary';
 import LoadingSpinner from './components/common/LoadingSpinner';
 
 // New components
