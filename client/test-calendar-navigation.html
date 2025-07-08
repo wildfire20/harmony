@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calendar Navigation Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-instructions {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        .test-button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .test-button:hover {
+            background-color: #45a049;
+        }
+        .test-result {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+            border-left: 4px solid #2196f3;
+        }
+        .success {
+            background-color: #e8f5e8;
+            border-left-color: #4CAF50;
+        }
+        .error {
+            background-color: #ffebee;
+            border-left-color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Calendar Navigation Test</h1>
+        
+        <div class="test-instructions">
+            <h3>Test Instructions:</h3>
+            <ol>
+                <li>Click the button below to open the calendar in a new tab</li>
+                <li>Navigate to the Calendar page</li>
+                <li>Try clicking the Today, Back, and Next buttons</li>
+                <li>Check the browser console for debug messages</li>
+                <li>Verify that the month changes when you click Back/Next</li>
+            </ol>
+        </div>
+
+        <button class="test-button" onclick="openCalendar()">Open Calendar in New Tab</button>
+        
+        <div class="test-result">
+            <h3>What to Look For:</h3>
+            <ul>
+                <li><strong>Console Messages:</strong> Should see "Back button clicked", "Next button clicked", etc.</li>
+                <li><strong>Date Changes:</strong> The calendar header should show different months</li>
+                <li><strong>Event Loading:</strong> Should see API calls for different months</li>
+                <li><strong>No Errors:</strong> Check console for any JavaScript errors</li>
+            </ul>
+        </div>
+
+        <div class="test-result">
+            <h3>Current Expected Behavior:</h3>
+            <ul>
+                <li>✅ <strong>Today:</strong> Should navigate to current month (July 2025)</li>
+                <li>✅ <strong>Back:</strong> Should navigate to previous month (June 2025)</li>
+                <li>✅ <strong>Next:</strong> Should navigate to next month (August 2025)</li>
+                <li>✅ <strong>Events:</strong> Should load events for the displayed month</li>
+            </ul>
+        </div>
+        
+        <div class="test-result">
+            <h3>Debug Information:</h3>
+            <p><strong>Current Date:</strong> <span id="currentDate"></span></p>
+            <p><strong>Calendar URL:</strong> <a href="http://localhost:3000/calendar" target="_blank">http://localhost:3000/calendar</a></p>
+            <p><strong>Backend API:</strong> <a href="http://localhost:5000/calendar" target="_blank">http://localhost:5000/calendar</a></p>
+        </div>
+    </div>
+
+    <script>
+        function openCalendar() {
+            window.open('http://localhost:3000/calendar', '_blank');
+        }
+        
+        // Display current date
+        document.getElementById('currentDate').textContent = new Date().toLocaleDateString();
+        
+        // Test backend API
+        function testBackendAPI() {
+            const month = new Date().getMonth() + 1;
+            const year = new Date().getFullYear();
+            const apiUrl = `http://localhost:5000/calendar?month=${month}&year=${year}`;
+            
+            fetch(apiUrl)
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Backend API Response:', data);
+                    document.getElementById('apiResult').innerHTML = `
+                        <div class="success">
+                            <strong>API Test Success:</strong> Found ${data.events?.length || 0} events
+                        </div>
+                    `;
+                })
+                .catch(error => {
+                    console.error('Backend API Error:', error);
+                    document.getElementById('apiResult').innerHTML = `
+                        <div class="error">
+                            <strong>API Test Failed:</strong> ${error.message}
+                        </div>
+                    `;
+                });
+        }
+        
+        // Auto-test backend API on page load
+        window.onload = function() {
+            // testBackendAPI();
+        };
+    </script>
+</body>
+</html>

@@ -41,7 +41,8 @@ const CalendarComponent = () => {
       const month = dateToFetch.getMonth() + 1;
       const year = dateToFetch.getFullYear();
       
-      console.log('Fetching calendar events for:', month, year);
+      console.log('fetchCalendarEvents called with dateToFetch:', dateToFetch);
+      console.log('Fetching calendar events for month:', month, 'year:', year);
       
       const response = await api.get(`/calendar?month=${month}&year=${year}`);
       
@@ -156,13 +157,74 @@ const CalendarComponent = () => {
     };
   };
 
+  // Custom toolbar component to handle navigation
+  const CustomToolbar = ({ date, onNavigate, label, onView, view }) => {
+    const goToBack = () => {
+      console.log('Back button clicked');
+      onNavigate('PREV');
+    };
+
+    const goToNext = () => {
+      console.log('Next button clicked');
+      onNavigate('NEXT');
+    };
+
+    const goToToday = () => {
+      console.log('Today button clicked');
+      onNavigate('TODAY');
+    };
+
+    return (
+      <div className="rbc-toolbar">
+        <span className="rbc-btn-group">
+          <button type="button" onClick={goToToday}>
+            Today
+          </button>
+          <button type="button" onClick={goToBack}>
+            Back
+          </button>
+          <button type="button" onClick={goToNext}>
+            Next
+          </button>
+        </span>
+        <span className="rbc-toolbar-label">{label}</span>
+        <span className="rbc-btn-group">
+          <button 
+            type="button" 
+            className={view === 'month' ? 'rbc-active' : ''}
+            onClick={() => onView('month')}
+          >
+            Month
+          </button>
+          <button 
+            type="button" 
+            className={view === 'week' ? 'rbc-active' : ''}
+            onClick={() => onView('week')}
+          >
+            Week
+          </button>
+          <button 
+            type="button" 
+            className={view === 'day' ? 'rbc-active' : ''}
+            onClick={() => onView('day')}
+          >
+            Day
+          </button>
+        </span>
+      </div>
+    );
+  };
+
   // Handler functions
   const handleSelectEvent = (event) => {
     setSelectedEvent(event);
   };
 
   const handleNavigate = (date) => {
+    console.log('handleNavigate called with date:', date);
+    console.log('Current date before change:', currentDate);
     setCurrentDate(date);
+    console.log('About to fetch events for:', date);
     fetchCalendarEvents(date);
   };
 
@@ -277,14 +339,18 @@ const CalendarComponent = () => {
           startAccessor="start"
           endAccessor="end"
           style={{ height: 700 }}
-          onSelectEvent={handleSelectEvent}
+          date={currentDate}
           onNavigate={handleNavigate}
+          onSelectEvent={handleSelectEvent}
           eventPropGetter={eventStyleGetter}
           views={['month', 'week', 'day']}
           defaultView="month"
           popup
           popupOffset={{ x: 30, y: 20 }}
+          showMultiDayTimes
+          step={60}
           components={{
+            toolbar: CustomToolbar,
             event: ({ event }) => (
               <div className="calendar-event">
                 <span className="event-title">{event.title}</span>
