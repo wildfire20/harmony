@@ -56,6 +56,33 @@ const initializeDocumentsTable = async () => {
       CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(is_active);
     `);
     
+    // Check if target_audience column exists and add it if missing
+    const columnCheck = await db.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'documents' AND column_name = 'target_audience'
+    `);
+
+    if (columnCheck.rows.length === 0) {
+      console.log('Adding target_audience column to documents table...');
+      
+      // Add the column
+      await db.query(`ALTER TABLE documents ADD COLUMN target_audience VARCHAR(20) DEFAULT NULL`);
+      
+      // Add constraint
+      await db.query(`
+        ALTER TABLE documents ADD CONSTRAINT check_target_audience 
+        CHECK (target_audience IS NULL OR target_audience IN ('everyone', 'student', 'staff'))
+      `);
+      
+      // Add index
+      await db.query(`CREATE INDEX idx_documents_target_audience ON documents(target_audience)`);
+      
+      console.log('✅ Target audience column added to documents table');
+    } else {
+      console.log('✅ Target audience column already exists');
+    }
+    
     console.log('Documents table initialized successfully');
   } catch (error) {
     console.log('Documents table initialization skipped or already exists:', error.message);
