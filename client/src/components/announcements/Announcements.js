@@ -19,11 +19,11 @@ const Announcements = () => {
     class_id: ''
   });
 
-  // Fetch user's assigned grades and classes if they're a teacher
+  // Fetch user's assigned grades and classes
   const { data: gradesData } = useQuery(
     ['grades'],
     () => classesAPI.getGrades(),
-    { enabled: user?.role === 'teacher' }
+    { enabled: canCreateAnnouncement }
   );
 
   const { data: classesData } = useQuery(
@@ -59,7 +59,12 @@ const Announcements = () => {
         toast.success('Announcement created successfully!');
       },
       onError: (error) => {
-        toast.error(error.response?.data?.message || 'Failed to create announcement');
+        console.error('Create announcement error:', error);
+        const errorMessage = error.response?.data?.message || 
+                            (error.response?.data?.errors ? 
+                             error.response.data.errors.map(e => e.msg).join(', ') : 
+                             'Failed to create announcement');
+        toast.error(errorMessage);
       }
     }
   );
@@ -82,7 +87,22 @@ const Announcements = () => {
   // Handle form submission
   const handleSubmit = (e) => {
     e.preventDefault();
-    createAnnouncementMutation.mutate(formData);
+    
+    // Validate form data
+    if (!formData.title || !formData.content || !formData.grade_id || !formData.class_id) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    // Convert IDs to integers
+    const submitData = {
+      ...formData,
+      grade_id: parseInt(formData.grade_id, 10),
+      class_id: parseInt(formData.class_id, 10)
+    };
+
+    console.log('Submitting announcement data:', submitData);
+    createAnnouncementMutation.mutate(submitData);
   };
 
   // Handle delete confirmation
@@ -147,40 +167,36 @@ const Announcements = () => {
             
             <form onSubmit={handleSubmit}>
               <div className="space-y-4">
-                {user?.role === 'teacher' && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Grade</label>
-                      <select
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                        value={formData.grade_id}
-                        onChange={(e) => setFormData({ ...formData, grade_id: e.target.value })}
-                        required
-                      >
-                        <option value="">Select Grade</option>
-                        {grades.map((grade) => (
-                          <option key={grade.id} value={grade.id}>{grade.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Class</label>
-                      <select
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                        value={formData.class_id}
-                        onChange={(e) => setFormData({ ...formData, class_id: e.target.value })}
-                        required
-                        disabled={!formData.grade_id}
-                      >
-                        <option value="">Select Class</option>
-                        {classes.map((cls) => (
-                          <option key={cls.id} value={cls.id}>{cls.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </>
-                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Grade</label>
+                  <select
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    value={formData.grade_id}
+                    onChange={(e) => setFormData({ ...formData, grade_id: e.target.value, class_id: '' })}
+                    required
+                  >
+                    <option value="">Select Grade</option>
+                    {grades.map((grade) => (
+                      <option key={grade.id} value={grade.id}>{grade.name}</option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Class</label>
+                  <select
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    value={formData.class_id}
+                    onChange={(e) => setFormData({ ...formData, class_id: e.target.value })}
+                    required
+                    disabled={!formData.grade_id}
+                  >
+                    <option value="">Select Class</option>
+                    {classes.map((cls) => (
+                      <option key={cls.id} value={cls.id}>{cls.name}</option>
+                    ))}
+                  </select>
+                </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Title</label>
