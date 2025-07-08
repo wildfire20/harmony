@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, momentLocalizer } from 'react-big-calendar';
 import moment from 'moment';
+import { Calendar as CalendarIcon, Plus, X, Clock, MapPin, Users, BookOpen, AlertCircle } from 'lucide-react';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import toast from 'react-hot-toast';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import './Calendar.css';
 
@@ -35,7 +37,7 @@ const CalendarComponent = () => {
   const fetchCalendarEvents = async (dateToFetch = currentDate) => {
     try {
       setLoading(true);
-      setError(null); // Clear any previous errors
+      setError(null);
       const month = dateToFetch.getMonth() + 1;
       const year = dateToFetch.getFullYear();
       
@@ -70,7 +72,25 @@ const CalendarComponent = () => {
     e.preventDefault();
     try {
       setError(null); // Clear any previous errors
-      const response = await api.post('/calendar/events', eventForm);
+      
+      // Clean up the form data - remove empty fields
+      const cleanedForm = {
+        title: eventForm.title.trim(),
+        description: eventForm.description.trim(),
+        start_date: eventForm.start_date,
+        end_date: eventForm.end_date || null,
+        event_type: eventForm.event_type,
+        target_audience: eventForm.target_audience
+      };
+
+      // Only include grade_id if it's not empty
+      if (eventForm.grade_id && eventForm.grade_id !== '') {
+        cleanedForm.grade_id = parseInt(eventForm.grade_id);
+      }
+
+      console.log('Submitting event form:', cleanedForm);
+      
+      const response = await api.post('/calendar/events', cleanedForm);
       
       if (response.data.success) {
         setShowCreateEvent(false);
@@ -83,14 +103,17 @@ const CalendarComponent = () => {
           target_audience: 'all',
           grade_id: ''
         });
-        await fetchCalendarEvents(); // Wait for refresh
-        // Show success message
-        console.log('Event created successfully');
+        await fetchCalendarEvents();
+        toast.success('Event created successfully!');
       }
     } catch (error) {
       console.error('Error creating event:', error);
-      const errorMessage = error.response?.data?.message || 'Failed to create event';
+      const errorMessage = error.response?.data?.message || 
+                          (error.response?.data?.errors ? 
+                           error.response.data.errors.map(e => e.msg).join(', ') : 
+                           'Failed to create event');
       setError(errorMessage);
+      toast.error(errorMessage);
     }
   };
 
@@ -133,14 +156,14 @@ const CalendarComponent = () => {
     };
   };
 
-  const handleNavigate = (date) => {
-    console.log('Navigating to date:', date);
-    setCurrentDate(date);
-    fetchCalendarEvents(date);
-  };
-
+  // Handler functions
   const handleSelectEvent = (event) => {
     setSelectedEvent(event);
+  };
+
+  const handleNavigate = (date) => {
+    setCurrentDate(date);
+    fetchCalendarEvents(date);
   };
 
   const formatEventDetails = (event) => {
@@ -185,62 +208,94 @@ const CalendarComponent = () => {
 
   return (
     <div className="calendar-container">
+      {/* Header */}
       <div className="calendar-header">
-        <h2>📅 Academic Calendar</h2>
-        {(user.role === 'admin' || user.role === 'super_admin') && (
-          <button 
-            className="btn btn-primary"
-            onClick={() => setShowCreateEvent(true)}
-          >
-            + Create Event
-          </button>
-        )}
+        <div className="header-content">
+          <div className="header-title">
+            <CalendarIcon className="header-icon" />
+            <h1>Academic Calendar</h1>
+          </div>
+          {(user.role === 'admin' || user.role === 'super_admin') && (
+            <button 
+              className="create-event-btn"
+              onClick={() => setShowCreateEvent(true)}
+            >
+              <Plus className="btn-icon" />
+              Create Event
+            </button>
+          )}
+        </div>
       </div>
 
+      {/* Error Display */}
       {error && (
-        <div className="alert alert-danger">
-          {error}
-          <button onClick={() => setError(null)}>×</button>
+        <div className="error-banner">
+          <AlertCircle className="error-icon" />
+          <span>{error}</span>
+          <button 
+            className="error-close"
+            onClick={() => setError(null)}
+          >
+            <X className="close-icon" />
+          </button>
         </div>
       )}
 
+      {/* Calendar Legend */}
       <div className="calendar-legend">
         <div className="legend-item">
-          <span className="legend-color" style={{ backgroundColor: '#4dabf7' }}></span>
-          <span>Assignments</span>
+          <div className="legend-color" style={{ backgroundColor: '#3b82f6' }}></div>
+          <span>📋 Assignments</span>
         </div>
         <div className="legend-item">
-          <span className="legend-color" style={{ backgroundColor: '#ff6b6b' }}></span>
-          <span>Quizzes</span>
+          <div className="legend-color" style={{ backgroundColor: '#dc2626' }}></div>
+          <span>📝 Quizzes</span>
         </div>
         <div className="legend-item">
-          <span className="legend-color" style={{ backgroundColor: '#51cf66' }}></span>
-          <span>Holidays</span>
+          <div className="legend-color" style={{ backgroundColor: '#059669' }}></div>
+          <span>🎉 Holidays</span>
         </div>
         <div className="legend-item">
-          <span className="legend-color" style={{ backgroundColor: '#ff8787' }}></span>
-          <span>Exams</span>
+          <div className="legend-color" style={{ backgroundColor: '#ea580c' }}></div>
+          <span>📊 Exams</span>
         </div>
         <div className="legend-item">
-          <span className="legend-color" style={{ backgroundColor: '#ffd43b' }}></span>
-          <span>Meetings</span>
+          <div className="legend-color" style={{ backgroundColor: '#7c3aed' }}></div>
+          <span>👥 Meetings</span>
+        </div>
+        <div className="legend-item">
+          <div className="legend-color" style={{ backgroundColor: '#6b7280' }}></div>
+          <span>📌 Other</span>
         </div>
       </div>
 
-      <Calendar
-        localizer={localizer}
-        events={events}
-        startAccessor="start"
-        endAccessor="end"
-        style={{ height: 600 }}
-        onSelectEvent={handleSelectEvent}
-        onNavigate={handleNavigate}
-        eventPropGetter={eventStyleGetter}
-        views={['month', 'week', 'day']}
-        defaultView="month"
-        popup
-        popupOffset={{ x: 30, y: 20 }}
-      />
+      {/* Calendar */}
+      <div className="calendar-wrapper">
+        <Calendar
+          localizer={localizer}
+          events={events}
+          startAccessor="start"
+          endAccessor="end"
+          style={{ height: 700 }}
+          onSelectEvent={handleSelectEvent}
+          onNavigate={handleNavigate}
+          eventPropGetter={eventStyleGetter}
+          views={['month', 'week', 'day']}
+          defaultView="month"
+          popup
+          popupOffset={{ x: 30, y: 20 }}
+          components={{
+            event: ({ event }) => (
+              <div className="calendar-event">
+                <span className="event-title">{event.title}</span>
+                <span className="event-time">
+                  {moment(event.start).format('HH:mm')}
+                </span>
+              </div>
+            )
+          }}
+        />
+      </div>
 
       {/* Event Details Modal */}
       {selectedEvent && (

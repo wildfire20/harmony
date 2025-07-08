@@ -1,5 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const moment = require('moment');
 const db = require('../config/database');
 const { authenticate, authorize, authorizeResourceAccess } = require('../middleware/auth');
 
@@ -142,17 +143,30 @@ router.get('/', authenticate, async (req, res) => {
 router.post('/events', [
   authenticate,
   authorize('admin', 'super_admin'),
-  body('title').notEmpty().withMessage('Title is required'),
-  body('description').optional(),
+  body('title').notEmpty().trim().withMessage('Title is required'),
+  body('description').optional().trim(),
   body('start_date').isISO8601().withMessage('Start date must be a valid date'),
-  body('end_date').optional().isISO8601().withMessage('End date must be a valid date'),
+  body('end_date').optional().custom((value) => {
+    if (value && !moment(value).isValid()) {
+      throw new Error('End date must be a valid date');
+    }
+    return true;
+  }),
   body('event_type').isIn(['holiday', 'exam', 'meeting', 'deadline', 'other']).withMessage('Invalid event type'),
   body('target_audience').isIn(['all', 'students', 'teachers', 'staff']).withMessage('Invalid target audience'),
-  body('grade_id').optional().isInt().withMessage('Grade ID must be an integer')
+  body('grade_id').optional().custom((value) => {
+    if (value !== undefined && value !== null && value !== '') {
+      if (!Number.isInteger(parseInt(value))) {
+        throw new Error('Grade ID must be an integer');
+      }
+    }
+    return true;
+  })
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('Validation errors:', errors.array());
       return res.status(400).json({ 
         success: false,
         message: 'Validation errors',
@@ -162,6 +176,11 @@ router.post('/events', [
 
     const { title, description, start_date, end_date, event_type, target_audience, grade_id } = req.body;
     const user = req.user;
+
+    // Convert grade_id to integer or null
+    const processedGradeId = grade_id && grade_id !== '' ? parseInt(grade_id) : null;
+
+    console.log('Creating event:', { title, description, start_date, end_date, event_type, target_audience, grade_id: processedGradeId });
 
     // Create school_events table if it doesn't exist
     await db.query(`
@@ -185,7 +204,7 @@ router.post('/events', [
       INSERT INTO school_events (title, description, start_date, end_date, event_type, target_audience, grade_id, created_by)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING id, title, description, start_date, end_date, event_type, target_audience, grade_id, created_at
-    `, [title, description, start_date, end_date, event_type, target_audience, grade_id, user.id]);
+    `, [title, description, start_date, end_date, event_type, target_audience, processedGradeId, user.id]);
 
     res.status(201).json({
       success: true,
