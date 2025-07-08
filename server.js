@@ -61,6 +61,48 @@ const initializeDocumentsTable = async () => {
   }
 };
 
+// Initialize target_audience column for announcements
+const initializeTargetAudienceColumn = async () => {
+  try {
+    // Check if column exists
+    const columnCheck = await db.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'announcements' AND column_name = 'target_audience';
+    `);
+    
+    if (columnCheck.rows.length === 0) {
+      console.log('Adding target_audience column to announcements table...');
+      
+      // Add target_audience column
+      await db.query(`
+        ALTER TABLE announcements 
+        ADD COLUMN target_audience VARCHAR(20) DEFAULT 'everyone' 
+        CHECK (target_audience IN ('everyone', 'staff', 'students'));
+      `);
+      
+      // Update existing records
+      await db.query(`
+        UPDATE announcements 
+        SET target_audience = 'everyone' 
+        WHERE target_audience IS NULL;
+      `);
+      
+      // Create index
+      await db.query(`
+        CREATE INDEX IF NOT EXISTS idx_announcements_target_audience 
+        ON announcements(target_audience);
+      `);
+      
+      console.log('✅ Target audience column added successfully');
+    } else {
+      console.log('✅ Target audience column already exists');
+    }
+  } catch (error) {
+    console.log('❌ Target audience column initialization failed:', error.message);
+  }
+};
+
 const app = express();
 
 // Production security enhancements
@@ -409,6 +451,7 @@ const startServer = async () => {
   try {
     await db.initialize();
     await initializeDocumentsTable();
+    await initializeTargetAudienceColumn();
     app.listen(PORT, () => {
       console.log(`🚀 Harmony Learning Institute server running on port ${PORT}`);
       console.log(`🌐 Environment: ${process.env.NODE_ENV}`);
