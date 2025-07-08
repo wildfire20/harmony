@@ -1,6 +1,6 @@
 {
   "name": "harmony-learning-institute",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "School Management System for Harmony Learning Institute",
   "main": "server.js",
   "scripts": {
