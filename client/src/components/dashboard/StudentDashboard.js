@@ -27,8 +27,9 @@ const StudentDashboard = () => {
 
   // Fetch recent announcements
   const { data: announcementsData, isLoading: announcementsLoading } = useQuery(
-    ['recent-announcements'],
-    () => announcementsAPI.getRecentAnnouncements(5)
+    ['dashboard-announcements'],
+    () => announcementsAPI.getAnnouncements(),
+    { enabled: !!user }
   );
 
   // Fetch student's submissions
@@ -38,7 +39,7 @@ const StudentDashboard = () => {
   );
 
   const tasks = tasksData?.data?.tasks || [];
-  const announcements = announcementsData?.data?.announcements || [];
+  const announcements = (announcementsData?.data?.announcements || []).slice(0, 5);
   const submissions = submissionsData?.data?.submissions || [];
 
   const upcomingTasks = tasks
@@ -68,6 +69,22 @@ const StudentDashboard = () => {
       case 'normal': return 'bg-blue-100 text-blue-800 border-blue-200';
       default: return 'bg-gray-100 text-gray-800 border-gray-200';
     }
+  };
+
+  const getTargetAudienceColor = (audience) => {
+    switch (audience) {
+      case 'everyone': return 'bg-purple-100 text-purple-800';
+      case 'staff': return 'bg-orange-100 text-orange-800';
+      case 'students': return 'bg-green-100 text-green-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const isNewAnnouncement = (createdAt) => {
+    const created = new Date(createdAt);
+    const now = new Date();
+    const diffHours = (now - created) / (1000 * 60 * 60);
+    return diffHours < 24; // Consider announcements less than 24 hours old as "new"
   };
 
   if (tasksLoading || announcementsLoading || submissionsLoading) {
@@ -236,9 +253,21 @@ const StudentDashboard = () => {
                   {announcements.map((announcement) => (
                     <div key={announcement.id} className="border-l-4 border-blue-400 pl-4">
                       <div className="flex items-center justify-between">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(announcement.priority)}`}>
-                          {announcement.priority}
-                        </span>
+                        <div className="flex items-center space-x-2">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(announcement.priority)}`}>
+                            {announcement.priority}
+                          </span>
+                          {announcement.target_audience && (
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getTargetAudienceColor(announcement.target_audience)}`}>
+                              {announcement.target_audience}
+                            </span>
+                          )}
+                          {isNewAnnouncement(announcement.created_at) && (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                              NEW
+                            </span>
+                          )}
+                        </div>
                         <span className="text-xs text-gray-500">
                           {new Date(announcement.created_at).toLocaleDateString()}
                         </span>
