@@ -19,6 +19,8 @@ const Announcements = () => {
     class_id: ''
   });
 
+  const canCreateAnnouncement = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'teacher';
+
   // Fetch user's assigned grades and classes
   const { data: gradesData } = useQuery(
     ['grades'],
@@ -110,8 +112,6 @@ const Announcements = () => {
     deleteAnnouncementMutation.mutate(id);
   };
 
-  const canCreateAnnouncement = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'teacher';
-  
   const canDeleteAnnouncement = (announcement) => {
     return user?.role === 'admin' || 
            user?.role === 'super_admin' || 
