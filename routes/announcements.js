@@ -170,8 +170,12 @@ router.post('/', [
   body('target_audience').optional().isIn(['everyone', 'staff', 'students']).withMessage('Invalid target audience')
 ], async (req, res) => {
   try {
+    console.log('📝 Creating announcement with data:', req.body);
+    console.log('👤 User:', { id: req.user.id, role: req.user.role });
+    
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('❌ Validation errors:', errors.array());
       return res.status(400).json({ 
         success: false,
         errors: errors.array() 
@@ -186,6 +190,7 @@ router.post('/', [
 
     // For teachers, use their assigned grade/class
     if (user.role === 'teacher') {
+      console.log('🏫 Processing teacher announcement...');
       // Get teacher's assignment
       const assignment = await db.query(`
         SELECT grade_id, class_id FROM teacher_assignments 
@@ -193,6 +198,7 @@ router.post('/', [
       `, [user.id]);
 
       if (assignment.rows.length === 0) {
+        console.log('❌ Teacher not assigned to any grade/class');
         return res.status(403).json({ 
           success: false,
           message: 'Access denied. You are not assigned to any grade/class. Please contact an administrator for assignment.' 
@@ -201,19 +207,27 @@ router.post('/', [
 
       gradeId = assignment.rows[0].grade_id;
       classId = assignment.rows[0].class_id;
+      console.log('✅ Teacher assignment found:', { gradeId, classId });
     }
     // For admins, announcements are global (no specific grade/class)
     else if (user.role === 'admin' || user.role === 'super_admin') {
+      console.log('👑 Processing admin announcement...');
       // Admin announcements are global, so grade_id and class_id can be null
       gradeId = null;
       classId = null;
     }
+
+    console.log('💾 Inserting announcement with params:', {
+      title, content, priority: priority || 'normal', gradeId, classId, target_audience: target_audience || 'everyone', created_by: user.id
+    });
 
     const result = await db.query(`
       INSERT INTO announcements (title, content, priority, grade_id, class_id, target_audience, created_by)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING id, title, content, priority, grade_id, class_id, target_audience, created_at
     `, [title, content, priority || 'normal', gradeId, classId, target_audience || 'everyone', user.id]);
+
+    console.log('✅ Announcement created successfully:', result.rows[0]);
 
     res.status(201).json({
       success: true,
@@ -222,7 +236,7 @@ router.post('/', [
     });
 
   } catch (error) {
-    console.error('Create announcement error:', error);
+    console.error('❌ Create announcement error:', error);
     res.status(500).json({ 
       success: false,
       message: 'Server error creating announcement' 
