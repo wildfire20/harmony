@@ -259,7 +259,7 @@ const DocumentLibrary = ({ gradeId, classId }) => {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Document Library</h2>
-          <p className="text-gray-600">Access and manage class materials - Enhanced Version</p>
+          <p className="text-gray-600">Access and manage class materials - Enhanced Version v1.1</p>
         </div>
         
         {canUpload && (
@@ -344,23 +344,29 @@ const DocumentLibrary = ({ gradeId, classId }) => {
             </button>
           </div>
           
+          {(user.role === 'admin' || user.role === 'super_admin') && (
+            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+              <p className="text-sm text-green-800">
+                � As an admin, you can upload documents for all users. Select your target audience below.
+                <span className="block mt-1 text-xs">
+                  Current role: {user.role} | Component version: v1.1
+                </span>
+              </p>
+            </div>
+          )}
+
           {user.role === 'teacher' && (
             <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
               <p className="text-sm text-blue-800">
-                📚 You can only upload documents to grades and classes you are assigned to.
+                � You can only upload documents to grades and classes you are assigned to.
                 {assignedGrades.length > 0 && (
                   <span className="block mt-1">
                     Your assignments: {assignedGrades.map(a => `${a.grade_name} - ${a.class_name}`).join(', ')}
                   </span>
                 )}
-              </p>
-            </div>
-          )}
-
-          {(user.role === 'admin' || user.role === 'super_admin') && (
-            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-              <p className="text-sm text-green-800">
-                🔐 As an admin, you can upload documents for all users. Select your target audience below.
+                <span className="block mt-1 text-xs">
+                  Current role: {user.role} | Component version: v1.1
+                </span>
               </p>
             </div>
           )}
