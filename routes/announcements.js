@@ -402,4 +402,45 @@ router.get('/recent/:limit?', authenticate, async (req, res) => {
   }
 });
 
+// Test endpoint to get current user details
+router.get('/debug/user', authenticate, async (req, res) => {
+  try {
+    console.log('🔍 Debug user endpoint called');
+    console.log('User from token:', req.user);
+    
+    // Get fresh user data from database
+    const userResult = await db.query(`
+      SELECT id, email, first_name, last_name, role, grade_id, class_id, is_active
+      FROM users 
+      WHERE id = $1
+    `, [req.user.id]);
+    
+    console.log('User from database:', userResult.rows[0]);
+    
+    // If user is a teacher, get their assignments
+    let assignments = null;
+    if (req.user.role === 'teacher') {
+      assignments = await db.query(`
+        SELECT ta.grade_id, ta.class_id, g.name as grade_name, c.name as class_name
+        FROM teacher_assignments ta
+        JOIN grades g ON ta.grade_id = g.id
+        JOIN classes c ON ta.class_id = c.id
+        WHERE ta.teacher_id = $1
+      `, [req.user.id]);
+      
+      console.log('Teacher assignments:', assignments.rows);
+    }
+    
+    res.json({
+      success: true,
+      user: req.user,
+      fresh_user: userResult.rows[0],
+      assignments: req.user.role === 'teacher' ? assignments.rows : null
+    });
+  } catch (error) {
+    console.error('Debug user error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

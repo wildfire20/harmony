@@ -6,10 +6,12 @@ const authenticate = async (req, res, next) => {
     const token = req.header('Authorization')?.replace('Bearer ', '');
     
     if (!token) {
+      console.log('❌ No token provided');
       return res.status(401).json({ message: 'Access denied. No token provided.' });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('✅ Token decoded successfully:', { id: decoded.id, email: decoded.email });
     
     // Get user details from database with retry logic
     let result;
@@ -39,12 +41,15 @@ const authenticate = async (req, res, next) => {
     }
 
     if (result.rows.length === 0) {
+      console.log('❌ User not found in database for id:', decoded.id);
       return res.status(401).json({ message: 'Invalid token. User not found.' });
     }
 
     req.user = result.rows[0];
+    console.log('✅ User authenticated:', { id: req.user.id, email: req.user.email, role: req.user.role });
     next();
   } catch (error) {
+    console.error('❌ Authentication error:', error);
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({ message: 'Token expired. Please login again.' });
     }
@@ -59,15 +64,21 @@ const authenticate = async (req, res, next) => {
 const authorize = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {
+      console.log('❌ Authorization failed: No user in request');
       return res.status(401).json({ message: 'Authentication required.' });
     }
 
+    console.log('🔍 Checking authorization for user:', { id: req.user.id, role: req.user.role });
+    console.log('🔍 Required roles:', roles);
+
     if (!roles.includes(req.user.role)) {
+      console.log('❌ Authorization failed: User role not in required roles');
       return res.status(403).json({ 
         message: 'Access denied. Insufficient permissions.' 
       });
     }
 
+    console.log('✅ Authorization successful');
     next();
   };
 };
