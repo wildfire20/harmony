@@ -385,6 +385,19 @@ router.post('/upload', [
     }
 
     // Insert document record
+    console.log('Preparing database insert with values:', {
+      title,
+      description,
+      document_type,
+      filename: req.file.filename,
+      fileSize: req.file.size,
+      gradeId,
+      classId,
+      uploadedBy: user.id,
+      filePath: req.file.path,
+      targetAudience: target_audience || null
+    });
+
     const result = await db.query(`
       INSERT INTO documents (title, description, document_type, file_name, file_size, 
                            grade_id, class_id, uploaded_by, file_path, target_audience)
@@ -392,7 +405,7 @@ router.post('/upload', [
       RETURNING id, title, description, document_type, file_name, file_size, uploaded_at, target_audience
     `, [
       title,
-      description,
+      description || null,
       document_type,
       req.file.filename,
       req.file.size,
@@ -419,10 +432,27 @@ router.post('/upload', [
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
-    console.error('Upload document error:', error);
+    
+    console.error('❌ Upload document error:', error);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      detail: error.detail,
+      constraint: error.constraint,
+      stack: error.stack
+    });
+    
+    // Send detailed error for debugging
     res.status(500).json({ 
       success: false,
-      message: 'Server error uploading document' 
+      message: 'Server error uploading document',
+      error_details: {
+        message: error.message,
+        code: error.code,
+        detail: error.detail,
+        constraint: error.constraint
+      }
     });
   }
 });
