@@ -167,12 +167,12 @@ router.get('/grade/:gradeId/class/:classId', [
 
     // Execute database query with fallback for different column names
     console.log('=== EXECUTING DATABASE QUERY ===');
-    console.log('Query parameters:', [requestedGradeId, requestedClassId]);
+    console.log('Query parameters:', [requestedGradeId, requestedClassId, user.role]);
 
     let query = `
       SELECT d.id, d.title, d.description, d.document_type, 
              d.file_name as filename, d.file_name as original_filename, d.file_size, 
-             d.uploaded_at, d.is_active,
+             d.uploaded_at, d.is_active, d.target_audience,
              u.first_name as uploaded_by_first_name, 
              u.last_name as uploaded_by_last_name,
              g.name as grade_name, c.name as class_name
@@ -180,7 +180,18 @@ router.get('/grade/:gradeId/class/:classId', [
       JOIN users u ON d.uploaded_by = u.id
       LEFT JOIN grades g ON d.grade_id = g.id
       LEFT JOIN classes c ON d.class_id = c.id
-      WHERE d.grade_id = $1 AND d.class_id = $2 AND d.is_active = true
+      WHERE d.is_active = true 
+        AND (
+          -- Class-specific documents (teacher/admin uploads to specific grade/class)
+          (d.grade_id = $1 AND d.class_id = $2 AND d.target_audience IS NULL)
+          OR
+          -- Admin target audience documents
+          (d.target_audience = 'everyone')
+          OR
+          (d.target_audience = 'student' AND $3 = 'student')
+          OR
+          (d.target_audience = 'staff' AND $3 IN ('teacher', 'admin', 'super_admin'))
+        )
       ORDER BY d.document_type, d.uploaded_at DESC
     `;
 
@@ -188,14 +199,14 @@ router.get('/grade/:gradeId/class/:classId', [
     let result;
 
     try {
-      result = await db.query(query, [requestedGradeId, requestedClassId]);
+      result = await db.query(query, [requestedGradeId, requestedClassId, user.role]);
     } catch (queryError) {
       console.log('Primary query failed, trying fallback:', queryError.message);
       // Fallback query with different column names
       query = `
         SELECT d.id, d.title, d.description, d.document_type, 
                d.file_name as filename, d.file_name as original_filename, d.file_size, 
-               d.uploaded_at, d.is_active,
+               d.uploaded_at, d.is_active, d.target_audience,
                u.first_name as uploaded_by_first_name, 
                u.last_name as uploaded_by_last_name,
                g.name as grade_name, c.name as class_name
@@ -203,10 +214,21 @@ router.get('/grade/:gradeId/class/:classId', [
         JOIN users u ON d.uploaded_by = u.id
         LEFT JOIN grades g ON d.grade_id = g.id
         LEFT JOIN classes c ON d.class_id = c.id
-        WHERE d.grade_id = $1 AND d.class_id = $2 AND d.is_active = true
+        WHERE d.is_active = true 
+          AND (
+            -- Class-specific documents (teacher/admin uploads to specific grade/class)
+            (d.grade_id = $1 AND d.class_id = $2 AND d.target_audience IS NULL)
+            OR
+            -- Admin target audience documents
+            (d.target_audience = 'everyone')
+            OR
+            (d.target_audience = 'student' AND $3 = 'student')
+            OR
+            (d.target_audience = 'staff' AND $3 IN ('teacher', 'admin', 'super_admin'))
+          )
         ORDER BY d.document_type, d.created_at DESC
       `;
-      result = await db.query(query, [requestedGradeId, requestedClassId]);
+      result = await db.query(query, [requestedGradeId, requestedClassId, user.role]);
     }
 
     console.log('=== QUERY RESULTS ===');
@@ -222,12 +244,21 @@ router.get('/grade/:gradeId/class/:classId', [
       file_size_mb: doc.file_size ? (doc.file_size / (1024 * 1024)).toFixed(2) : '0.00'
     }));
 
+    // Group documents by type for better organization
+    const documentsByType = {};
+    documents.forEach(doc => {
+      if (!documentsByType[doc.document_type]) {
+        documentsByType[doc.document_type] = [];
+      }
+      documentsByType[doc.document_type].push(doc);
+    });
+
     console.log('✅ Query successful, returning', documents.length, 'documents');
     console.log('=== END DEBUG ===');
 
     res.json({ 
       success: true,
-      documents: documents,
+      documents: documentsByType,
       total: documents.length,
       grade_id: requestedGradeId,
       class_id: requestedClassId
@@ -262,7 +293,6 @@ router.get('/grade/:gradeId/class/:classId', [
 router.post('/upload', [
   authenticate,
   authorize('teacher', 'admin', 'super_admin'),
-  requireTeacherAssignment,
   upload.single('document')
 ], async (req, res) => {
   try {
@@ -273,7 +303,7 @@ router.post('/upload', [
       });
     }
 
-    const { title, description, document_type, grade_id, class_id } = req.body;
+    const { title, description, document_type, grade_id, class_id, target_audience } = req.body;
     const user = req.user;
 
     console.log('=== DOCUMENT UPLOAD ===');
@@ -281,26 +311,59 @@ router.post('/upload', [
     console.log('Request body:', req.body);
     console.log('File:', req.file);
 
-    // Validate required fields
-    if (!title || !document_type || !grade_id || !class_id) {
-      // Clean up uploaded file if validation fails
+    // Validate required fields based on user role
+    if (!title || !document_type) {
       fs.unlinkSync(req.file.path);
       return res.status(400).json({ 
         success: false,
-        message: 'Title, document type, grade ID, and class ID are required' 
+        message: 'Title and document type are required' 
       });
     }
 
-    // Convert to integers
-    const gradeId = parseInt(grade_id, 10);
-    const classId = parseInt(class_id, 10);
+    // For admin uploads, validate target_audience
+    if ((user.role === 'admin' || user.role === 'super_admin')) {
+      if (!target_audience) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ 
+          success: false,
+          message: 'Target audience is required for admin uploads' 
+        });
+      }
+      
+      const validAudiences = ['everyone', 'student', 'staff'];
+      if (!validAudiences.includes(target_audience)) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ 
+          success: false,
+          message: 'Invalid target audience. Must be: everyone, student, or staff' 
+        });
+      }
+    } else {
+      // For teacher uploads, validate grade_id and class_id
+      if (!grade_id || !class_id) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ 
+          success: false,
+          message: 'Grade ID and class ID are required for teacher uploads' 
+        });
+      }
+    }
 
-    if (isNaN(gradeId) || isNaN(classId)) {
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({ 
-        success: false,
-        message: 'Invalid grade or class ID' 
-      });
+    let gradeId = null;
+    let classId = null;
+
+    // Only process grade/class for non-admin uploads
+    if (user.role === 'teacher') {
+      gradeId = parseInt(grade_id, 10);
+      classId = parseInt(class_id, 10);
+
+      if (isNaN(gradeId) || isNaN(classId)) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ 
+          success: false,
+          message: 'Invalid grade or class ID' 
+        });
+      }
     }
 
     // Check if teacher has access to this grade/class - MANDATORY CHECK
@@ -324,9 +387,9 @@ router.post('/upload', [
     // Insert document record
     const result = await db.query(`
       INSERT INTO documents (title, description, document_type, file_name, file_size, 
-                           grade_id, class_id, uploaded_by, file_path)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id, title, description, document_type, file_name, file_size, uploaded_at
+                           grade_id, class_id, uploaded_by, file_path, target_audience)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING id, title, description, document_type, file_name, file_size, uploaded_at, target_audience
     `, [
       title,
       description,
@@ -336,7 +399,8 @@ router.post('/upload', [
       gradeId,
       classId,
       user.id,
-      req.file.path
+      req.file.path,
+      target_audience || null
     ]);
 
     console.log('✅ Document uploaded successfully:', result.rows[0]);

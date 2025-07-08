@@ -15,11 +15,12 @@ const DocumentLibrary = ({ gradeId, classId }) => {
     title: '',
     description: '',
     document_type: '',
-    file: null
+    file: null,
+    target_audience: 'everyone' // For admin uploads
   });
   const [viewingDocument, setViewingDocument] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
+  const [viewMode, setViewMode] = useState('grid');
   const [selectedType, setSelectedType] = useState('all');
   const [assignedGrades, setAssignedGrades] = useState([]);
 
@@ -94,6 +95,12 @@ const DocumentLibrary = ({ gradeId, classId }) => {
       return;
     }
 
+    // For admin uploads, validate target_audience is selected
+    if ((user.role === 'admin' || user.role === 'super_admin') && !uploadForm.target_audience) {
+      alert('Please select a target audience for the document');
+      return;
+    }
+
     // Validate teacher access to this grade/class
     if (user.role === 'teacher') {
       const hasAccess = assignedGrades.some(assignment => 
@@ -112,8 +119,14 @@ const DocumentLibrary = ({ gradeId, classId }) => {
     formData.append('title', uploadForm.title);
     formData.append('description', uploadForm.description);
     formData.append('document_type', uploadForm.document_type);
-    formData.append('grade_id', gradeId);
-    formData.append('class_id', classId);
+    
+    // For admin uploads, use target_audience instead of grade/class
+    if (user.role === 'admin' || user.role === 'super_admin') {
+      formData.append('target_audience', uploadForm.target_audience);
+    } else {
+      formData.append('grade_id', gradeId);
+      formData.append('class_id', classId);
+    }
 
     try {
       const response = await fetch('/api/documents/upload', {
@@ -127,7 +140,13 @@ const DocumentLibrary = ({ gradeId, classId }) => {
       if (response.ok) {
         await fetchDocuments();
         setShowUploadForm(false);
-        setUploadForm({ title: '', description: '', document_type: '', file: null });
+        setUploadForm({ 
+          title: '', 
+          description: '', 
+          document_type: '', 
+          file: null, 
+          target_audience: 'everyone' 
+        });
       } else {
         const error = await response.json();
         alert(error.message || 'Upload failed');
@@ -240,7 +259,7 @@ const DocumentLibrary = ({ gradeId, classId }) => {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Document Library</h2>
-          <p className="text-gray-600">Access and manage class materials</p>
+          <p className="text-gray-600">Access and manage class materials - Enhanced Version</p>
         </div>
         
         {canUpload && (
@@ -309,7 +328,16 @@ const DocumentLibrary = ({ gradeId, classId }) => {
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Upload Document</h3>
             <button
-              onClick={() => setShowUploadForm(false)}
+              onClick={() => {
+                setShowUploadForm(false);
+                setUploadForm({ 
+                  title: '', 
+                  description: '', 
+                  document_type: '', 
+                  file: null, 
+                  target_audience: 'everyone' 
+                });
+              }}
               className="text-gray-400 hover:text-gray-600"
             >
               <X className="h-5 w-5" />
@@ -325,6 +353,14 @@ const DocumentLibrary = ({ gradeId, classId }) => {
                     Your assignments: {assignedGrades.map(a => `${a.grade_name} - ${a.class_name}`).join(', ')}
                   </span>
                 )}
+              </p>
+            </div>
+          )}
+
+          {(user.role === 'admin' || user.role === 'super_admin') && (
+            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+              <p className="text-sm text-green-800">
+                🔐 As an admin, you can upload documents for all users. Select your target audience below.
               </p>
             </div>
           )}
@@ -364,6 +400,29 @@ const DocumentLibrary = ({ gradeId, classId }) => {
                 </select>
               </div>
             </div>
+
+            {/* Admin Target Audience Selection */}
+            {(user.role === 'admin' || user.role === 'super_admin') && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Target Audience <span className="text-red-500">*</span>
+                </label>
+                <select
+                  required
+                  value={uploadForm.target_audience}
+                  onChange={(e) => setUploadForm({ ...uploadForm, target_audience: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select target audience</option>
+                  <option value="everyone">Everyone (All Users)</option>
+                  <option value="student">Students Only</option>
+                  <option value="staff">Staff Only (Teachers & Admins)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Choose who can access this document
+                </p>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -406,7 +465,16 @@ const DocumentLibrary = ({ gradeId, classId }) => {
               
               <button
                 type="button"
-                onClick={() => setShowUploadForm(false)}
+                onClick={() => {
+                  setShowUploadForm(false);
+                  setUploadForm({ 
+                    title: '', 
+                    description: '', 
+                    document_type: '', 
+                    file: null, 
+                    target_audience: 'everyone' 
+                  });
+                }}
                 className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400 transition-colors"
               >
                 Cancel
