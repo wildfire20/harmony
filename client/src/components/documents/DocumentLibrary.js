@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Download, File, Trash2, Calendar, User, FileText, BookOpen, Clock, Clipboard } from 'lucide-react';
+import { Upload, Download, File, Trash2, Calendar, User, FileText, BookOpen, Clock, Clipboard, Eye, X, ExternalLink, Search, Grid, List } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { usersAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 
 const DocumentLibrary = ({ gradeId, classId }) => {
@@ -16,6 +17,11 @@ const DocumentLibrary = ({ gradeId, classId }) => {
     document_type: '',
     file: null
   });
+  const [viewingDocument, setViewingDocument] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
+  const [selectedType, setSelectedType] = useState('all');
+  const [assignedGrades, setAssignedGrades] = useState([]);
 
   const documentIcons = {
     timetable: Calendar,
@@ -31,6 +37,9 @@ const DocumentLibrary = ({ gradeId, classId }) => {
   useEffect(() => {
     fetchDocuments();
     fetchDocumentTypes();
+    if (user?.role === 'teacher') {
+      fetchTeacherAssignments();
+    }
   }, [gradeId, classId]);
 
   const fetchDocuments = async () => {
@@ -69,11 +78,32 @@ const DocumentLibrary = ({ gradeId, classId }) => {
     }
   };
 
+  const fetchTeacherAssignments = async () => {
+    try {
+      const response = await usersAPI.getTeacherAssignments();
+      setAssignedGrades(response.data.assignments || []);
+    } catch (error) {
+      console.error('Error fetching teacher assignments:', error);
+    }
+  };
+
   const handleFileUpload = async (e) => {
     e.preventDefault();
     if (!uploadForm.file || !uploadForm.title || !uploadForm.document_type) {
       alert('Please fill in all required fields and select a file');
       return;
+    }
+
+    // Validate teacher access to this grade/class
+    if (user.role === 'teacher') {
+      const hasAccess = assignedGrades.some(assignment => 
+        assignment.grade_id === parseInt(gradeId) && assignment.class_id === parseInt(classId)
+      );
+      
+      if (!hasAccess) {
+        alert('You can only upload documents to grades and classes you are assigned to.');
+        return;
+      }
     }
 
     setUploading(true);
@@ -155,8 +185,46 @@ const DocumentLibrary = ({ gradeId, classId }) => {
     }
   };
 
+  const handleViewDocument = (document) => {
+    setViewingDocument(document);
+  };
+
+  const getDocumentUrl = (documentId) => {
+    return `/api/documents/view/${documentId}?token=${encodeURIComponent(token)}`;
+  };
+
+  const getFileExtension = (fileName) => {
+    return fileName.split('.').pop().toLowerCase();
+  };
+
+  const isViewableInBrowser = (fileName) => {
+    const ext = getFileExtension(fileName);
+    return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'txt'].includes(ext);
+  };
+
+  // Filter documents based on search and type
+  const filterDocuments = () => {
+    const filteredDocs = {};
+    
+    Object.entries(documents).forEach(([type, docs]) => {
+      if (selectedType === 'all' || selectedType === type) {
+        const filtered = docs.filter(doc =>
+          doc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          doc.description?.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+        
+        if (filtered.length > 0) {
+          filteredDocs[type] = filtered;
+        }
+      }
+    });
+    
+    return filteredDocs;
+  };
+
   const canUpload = user.role === 'teacher' || user.role === 'admin' || user.role === 'super_admin';
   const canDelete = user.role === 'admin' || user.role === 'super_admin';
+  const filteredDocuments = filterDocuments();
 
   if (loading) {
     return (
@@ -169,16 +237,16 @@ const DocumentLibrary = ({ gradeId, classId }) => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Document Library</h2>
-          <p className="text-gray-600">Access timetables, past papers, and other class materials</p>
+          <p className="text-gray-600">Access and manage class materials</p>
         </div>
         
         {canUpload && (
           <button
             onClick={() => setShowUploadForm(true)}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2 shadow-sm"
           >
             <Upload className="h-4 w-4" />
             <span>Upload Document</span>
@@ -186,16 +254,86 @@ const DocumentLibrary = ({ gradeId, classId }) => {
         )}
       </div>
 
+      {/* Search and Filters */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+        <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+          <div className="flex flex-col sm:flex-row gap-4 flex-1">
+            {/* Search */}
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+              <input
+                type="text"
+                placeholder="Search documents..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {/* Type Filter */}
+            <select
+              value={selectedType}
+              onChange={(e) => setSelectedType(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">All Types</option>
+              {documentTypes.map((type) => (
+                <option key={type.value} value={type.value}>
+                  {type.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* View Mode Toggle */}
+          <div className="flex bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`p-2 rounded ${viewMode === 'grid' ? 'bg-white shadow-sm' : 'text-gray-600'}`}
+            >
+              <Grid className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-2 rounded ${viewMode === 'list' ? 'bg-white shadow-sm' : 'text-gray-600'}`}
+            >
+              <List className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Upload Form */}
       {showUploadForm && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Upload Document</h3>
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">Upload Document</h3>
+            <button
+              onClick={() => setShowUploadForm(false)}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          
+          {user.role === 'teacher' && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                📚 You can only upload documents to grades and classes you are assigned to.
+                {assignedGrades.length > 0 && (
+                  <span className="block mt-1">
+                    Your assignments: {assignedGrades.map(a => `${a.grade_name} - ${a.class_name}`).join(', ')}
+                  </span>
+                )}
+              </p>
+            </div>
+          )}
           
           <form onSubmit={handleFileUpload} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Title *
+                  Title <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -209,7 +347,7 @@ const DocumentLibrary = ({ gradeId, classId }) => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Document Type *
+                  Document Type <span className="text-red-500">*</span>
                 </label>
                 <select
                   required
@@ -242,7 +380,7 @@ const DocumentLibrary = ({ gradeId, classId }) => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                File *
+                File <span className="text-red-500">*</span>
               </label>
               <input
                 type="file"
@@ -279,23 +417,28 @@ const DocumentLibrary = ({ gradeId, classId }) => {
       )}
 
       {/* Documents */}
-      {Object.keys(documents).length === 0 ? (
+      {Object.keys(filteredDocuments).length === 0 ? (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center">
           <File className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No documents available</h3>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">
+            {searchTerm || selectedType !== 'all' ? 'No documents found' : 'No documents available'}
+          </h3>
           <p className="text-gray-600">
-            {canUpload ? 'Upload the first document to get started.' : 'Documents will appear here when uploaded.'}
+            {searchTerm || selectedType !== 'all' 
+              ? 'Try adjusting your search or filter criteria'
+              : canUpload ? 'Upload the first document to get started.' : 'Documents will appear here when uploaded.'
+            }
           </p>
         </div>
       ) : (
         <div className="space-y-6">
-          {Object.entries(documents).map(([type, docs]) => {
+          {Object.entries(filteredDocuments).map(([type, docs]) => {
             const typeInfo = documentTypes.find(t => t.value === type) || { label: type, icon: 'file' };
             const IconComponent = documentIcons[type] || File;
 
             return (
               <div key={type} className="bg-white rounded-lg shadow-sm border border-gray-200">
-                <div className="px-6 py-4 border-b border-gray-200">
+                <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                   <div className="flex items-center space-x-3">
                     <IconComponent className="h-6 w-6 text-blue-600" />
                     <h3 className="text-lg font-semibold text-gray-900">{typeInfo.label}</h3>
@@ -305,56 +448,197 @@ const DocumentLibrary = ({ gradeId, classId }) => {
                   </div>
                 </div>
 
-                <div className="divide-y divide-gray-200">
-                  {docs.map((doc) => (
-                    <div key={doc.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50">
-                      <div className="flex-1 min-w-0">
-                        <h4 className="text-sm font-medium text-gray-900 truncate">
-                          {doc.title}
-                        </h4>
-                        {doc.description && (
-                          <p className="text-sm text-gray-600 mt-1 truncate">
-                            {doc.description}
-                          </p>
-                        )}
-                        <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
+                {viewMode === 'grid' ? (
+                  <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {docs.map((doc) => (
+                      <div key={doc.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-sm font-medium text-gray-900 truncate">
+                              {doc.title}
+                            </h4>
+                            {doc.description && (
+                              <p className="text-xs text-gray-600 mt-1 line-clamp-2">
+                                {doc.description}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
                           <div className="flex items-center space-x-1">
                             <User className="h-3 w-3" />
                             <span>{doc.uploaded_by_first_name} {doc.uploaded_by_last_name}</span>
                           </div>
-                          <div className="flex items-center space-x-1">
-                            <Calendar className="h-3 w-3" />
-                            <span>{new Date(doc.uploaded_at).toLocaleDateString()}</span>
-                          </div>
                           <span>{doc.file_size_mb} MB</span>
                         </div>
-                      </div>
 
-                      <div className="flex items-center space-x-2 ml-4">
-                        <button
-                          onClick={() => handleDownload(doc.id, doc.file_name)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                          title="Download"
-                        >
-                          <Download className="h-4 w-4" />
-                        </button>
-                        
-                        {canDelete && (
+                        <div className="flex items-center space-x-2">
+                          {isViewableInBrowser(doc.file_name) && (
+                            <button
+                              onClick={() => handleViewDocument(doc)}
+                              className="flex-1 bg-blue-50 text-blue-600 px-3 py-2 rounded text-sm hover:bg-blue-100 transition-colors flex items-center justify-center space-x-1"
+                              title="View in browser"
+                            >
+                              <Eye className="h-3 w-3" />
+                              <span>View</span>
+                            </button>
+                          )}
+                          
                           <button
-                            onClick={() => handleDelete(doc.id)}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                            title="Delete"
+                            onClick={() => handleDownload(doc.id, doc.file_name)}
+                            className="flex-1 bg-gray-50 text-gray-600 px-3 py-2 rounded text-sm hover:bg-gray-100 transition-colors flex items-center justify-center space-x-1"
+                            title="Download"
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Download className="h-3 w-3" />
+                            <span>Download</span>
                           </button>
-                        )}
+                          
+                          {canDelete && (
+                            <button
+                              onClick={() => handleDelete(doc.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-200">
+                    {docs.map((doc) => (
+                      <div key={doc.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-sm font-medium text-gray-900 truncate">
+                            {doc.title}
+                          </h4>
+                          {doc.description && (
+                            <p className="text-sm text-gray-600 mt-1 truncate">
+                              {doc.description}
+                            </p>
+                          )}
+                          <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
+                            <div className="flex items-center space-x-1">
+                              <User className="h-3 w-3" />
+                              <span>{doc.uploaded_by_first_name} {doc.uploaded_by_last_name}</span>
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              <Calendar className="h-3 w-3" />
+                              <span>{new Date(doc.uploaded_at).toLocaleDateString()}</span>
+                            </div>
+                            <span>{doc.file_size_mb} MB</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-2 ml-4">
+                          {isViewableInBrowser(doc.file_name) && (
+                            <button
+                              onClick={() => handleViewDocument(doc)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                              title="View in browser"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                          )}
+                          
+                          <button
+                            onClick={() => handleDownload(doc.id, doc.file_name)}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                            title="Download"
+                          >
+                            <Download className="h-4 w-4" />
+                          </button>
+                          
+                          {canDelete && (
+                            <button
+                              onClick={() => handleDelete(doc.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Document Viewer Modal */}
+      {viewingDocument && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg max-w-6xl max-h-[90vh] w-full mx-4 flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">{viewingDocument.title}</h3>
+                <p className="text-sm text-gray-600">{viewingDocument.description}</p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <a
+                  href={getDocumentUrl(viewingDocument.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                  title="Open in new tab"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+                <button
+                  onClick={() => handleDownload(viewingDocument.id, viewingDocument.file_name)}
+                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                  title="Download"
+                >
+                  <Download className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setViewingDocument(null)}
+                  className="p-2 text-gray-400 hover:text-gray-600 rounded-md transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-hidden">
+              {getFileExtension(viewingDocument.file_name) === 'pdf' ? (
+                <iframe
+                  src={getDocumentUrl(viewingDocument.id)}
+                  className="w-full h-full"
+                  title={viewingDocument.title}
+                />
+              ) : ['jpg', 'jpeg', 'png', 'gif'].includes(getFileExtension(viewingDocument.file_name)) ? (
+                <div className="h-full flex items-center justify-center p-4">
+                  <img
+                    src={getDocumentUrl(viewingDocument.id)}
+                    alt={viewingDocument.title}
+                    className="max-w-full max-h-full object-contain"
+                  />
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center p-4">
+                  <div className="text-center">
+                    <File className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600">This file type cannot be previewed in the browser.</p>
+                    <button
+                      onClick={() => handleDownload(viewingDocument.id, viewingDocument.file_name)}
+                      className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2 mx-auto"
+                    >
+                      <Download className="h-4 w-4" />
+                      <span>Download to View</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

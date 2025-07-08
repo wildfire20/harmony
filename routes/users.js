@@ -69,4 +69,45 @@ router.put('/profile', authenticate, async (req, res) => {
   }
 });
 
+// Get teacher assignments (for teachers only)
+router.get('/teacher/assignments', [
+  authenticate
+], async (req, res) => {
+  try {
+    const user = req.user;
+
+    if (user.role !== 'teacher') {
+      return res.status(403).json({ 
+        success: false,
+        message: 'Access denied. Only teachers can access this endpoint.' 
+      });
+    }
+
+    const result = await db.query(`
+      SELECT 
+        ta.grade_id, 
+        ta.class_id,
+        g.name as grade_name,
+        c.name as class_name
+      FROM teacher_assignments ta
+      JOIN grades g ON ta.grade_id = g.id
+      JOIN classes c ON ta.class_id = c.id
+      WHERE ta.teacher_id = $1
+      ORDER BY g.name, c.name
+    `, [user.id]);
+
+    res.json({
+      success: true,
+      assignments: result.rows
+    });
+
+  } catch (error) {
+    console.error('Get teacher assignments error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching teacher assignments' 
+    });
+  }
+});
+
 module.exports = router;

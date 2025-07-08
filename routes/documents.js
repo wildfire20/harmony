@@ -414,6 +414,88 @@ router.get('/download/:id', authenticate, async (req, res) => {
   }
 });
 
+// View document in browser
+router.get('/view/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = req.user;
+
+    // Get document information
+    const result = await db.query(`
+      SELECT d.*, g.name as grade_name, c.name as class_name
+      FROM documents d
+      LEFT JOIN grades g ON d.grade_id = g.id
+      LEFT JOIN classes c ON d.class_id = c.id
+      WHERE d.id = $1 AND d.is_active = true
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Document not found' });
+    }
+
+    const document = result.rows[0];
+
+    // Check access permissions
+    if (user.role === 'student' && (user.grade_id != document.grade_id || user.class_id != document.class_id)) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    if (user.role === 'teacher') {
+      const assignmentCheck = await db.query(`
+        SELECT 1 FROM teacher_assignments 
+        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+      `, [user.id, document.grade_id, document.class_id]);
+
+      if (assignmentCheck.rows.length === 0) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+    }
+
+    // Check if file exists
+    if (!fs.existsSync(document.file_path)) {
+      return res.status(404).json({ message: 'File not found on server' });
+    }
+
+    // Set appropriate content type based on file extension
+    const ext = path.extname(document.filename).toLowerCase();
+    let contentType = 'application/octet-stream';
+    
+    switch (ext) {
+      case '.pdf':
+        contentType = 'application/pdf';
+        break;
+      case '.jpg':
+      case '.jpeg':
+        contentType = 'image/jpeg';
+        break;
+      case '.png':
+        contentType = 'image/png';
+        break;
+      case '.gif':
+        contentType = 'image/gif';
+        break;
+      case '.txt':
+        contentType = 'text/plain';
+        break;
+      default:
+        // For other file types, force download
+        return res.download(document.file_path, document.filename);
+    }
+
+    // Set headers for inline viewing
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${document.filename}"`);
+    
+    // Stream the file
+    const fileStream = fs.createReadStream(document.file_path);
+    fileStream.pipe(res);
+
+  } catch (error) {
+    console.error('View document error:', error);
+    res.status(500).json({ message: 'Server error viewing document' });
+  }
+});
+
 // Delete document
 router.delete('/:id', [
   authenticate,
