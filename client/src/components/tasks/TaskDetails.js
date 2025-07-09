@@ -375,6 +375,10 @@ const SubmissionsManagement = ({ taskId }) => {
     () => submissionsAPI.getTaskSubmissions(taskId),
     { 
       enabled: !!taskId,
+      cacheTime: 0, // Don't cache the result
+      staleTime: 0, // Always consider data stale
+      refetchOnMount: true, // Always refetch when component mounts
+      refetchOnWindowFocus: true, // Refetch when window gets focus
       onSuccess: (data) => {
         console.log('Submissions data received:', data);
       },
@@ -392,6 +396,10 @@ const SubmissionsManagement = ({ taskId }) => {
       enabled: !!taskId,
       retry: 1,
       retryDelay: 1000,
+      cacheTime: 0, // Don't cache the result
+      staleTime: 0, // Always consider data stale
+      refetchOnMount: true, // Always refetch when component mounts
+      refetchOnWindowFocus: true, // Refetch when window gets focus
       onSuccess: (data) => {
         console.log('✅ Students data received:', data);
         console.log('✅ Students array:', data?.data?.students);
@@ -576,12 +584,25 @@ const SubmissionsManagement = ({ taskId }) => {
   const retryAllEndpoints = async () => {
     try {
       console.log('🔄 Retrying all endpoints...');
+      
+      // Clear React Query cache for this task
+      queryClient.removeQueries(['taskStudents', taskId]);
+      queryClient.removeQueries(['taskSubmissions', taskId]);
+      queryClient.removeQueries(['taskStudentsForce', taskId]);
+      
       await Promise.all([
         refetchSubmissions(),
         refetchStudents(),
         refetchForceStudents()
       ]);
       console.log('✅ All endpoints retried');
+      
+      // Force a hard refresh of the page after a short delay
+      setTimeout(() => {
+        console.log('🔄 Forcing page refresh to clear any stale state');
+        window.location.reload();
+      }, 2000);
+      
     } catch (error) {
       console.error('❌ Retry failed:', error);
     }
