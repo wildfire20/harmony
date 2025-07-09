@@ -5,24 +5,12 @@ const fs = require('fs');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize, authorizeTeacherAssignment, requireTeacherAssignment, authenticateFlexible } = require('../middleware/auth');
+const s3Service = require('../services/s3Service');
 
 const router = express.Router();
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadPath = 'uploads/documents';
-    if (!fs.existsSync(uploadPath)) {
-      fs.mkdirSync(uploadPath, { recursive: true });
-    }
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => {
-    // Generate unique filename
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
+// Configure multer for handling file uploads (now stores in memory for S3)
+const storage = multer.memoryStorage(); // Use memory storage for S3 upload
 
 const fileFilter = (req, file, cb) => {
   // Allow specific file types
@@ -32,15 +20,19 @@ const fileFilter = (req, file, cb) => {
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'text/plain',
     'image/jpeg',
     'image/png',
-    'image/jpg'
+    'image/jpg',
+    'image/gif'
   ];
   
   if (allowedTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Only PDF, Word, Excel, and Image files are allowed.'), false);
+    cb(new Error('Invalid file type. Only PDF, Word, Excel, PowerPoint, Text, and Image files are allowed.'), false);
   }
 };
 
@@ -313,7 +305,6 @@ router.post('/upload', [
 
     // Validate required fields based on user role
     if (!title || !document_type) {
-      fs.unlinkSync(req.file.path);
       return res.status(400).json({ 
         success: false,
         message: 'Title and document type are required' 
@@ -323,7 +314,6 @@ router.post('/upload', [
     // For admin uploads, validate target_audience
     if ((user.role === 'admin' || user.role === 'super_admin')) {
       if (!target_audience) {
-        fs.unlinkSync(req.file.path);
         return res.status(400).json({ 
           success: false,
           message: 'Target audience is required for admin uploads' 
@@ -332,7 +322,6 @@ router.post('/upload', [
       
       const validAudiences = ['everyone', 'student', 'staff'];
       if (!validAudiences.includes(target_audience)) {
-        fs.unlinkSync(req.file.path);
         return res.status(400).json({ 
           success: false,
           message: 'Invalid target audience. Must be: everyone, student, or staff' 
@@ -341,7 +330,6 @@ router.post('/upload', [
     } else {
       // For teacher uploads, validate grade_id and class_id
       if (!grade_id || !class_id) {
-        fs.unlinkSync(req.file.path);
         return res.status(400).json({ 
           success: false,
           message: 'Grade ID and class ID are required for teacher uploads' 
@@ -358,7 +346,6 @@ router.post('/upload', [
       classId = parseInt(class_id, 10);
 
       if (isNaN(gradeId) || isNaN(classId)) {
-        fs.unlinkSync(req.file.path);
         return res.status(400).json({ 
           success: false,
           message: 'Invalid grade or class ID' 
@@ -374,8 +361,6 @@ router.post('/upload', [
       `, [user.id, gradeId, classId]);
 
       if (assignmentCheck.rows.length === 0) {
-        // Clean up uploaded file
-        fs.unlinkSync(req.file.path);
         return res.status(403).json({ 
           success: false,
           message: 'Access denied. You are not assigned to this grade/class. Please contact an administrator for assignment.' 
@@ -384,55 +369,86 @@ router.post('/upload', [
       console.log('✅ Teacher assignment verified');
     }
 
-    // Insert document record
-    console.log('Preparing database insert with values:', {
-      title,
-      description,
-      document_type,
-      filename: req.file.filename,
-      fileSize: req.file.size,
-      gradeId,
-      classId,
-      uploadedBy: user.id,
-      filePath: req.file.path,
-      targetAudience: target_audience || null
-    });
+    // Insert document record with S3 information OR local file fallback
+    console.log('Preparing file upload and database insert...');
+
+    let s3UploadResult = null;
+    let localFilePath = null;
+    
+    // Check if S3 is configured (for testing purposes)
+    const isS3Configured = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_S3_BUCKET_NAME;
+    
+    if (isS3Configured) {
+      console.log('S3 is configured, uploading to cloud storage...');
+      try {
+        // Upload file to S3
+        s3UploadResult = await s3Service.uploadFile(
+          req.file.buffer,
+          req.file.originalname,
+          req.file.mimetype,
+          'documents'
+        );
+        console.log('S3 upload result:', s3UploadResult);
+      } catch (s3Error) {
+        console.log('S3 upload failed, falling back to local storage:', s3Error);
+        isS3Configured = false; // Fall back to local storage
+      }
+    }
+    
+    if (!isS3Configured) {
+      console.log('S3 not configured or failed, using local storage for testing...');
+      
+      // Create uploads directory if it doesn't exist
+      const uploadsDir = path.join(__dirname, '../uploads');
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      
+      // Generate unique filename
+      const timestamp = Date.now();
+      const uniqueFileName = `${timestamp}-${req.file.originalname}`;
+      localFilePath = path.join(uploadsDir, uniqueFileName);
+      
+      // Save file locally
+      fs.writeFileSync(localFilePath, req.file.buffer);
+      
+      console.log('File saved locally:', localFilePath);
+    }
 
     const result = await db.query(`
-      INSERT INTO documents (title, description, document_type, file_name, file_size, 
-                           grade_id, class_id, uploaded_by, file_path, target_audience)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      RETURNING id, title, description, document_type, file_name, file_size, uploaded_at, target_audience
+      INSERT INTO documents (title, description, document_type, file_name, original_file_name, file_size, 
+                           grade_id, class_id, uploaded_by, s3_key, s3_url, target_audience, file_path)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      RETURNING id, title, description, document_type, file_name, original_file_name, file_size, uploaded_at, target_audience, s3_key, file_path
     `, [
       title,
       description || null,
       document_type,
-      req.file.filename,
+      s3UploadResult ? s3UploadResult.uniqueFileName : path.basename(localFilePath),
+      req.file.originalname,
       req.file.size,
       gradeId,
       classId,
       user.id,
-      req.file.path,
-      target_audience || null
+      s3UploadResult ? s3UploadResult.s3Key : null,
+      s3UploadResult ? s3UploadResult.s3Url : null,
+      target_audience || null,
+      localFilePath || null
     ]);
 
     console.log('✅ Document uploaded successfully:', result.rows[0]);
 
     res.status(201).json({
       success: true,
-      message: 'Document uploaded successfully',
+      message: `Document uploaded successfully ${s3UploadResult ? 'to cloud storage' : 'to local storage (testing mode)'}`,
       document: {
         ...result.rows[0],
-        file_size_mb: (req.file.size / (1024 * 1024)).toFixed(2)
+        file_size_mb: (req.file.size / (1024 * 1024)).toFixed(2),
+        storage_type: s3UploadResult ? 'S3' : 'Local'
       }
     });
 
   } catch (error) {
-    // Clean up uploaded file on error
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-    
     console.error('❌ Upload document error:', error);
     console.error('Error details:', {
       name: error.name,
@@ -458,7 +474,7 @@ router.post('/upload', [
 });
 
 // Download document
-router.get('/download/:id', authenticate, async (req, res) => {
+router.get('/download/:id', authenticateFlexible, async (req, res) => {
   try {
     const { id } = req.params;
     const user = req.user;
@@ -534,15 +550,56 @@ router.get('/download/:id', authenticate, async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    // Check if file exists
-    if (!fs.existsSync(document.file_path)) {
-      console.log('❌ File not found on server:', document.file_path);
-      return res.status(404).json({ message: 'File not found on server' });
+    // Handle file serving - S3 or local fallback
+    if (document.s3_key) {
+      console.log('✅ Generating signed URL for S3 download:', document.s3_key);
+      
+      try {
+        const signedUrl = await s3Service.getSignedUrl(document.s3_key, 300); // 5 minutes expiry
+        
+        // Redirect to the signed URL for download
+        res.redirect(signedUrl);
+        
+      } catch (s3Error) {
+        console.log('❌ S3 download error:', s3Error);
+        return res.status(404).json({ 
+          message: 'Document file is temporarily unavailable',
+          details: 'The file could not be accessed from cloud storage. Please try again later or contact an administrator.',
+          document_title: document.title,
+          document_id: document.id
+        });
+      }
+    } else if (document.file_path) {
+      // Local file fallback
+      console.log('📁 Serving local file:', document.file_path);
+      
+      if (!fs.existsSync(document.file_path)) {
+        console.log('❌ Local file not found:', document.file_path);
+        return res.status(404).json({ 
+          message: 'Document file is not available',
+          details: 'The local file was not found. It may have been moved or deleted.',
+          document_title: document.title,
+          document_id: document.id
+        });
+      }
+      
+      // Set appropriate headers for download
+      res.setHeader('Content-Disposition', `attachment; filename="${document.original_file_name || document.file_name}"`);
+      res.setHeader('Content-Type', 'application/octet-stream');
+      
+      // Stream the file
+      const fileStream = fs.createReadStream(document.file_path);
+      fileStream.pipe(res);
+      
+    } else {
+      console.log('❌ Document missing both S3 key and file path');
+      return res.status(404).json({ 
+        message: 'Document file is not available',
+        details: 'This document was uploaded before proper file storage was implemented. Please ask an administrator to re-upload it.',
+        document_title: document.title,
+        document_id: document.id
+      });
     }
-
-    console.log('✅ Downloading file:', document.file_path);
-    // Send file
-    res.download(document.file_path, document.file_name);
 
   } catch (error) {
     console.error('Download document error:', error);
@@ -627,47 +684,113 @@ router.get('/view/:id', authenticateFlexible, async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    // Check if file exists
-    if (!fs.existsSync(document.file_path)) {
-      console.log('❌ File not found on server:', document.file_path);
-      return res.status(404).json({ message: 'File not found on server' });
+    // Handle file serving - S3 or local fallback for viewing
+    if (document.s3_key) {
+      console.log('✅ Generating signed URL for S3 view:', document.s3_key);
+
+      try {
+        // Set appropriate content type based on file extension
+        const ext = path.extname(document.original_file_name || document.file_name).toLowerCase();
+        let contentType = 'application/octet-stream';
+        
+        switch (ext) {
+          case '.pdf':
+            contentType = 'application/pdf';
+            break;
+          case '.jpg':
+          case '.jpeg':
+            contentType = 'image/jpeg';
+            break;
+          case '.png':
+            contentType = 'image/png';
+            break;
+          case '.gif':
+            contentType = 'image/gif';
+            break;
+          case '.txt':
+            contentType = 'text/plain';
+            break;
+          default:
+            // For other file types, redirect to download instead of attempting to view
+            const downloadUrl = await s3Service.getSignedUrl(document.s3_key, 300);
+            return res.redirect(downloadUrl);
+        }
+
+        // Generate signed URL for viewing
+        const signedUrl = await s3Service.getSignedUrl(document.s3_key, 3600); // 1 hour for viewing
+        
+        // Redirect to signed URL for inline viewing
+        res.redirect(signedUrl);
+        
+      } catch (s3Error) {
+        console.log('❌ S3 view error:', s3Error);
+        return res.status(404).json({ 
+          message: 'Document file is temporarily unavailable',
+          details: 'The file could not be accessed from cloud storage. Please try again later or contact an administrator.',
+          document_title: document.title,
+          document_id: document.id
+        });
+      }
+    } else if (document.file_path) {
+      // Local file fallback for viewing
+      console.log('📁 Serving local file for viewing:', document.file_path);
+      
+      if (!fs.existsSync(document.file_path)) {
+        console.log('❌ Local file not found:', document.file_path);
+        return res.status(404).json({ 
+          message: 'Document file is not available',
+          details: 'The local file was not found. It may have been moved or deleted.',
+          document_title: document.title,
+          document_id: document.id
+        });
+      }
+      
+      // Set appropriate content type based on file extension
+      const ext = path.extname(document.original_file_name || document.file_name).toLowerCase();
+      let contentType = 'application/octet-stream';
+      
+      switch (ext) {
+        case '.pdf':
+          contentType = 'application/pdf';
+          break;
+        case '.jpg':
+        case '.jpeg':
+          contentType = 'image/jpeg';
+          break;
+        case '.png':
+          contentType = 'image/png';
+          break;
+        case '.gif':
+          contentType = 'image/gif';
+          break;
+        case '.txt':
+          contentType = 'text/plain';
+          break;
+        default:
+          // For other file types, serve as download
+          res.setHeader('Content-Disposition', `attachment; filename="${document.original_file_name || document.file_name}"`);
+          contentType = 'application/octet-stream';
+      }
+      
+      // Set headers for inline viewing
+      res.setHeader('Content-Type', contentType);
+      if (ext === '.pdf' || ext === '.jpg' || ext === '.jpeg' || ext === '.png' || ext === '.gif' || ext === '.txt') {
+        res.setHeader('Content-Disposition', 'inline');
+      }
+      
+      // Stream the file
+      const fileStream = fs.createReadStream(document.file_path);
+      fileStream.pipe(res);
+      
+    } else {
+      console.log('❌ Document missing both S3 key and file path');
+      return res.status(404).json({ 
+        message: 'Document file is not available',
+        details: 'This document was uploaded before proper file storage was implemented. Please ask an administrator to re-upload it.',
+        document_title: document.title,
+        document_id: document.id
+      });
     }
-
-    console.log('✅ Viewing file:', document.file_path);
-
-    // Set appropriate content type based on file extension
-    const ext = path.extname(document.file_name).toLowerCase();
-    let contentType = 'application/octet-stream';
-    
-    switch (ext) {
-      case '.pdf':
-        contentType = 'application/pdf';
-        break;
-      case '.jpg':
-      case '.jpeg':
-        contentType = 'image/jpeg';
-        break;
-      case '.png':
-        contentType = 'image/png';
-        break;
-      case '.gif':
-        contentType = 'image/gif';
-        break;
-      case '.txt':
-        contentType = 'text/plain';
-        break;
-      default:
-        // For other file types, force download
-        return res.download(document.file_path, document.file_name);
-    }
-
-    // Set headers for inline viewing
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `inline; filename="${document.file_name}"`);
-    
-    // Stream the file
-    const fileStream = fs.createReadStream(document.file_path);
-    fileStream.pipe(res);
 
   } catch (error) {
     console.error('View document error:', error);

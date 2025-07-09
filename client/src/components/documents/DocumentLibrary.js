@@ -196,6 +196,7 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
 
   const handleDownload = async (documentId, fileName) => {
     try {
+      console.log('Attempting to download document:', { documentId, fileName });
       const response = await fetch(`/api/documents/download/${documentId}`, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -212,9 +213,15 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
+        console.log('Download completed successfully');
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Download failed:', response.status, errorData);
+        alert(`Download failed: ${errorData.message || 'File may not be available'}`);
       }
     } catch (error) {
       console.error('Error downloading document:', error);
+      alert('Download failed. Please try again or contact support.');
     }
   };
 
@@ -239,7 +246,33 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
     }
   };
 
-  const handleViewDocument = (document) => {
+  const handleViewDocument = async (document) => {
+    console.log('Viewing document:', document);
+    console.log('File extension:', getFileExtension(document.filename));
+    console.log('Is viewable in browser:', isViewableInBrowser(document.filename));
+    
+    // For viewable file types, check if the file is actually accessible
+    if (isViewableInBrowser(document.filename)) {
+      try {
+        const response = await fetch(getDocumentUrl(document.id), { 
+          method: 'HEAD',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        if (!response.ok) {
+          console.error('Document not accessible:', response.status);
+          if (response.status === 404) {
+            alert('This document file is no longer available. It may have been lost during server maintenance. Please ask an administrator to re-upload it.');
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('Error checking document accessibility:', error);
+      }
+    }
+    
     setViewingDocument(document);
   };
 
@@ -248,7 +281,9 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
   };
 
   const getFileExtension = (fileName) => {
-    return fileName.split('.').pop().toLowerCase();
+    if (!fileName) return '';
+    const parts = fileName.split('.');
+    return parts.length > 1 ? parts.pop().toLowerCase() : '';
   };
 
   const isViewableInBrowser = (fileName) => {
@@ -258,9 +293,13 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
   };
 
   const isDocumentFile = (fileName) => {
+    if (!fileName) {
+      return false;
+    }
     const ext = getFileExtension(fileName);
     // These are document files that should have a view option (even if they download)
-    return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'txt', 'doc', 'docx', 'xls', 'xlsx'].includes(ext);
+    // Ensure we support all common document types including teacher uploads
+    return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'txt', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext);
   };
 
   // Filter documents based on search and type
@@ -297,6 +336,24 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
 
   return (
     <div className="space-y-6">
+      {/* Important Notice about File Availability */}
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <div className="flex items-start space-x-3">
+          <div className="flex-shrink-0">
+            <svg className="h-5 w-5 text-yellow-600 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <h3 className="text-sm font-medium text-yellow-800">File Availability Notice</h3>
+            <p className="text-sm text-yellow-700 mt-1">
+              Some older documents may be temporarily unavailable due to recent server maintenance. 
+              New uploads will work normally. If you need access to specific older documents, please contact an administrator for re-upload.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -725,31 +782,103 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
             
             <div className="flex-1 overflow-hidden">
               {getFileExtension(viewingDocument.filename) === 'pdf' ? (
-                <iframe
-                  src={getDocumentUrl(viewingDocument.id)}
-                  className="w-full h-full"
-                  title={viewingDocument.title}
-                />
+                <>
+                  <iframe
+                    src={getDocumentUrl(viewingDocument.id)}
+                    className="w-full h-full"
+                    title={viewingDocument.title}
+                    onLoad={() => console.log('PDF loaded successfully')}
+                    onError={(e) => {
+                      console.error('Failed to load PDF in iframe');
+                      console.error('PDF URL:', getDocumentUrl(viewingDocument.id));
+                      e.target.style.display = 'none';
+                      e.target.nextSibling.style.display = 'block';
+                    }}
+                  />
+                  <div style={{display: 'none'}} className="h-full flex items-center justify-center p-4">
+                    <div className="text-center">
+                      <File className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <p className="text-gray-600 mb-2">Failed to load PDF document.</p>
+                      <p className="text-sm text-gray-500 mb-4">The file may have been lost during server maintenance.</p>
+                      <button
+                        onClick={() => handleDownload(viewingDocument.id, viewingDocument.filename)}
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2 mx-auto"
+                      >
+                        <Download className="h-4 w-4" />
+                        <span>Try Download</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : getFileExtension(viewingDocument.filename) === 'txt' ? (
+                <div className="h-full p-4 overflow-auto bg-white">
+                  <iframe
+                    src={getDocumentUrl(viewingDocument.id)}
+                    className="w-full h-full border-0"
+                    title={viewingDocument.title}
+                    onError={(e) => {
+                      console.error('Failed to load text file');
+                      e.target.style.display = 'none';
+                      e.target.nextSibling.style.display = 'block';
+                    }}
+                  />
+                  <div style={{display: 'none'}} className="text-center">
+                    <File className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 mb-4">Failed to load text file. The file may be missing.</p>
+                    <button
+                      onClick={() => handleDownload(viewingDocument.id, viewingDocument.filename)}
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2 mx-auto"
+                    >
+                      <Download className="h-4 w-4" />
+                      <span>Try Download</span>
+                    </button>
+                  </div>
+                </div>
               ) : ['jpg', 'jpeg', 'png', 'gif'].includes(getFileExtension(viewingDocument.filename)) ? (
                 <div className="h-full flex items-center justify-center p-4">
                   <img
                     src={getDocumentUrl(viewingDocument.id)}
                     alt={viewingDocument.title}
                     className="max-w-full max-h-full object-contain"
+                    onError={(e) => {
+                      console.error('Failed to load image');
+                      e.target.style.display = 'none';
+                      e.target.nextSibling.style.display = 'block';
+                    }}
                   />
+                  <div style={{display: 'none'}} className="text-center">
+                    <File className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 mb-4">Failed to load image. The file may be missing.</p>
+                    <button
+                      onClick={() => handleDownload(viewingDocument.id, viewingDocument.filename)}
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2 mx-auto"
+                    >
+                      <Download className="h-4 w-4" />
+                      <span>Try Download</span>
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="h-full flex items-center justify-center p-4">
                   <div className="text-center">
                     <File className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-600">This file type cannot be previewed in the browser.</p>
-                    <button
-                      onClick={() => handleDownload(viewingDocument.id, viewingDocument.filename)}
-                      className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2 mx-auto"
-                    >
-                      <Download className="h-4 w-4" />
-                      <span>Download to View</span>
-                    </button>
+                    <p className="text-gray-600 mb-2">This file type cannot be previewed in the browser.</p>
+                    <p className="text-sm text-gray-500 mb-4">
+                      File type: {getFileExtension(viewingDocument.filename) || 'Unknown'} 
+                      {!getFileExtension(viewingDocument.filename) && ' (No file extension detected)'}
+                    </p>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => handleDownload(viewingDocument.id, viewingDocument.filename)}
+                        className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2"
+                      >
+                        <Download className="h-4 w-4" />
+                        <span>Download to View</span>
+                      </button>
+                      <p className="text-xs text-gray-400">
+                        Note: If download fails, the file may have been lost during server maintenance
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}

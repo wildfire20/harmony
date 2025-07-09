@@ -1,9 +1,34 @@
 const express = require('express');
+const multer = require('multer');
+const path = require('path');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize, authorizeResourceAccess, authorizeTeacherAssignment, requireTeacherAssignment } = require('../middleware/auth');
+const s3Service = require('../services/s3Service');
 
 const router = express.Router();
+
+// Configure multer for task file attachments (using memory storage for S3)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10485760 // 10MB
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|txt|ppt|pptx|xls|xlsx|zip|rar/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype) || 
+                     file.mimetype.includes('application/') || 
+                     file.mimetype.includes('text/') ||
+                     file.mimetype.includes('image/');
+
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('File type not supported. Please upload documents, images, or text files.'));
+    }
+  }
+});
 
 // Get all tasks for a grade/class
 router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
@@ -155,10 +180,12 @@ router.get('/:id', [
     const { id } = req.params;
     const user = req.user;
 
-    // First try with submission_type column, if it fails, try without it
+    // First try with submission_type and attachment columns, if it fails, try without them
     let query = `
       SELECT t.id, t.title, t.description, t.instructions, t.due_date, t.max_points,
-             t.task_type, t.submission_type, t.created_at, t.updated_at, t.grade_id, t.class_id,
+             t.task_type, t.submission_type, t.attachment_s3_key, t.attachment_s3_url, 
+             t.attachment_original_name, t.attachment_file_size, t.attachment_file_type,
+             t.created_at, t.updated_at, t.grade_id, t.class_id,
              u.first_name as teacher_first_name, u.last_name as teacher_last_name,
              g.name as grade_name, c.name as class_name
       FROM tasks t
@@ -174,11 +201,14 @@ router.get('/:id', [
     try {
       result = await db.query(query, params);
     } catch (columnError) {
-      console.log('submission_type column might not exist, trying fallback query');
-      // Fallback query without submission_type column
+      console.log('Some task columns might not exist, trying fallback query');
+      // Fallback query without new columns
       query = `
         SELECT t.id, t.title, t.description, t.instructions, t.due_date, t.max_points,
-               t.task_type, 'online' as submission_type, t.created_at, t.updated_at, t.grade_id, t.class_id,
+               t.task_type, 'online' as submission_type, 
+               NULL as attachment_s3_key, NULL as attachment_s3_url, NULL as attachment_original_name,
+               NULL as attachment_file_size, NULL as attachment_file_type,
+               t.created_at, t.updated_at, t.grade_id, t.class_id,
                u.first_name as teacher_first_name, u.last_name as teacher_last_name,
                g.name as grade_name, c.name as class_name
         FROM tasks t
@@ -252,6 +282,7 @@ router.get('/:id', [
 router.post('/', [
   authenticate,
   authorize('teacher', 'admin', 'super_admin'),
+  upload.single('attachment'), // Add file upload support
   body('title').notEmpty().withMessage('Title is required'),
   body('description').optional(),
   body('instructions').optional(),
@@ -334,13 +365,52 @@ router.post('/', [
 
     console.log('Creating task with submission_type:', finalSubmissionType);
 
-    // Try to insert with submission_type first, fall back to without if column doesn't exist
+    // Handle file attachment upload to S3 if provided
+    let attachmentS3Key = null;
+    let attachmentS3Url = null;
+    let attachmentOriginalName = null;
+    let attachmentFileSize = null;
+    let attachmentFileType = null;
+
+    if (req.file) {
+      try {
+        console.log('📤 Uploading task attachment to S3:', req.file.originalname);
+        
+        const uploadResult = await s3Service.uploadFile(
+          req.file.buffer,
+          req.file.originalname,
+          req.file.mimetype,
+          'task-attachments'
+        );
+
+        attachmentS3Key = uploadResult.s3Key;
+        attachmentS3Url = uploadResult.s3Url;
+        attachmentOriginalName = req.file.originalname;
+        attachmentFileSize = req.file.size;
+        attachmentFileType = req.file.mimetype;
+
+        console.log('✅ Task attachment uploaded to S3:', { attachmentS3Key, attachmentS3Url });
+      } catch (uploadError) {
+        console.error('❌ S3 upload failed:', uploadError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to upload attachment. Please try again.',
+          error: uploadError.message
+        });
+      }
+    }
+
+    // Try to insert with submission_type and attachment fields first, fall back to without if columns don't exist
     let result;
     try {
       result = await db.query(`
-        INSERT INTO tasks (title, description, instructions, due_date, max_points, grade_id, class_id, created_by, task_type, submission_type)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id, title, description, instructions, due_date, max_points, grade_id, class_id, task_type, submission_type, created_at
+        INSERT INTO tasks (
+          title, description, instructions, due_date, max_points, grade_id, class_id, created_by, task_type, submission_type,
+          attachment_s3_key, attachment_s3_url, attachment_original_name, attachment_file_size, attachment_file_type
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        RETURNING id, title, description, instructions, due_date, max_points, grade_id, class_id, task_type, submission_type, 
+                  attachment_s3_key, attachment_s3_url, attachment_original_name, attachment_file_size, attachment_file_type, created_at
       `, [
         title, 
         description, 
@@ -351,11 +421,16 @@ router.post('/', [
         classId, 
         user.id, 
         task_type,
-        finalSubmissionType
+        finalSubmissionType,
+        attachmentS3Key,
+        attachmentS3Url,
+        attachmentOriginalName,
+        attachmentFileSize,
+        attachmentFileType
       ]);
     } catch (columnError) {
       if (columnError.code === '42703') { // Column doesn't exist
-        console.log('submission_type column not found, creating task without it');
+        console.log('Some task columns not found, trying fallback query without new columns');
         result = await db.query(`
           INSERT INTO tasks (title, description, instructions, due_date, max_points, grade_id, class_id, created_by, task_type)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -371,6 +446,11 @@ router.post('/', [
           user.id, 
           task_type
         ]);
+        
+        // If attachment was uploaded but columns don't exist, warn user
+        if (req.file) {
+          console.log('⚠️ Warning: File attachment uploaded but database not yet migrated to support attachments');
+        }
       } else {
         throw columnError;
       }
@@ -553,6 +633,104 @@ router.get('/:id/submissions', [
   } catch (error) {
     console.error('Get task submissions error:', error);
     res.status(500).json({ message: 'Server error fetching submissions' });
+  }
+});
+
+// Download task attachment
+router.get('/:id/attachment/download', [
+  authenticate,
+  authorizeResourceAccess('task')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      SELECT attachment_s3_key, attachment_s3_url, attachment_original_name 
+      FROM tasks WHERE id = $1 AND is_active = true
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Task not found' 
+      });
+    }
+
+    const task = result.rows[0];
+
+    if (!task.attachment_s3_key) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'No attachment found for this task' 
+      });
+    }
+
+    try {
+      const signedUrl = await s3Service.getSignedUrl(task.attachment_s3_key, 300); // 5 minutes expiry
+      return res.redirect(signedUrl);
+    } catch (s3Error) {
+      console.error('❌ S3 download error:', s3Error);
+      return res.status(500).json({ 
+        success: false,
+        message: 'Attachment temporarily unavailable. Please try again later.' 
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Download task attachment error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error downloading attachment' 
+    });
+  }
+});
+
+// View task attachment in browser
+router.get('/:id/attachment/view', [
+  authenticate,
+  authorizeResourceAccess('task')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      SELECT attachment_s3_key, attachment_s3_url, attachment_original_name 
+      FROM tasks WHERE id = $1 AND is_active = true
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Task not found' 
+      });
+    }
+
+    const task = result.rows[0];
+
+    if (!task.attachment_s3_key) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'No attachment found for this task' 
+      });
+    }
+
+    try {
+      const signedUrl = await s3Service.getSignedUrl(task.attachment_s3_key, 3600); // 1 hour for viewing
+      return res.redirect(signedUrl);
+    } catch (s3Error) {
+      console.error('❌ S3 view error:', s3Error);
+      return res.status(500).json({ 
+        success: false,
+        message: 'Attachment temporarily unavailable. Please try again later.' 
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ View task attachment error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error viewing attachment' 
+    });
   }
 });
 

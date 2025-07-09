@@ -1,43 +1,32 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
-const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize, authorizeResourceAccess, authorizeTeacherAssignment } = require('../middleware/auth');
+const s3Service = require('../services/s3Service');
 
 const router = express.Router();
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, '..', 'uploads', 'submissions');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
+// Configure multer for memory storage (for S3 upload)
 const upload = multer({
-  storage: storage,
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10485760 // 10MB
   },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|txt|ppt|pptx|xls|xlsx/;
+    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|txt|ppt|pptx|xls|xlsx|zip|rar|mp4|mp3|avi|mov/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
+    const mimetype = allowedTypes.test(file.mimetype) || 
+                     file.mimetype.includes('application/') || 
+                     file.mimetype.includes('text/') ||
+                     file.mimetype.includes('video/') ||
+                     file.mimetype.includes('audio/');
 
     if (mimetype && extname) {
       return cb(null, true);
     } else {
-      cb(new Error('Only certain file types are allowed'));
+      cb(new Error('File type not supported. Please upload documents, images, videos, or audio files.'));
     }
   }
 });
@@ -122,35 +111,107 @@ router.post('/assignment/:taskId', [
       });
     }
 
-    // Check if student has already submitted (only one submission per assignment)
+    // Check if student has already submitted - allow resubmission before deadline
     const existingSubmission = await db.query(`
-      SELECT id FROM submissions 
+      SELECT id, s3_key FROM submissions 
       WHERE task_id = $1 AND student_id = $2
     `, [taskId, user.id]);
 
+    let isResubmission = false;
+    let oldS3Key = null;
+
     if (existingSubmission.rows.length > 0) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Assignment already submitted. Only one submission per assignment is allowed.' 
-      });
+      isResubmission = true;
+      oldS3Key = existingSubmission.rows[0].s3_key;
+      console.log('⚠️ Student resubmitting assignment, will replace previous submission');
     }
 
-    // Create submission
-    const filePath = req.file ? req.file.path : null;
-    const fileName = req.file ? req.file.filename : null;
+    // Create submission with S3 file upload if file provided
+    let s3Key = null;
+    let s3Url = null;
+    let originalFileName = null;
+    let fileSize = null;
+    let fileType = null;
+
+    if (req.file) {
+      try {
+        console.log('📤 Uploading file to S3:', req.file.originalname);
+        
+        const uploadResult = await s3Service.uploadFile(
+          req.file.buffer,
+          req.file.originalname,
+          req.file.mimetype,
+          'submissions'
+        );
+
+        s3Key = uploadResult.s3Key;
+        s3Url = uploadResult.s3Url;
+        originalFileName = req.file.originalname;
+        fileSize = req.file.size;
+        fileType = req.file.mimetype;
+
+        console.log('✅ File uploaded to S3:', { s3Key, s3Url });
+      } catch (uploadError) {
+        console.error('❌ S3 upload failed:', uploadError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to upload file. Please try again.',
+          error: uploadError.message
+        });
+      }
+    }
     
-    const result = await db.query(`
-      INSERT INTO submissions (task_id, student_id, content, file_path, file_name, max_score, status, submission_type)
-      VALUES ($1, $2, $3, $4, $5, $6, 'submitted', $7)
-      RETURNING id, content, file_path, file_name, status, submitted_at, submission_type
-    `, [taskId, user.id, content, filePath, fileName, task.max_points, task.submission_type]);
+    let result;
+    
+    if (isResubmission) {
+      // Update existing submission
+      result = await db.query(`
+        UPDATE submissions 
+        SET content = $3, s3_key = $4, s3_url = $5, original_file_name = $6, 
+            file_size = $7, file_type = $8, status = 'submitted', submitted_at = CURRENT_TIMESTAMP,
+            score = NULL, feedback = NULL, graded_at = NULL
+        WHERE task_id = $1 AND student_id = $2
+        RETURNING id, content, s3_key, s3_url, original_file_name, file_size, 
+                 file_type, status, submitted_at
+      `, [
+        taskId, user.id, content, s3Key, s3Url, originalFileName, 
+        fileSize, fileType
+      ]);
+      
+      // Delete old file from S3 if it exists and is different from new one
+      if (oldS3Key && oldS3Key !== s3Key) {
+        try {
+          await s3Service.deleteFile(oldS3Key);
+          console.log('✅ Old submission file deleted from S3:', oldS3Key);
+        } catch (deleteError) {
+          console.log('⚠️ Warning: Could not delete old file from S3:', deleteError.message);
+        }
+      }
+      
+      console.log('✅ Submission updated successfully:', result.rows[0]);
+    } else {
+      // Create new submission
+      result = await db.query(`
+        INSERT INTO submissions (
+          task_id, student_id, content, s3_key, s3_url, original_file_name, 
+          file_size, file_type, max_score, status
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'submitted')
+        RETURNING id, content, s3_key, s3_url, original_file_name, file_size, 
+                 file_type, status, submitted_at
+      `, [
+        taskId, user.id, content, s3Key, s3Url, originalFileName, 
+        fileSize, fileType, task.max_points
+      ]);
+      
+      console.log('✅ Submission created successfully:', result.rows[0]);
+    }
 
-    console.log('✅ Submission created successfully:', result.rows[0]);
-
-    res.status(201).json({
+    res.status(isResubmission ? 200 : 201).json({
       success: true,
-      message: 'Assignment submitted successfully',
-      submission: result.rows[0]
+      message: isResubmission ? 'Assignment resubmitted successfully' : 'Assignment submitted successfully',
+      submission: result.rows[0],
+      is_resubmission: isResubmission
     });
 
   } catch (error) {
@@ -248,8 +309,9 @@ router.get('/task/:taskId', [
 
     // Get submissions for this task
     const submissionsResult = await db.query(`
-      SELECT s.id, s.content, s.file_path, s.file_name, s.score, s.max_score, s.feedback,
-             s.status, s.submitted_at, s.graded_at, s.attempt_number, s.submission_type,
+      SELECT s.id, s.content, s.file_path, s.s3_key, s.s3_url, s.original_file_name,
+             s.file_size, s.file_type, s.score, s.max_score, s.feedback,
+             s.status, s.submitted_at, s.graded_at, s.attempt_number,
              u.first_name, u.last_name, u.student_number
       FROM submissions s
       JOIN users u ON s.student_id = u.id
@@ -283,7 +345,8 @@ router.get('/student', authenticate, async (req, res) => {
     const { status, limit = 20, offset = 0 } = req.query;
 
     let query = `
-      SELECT s.id, s.content, s.file_path, s.score, s.max_score, s.feedback,
+      SELECT s.id, s.content, s.file_path, s.s3_key, s.s3_url, s.original_file_name,
+             s.file_size, s.file_type, s.score, s.max_score, s.feedback,
              s.status, s.submitted_at, s.graded_at, s.attempt_number,
              t.id as task_id, t.title, t.task_type, t.due_date,
              g.name as grade_name, c.name as class_name
@@ -324,7 +387,8 @@ router.get('/:id', [
     const user = req.user;
 
     const result = await db.query(`
-      SELECT s.id, s.content, s.file_path, s.quiz_answers, s.score, s.max_score, 
+      SELECT s.id, s.content, s.file_path, s.s3_key, s.s3_url, s.original_file_name,
+             s.file_size, s.file_type, s.quiz_answers, s.score, s.max_score, 
              s.feedback, s.status, s.submitted_at, s.graded_at, s.attempt_number,
              t.id as task_id, t.title, t.description, t.instructions, t.task_type, t.due_date,
              u.student_number, u.first_name, u.last_name,
@@ -462,25 +526,107 @@ router.get('/:id/download', [
     const { id } = req.params;
 
     const result = await db.query(`
-      SELECT file_path FROM submissions WHERE id = $1
+      SELECT s3_key, s3_url, original_file_name, file_path 
+      FROM submissions WHERE id = $1
     `, [id]);
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Submission not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Submission not found' 
+      });
     }
 
-    const filePath = result.rows[0].file_path;
+    const submission = result.rows[0];
 
-    if (!filePath || !fs.existsSync(filePath)) {
-      return res.status(404).json({ message: 'File not found' });
+    // If file is stored in S3
+    if (submission.s3_key) {
+      try {
+        const signedUrl = await s3Service.getSignedUrl(submission.s3_key, 300); // 5 minutes expiry
+        return res.redirect(signedUrl);
+      } catch (s3Error) {
+        console.error('❌ S3 download error:', s3Error);
+        return res.status(500).json({ 
+          success: false,
+          message: 'File temporarily unavailable. Please try again later.' 
+        });
+      }
     }
 
-    const fileName = path.basename(filePath);
-    res.download(filePath, fileName);
+    // Fallback: check for legacy local file
+    if (submission.file_path && require('fs').existsSync(submission.file_path)) {
+      const fileName = submission.original_file_name || path.basename(submission.file_path);
+      return res.download(submission.file_path, fileName);
+    }
+
+    // No file found
+    return res.status(404).json({ 
+      success: false,
+      message: 'Submission file not found' 
+    });
 
   } catch (error) {
-    console.error('Download file error:', error);
-    res.status(500).json({ message: 'Server error downloading file' });
+    console.error('❌ Download submission file error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error downloading file' 
+    });
+  }
+});
+
+// View submission file in browser
+router.get('/:id/view', [
+  authenticate,
+  authorizeResourceAccess('submission')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      SELECT s3_key, s3_url, original_file_name, file_type, file_path 
+      FROM submissions WHERE id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Submission not found' 
+      });
+    }
+
+    const submission = result.rows[0];
+
+    // If file is stored in S3
+    if (submission.s3_key) {
+      try {
+        const signedUrl = await s3Service.getSignedUrl(submission.s3_key, 3600); // 1 hour for viewing
+        return res.redirect(signedUrl);
+      } catch (s3Error) {
+        console.error('❌ S3 view error:', s3Error);
+        return res.status(500).json({ 
+          success: false,
+          message: 'File temporarily unavailable. Please try again later.' 
+        });
+      }
+    }
+
+    // Fallback: check for legacy local file
+    if (submission.file_path && require('fs').existsSync(submission.file_path)) {
+      return res.sendFile(path.resolve(submission.file_path));
+    }
+
+    // No file found
+    return res.status(404).json({ 
+      success: false,
+      message: 'Submission file not found' 
+    });
+
+  } catch (error) {
+    console.error('❌ View submission file error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error viewing file' 
+    });
   }
 });
 
@@ -2015,9 +2161,9 @@ router.get('/task/:taskId/test-all', [
         task: task,
         students: studentsWithSubmissions,
         stats: {
-          total: studentsWithSubmissions.length,
-          submitted: studentsWithSubmissions.filter(s => s.submission_id).length,
-          pending: studentsWithSubmissions.filter(s => !s.submission_id).length
+          total: studentsWithSubmissionInfo.length,
+          submitted: studentsWithSubmissionInfo.filter(s => s.submission_id).length,
+          pending: studentsWithSubmissionInfo.filter(s => !s.submission_id).length
         }
       }
     });
