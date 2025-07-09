@@ -126,38 +126,60 @@ router.post('/assignment/:taskId', [
       console.log('⚠️ Student resubmitting assignment, will replace previous submission');
     }
 
-    // Create submission with S3 file upload if file provided
+    // Create submission with S3 file upload OR local storage fallback if file provided
     let s3Key = null;
     let s3Url = null;
     let originalFileName = null;
     let fileSize = null;
     let fileType = null;
+    let localFilePath = null;
 
     if (req.file) {
-      try {
+      originalFileName = req.file.originalname;
+      fileSize = req.file.size;
+      fileType = req.file.mimetype;
+      
+      // Check if S3 is configured (for cloud storage)
+      let isS3Configured = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_S3_BUCKET_NAME;
+      
+      if (isS3Configured) {
         console.log('📤 Uploading file to S3:', req.file.originalname);
+        try {
+          const uploadResult = await s3Service.uploadFile(
+            req.file.buffer,
+            req.file.originalname,
+            req.file.mimetype,
+            'submissions'
+          );
+
+          s3Key = uploadResult.s3Key;
+          s3Url = uploadResult.s3Url;
+          console.log('✅ File uploaded to S3:', { s3Key, s3Url });
+        } catch (s3Error) {
+          console.log('❌ S3 upload failed, falling back to local storage:', s3Error.message);
+          isS3Configured = false; // Fall back to local storage
+        }
+      }
+      
+      if (!isS3Configured) {
+        console.log('📁 S3 not configured or failed, using local storage for file upload');
         
-        const uploadResult = await s3Service.uploadFile(
-          req.file.buffer,
-          req.file.originalname,
-          req.file.mimetype,
-          'submissions'
-        );
-
-        s3Key = uploadResult.s3Key;
-        s3Url = uploadResult.s3Url;
-        originalFileName = req.file.originalname;
-        fileSize = req.file.size;
-        fileType = req.file.mimetype;
-
-        console.log('✅ File uploaded to S3:', { s3Key, s3Url });
-      } catch (uploadError) {
-        console.error('❌ S3 upload failed:', uploadError);
-        return res.status(500).json({
-          success: false,
-          message: 'Failed to upload file. Please try again.',
-          error: uploadError.message
-        });
+        // Create uploads directory if it doesn't exist
+        const path = require('path');
+        const fs = require('fs');
+        const uploadsDir = path.join(__dirname, '../uploads/submissions');
+        if (!fs.existsSync(uploadsDir)) {
+          fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+        
+        // Generate unique filename
+        const timestamp = Date.now();
+        const uniqueFileName = `${timestamp}-${req.file.originalname}`;
+        localFilePath = path.join(uploadsDir, uniqueFileName);
+        
+        // Save file locally
+        fs.writeFileSync(localFilePath, req.file.buffer);
+        console.log('✅ File saved locally:', localFilePath);
       }
     }
     
@@ -168,14 +190,14 @@ router.post('/assignment/:taskId', [
       result = await db.query(`
         UPDATE submissions 
         SET content = $3, s3_key = $4, s3_url = $5, original_file_name = $6, 
-            file_size = $7, file_type = $8, status = 'submitted', submitted_at = CURRENT_TIMESTAMP,
+            file_size = $7, file_type = $8, file_path = $9, status = 'submitted', submitted_at = CURRENT_TIMESTAMP,
             score = NULL, feedback = NULL, graded_at = NULL
         WHERE task_id = $1 AND student_id = $2
         RETURNING id, content, s3_key, s3_url, original_file_name, file_size, 
-                 file_type, status, submitted_at
+                 file_type, file_path, status, submitted_at
       `, [
         taskId, user.id, content, s3Key, s3Url, originalFileName, 
-        fileSize, fileType
+        fileSize, fileType, localFilePath
       ]);
       
       // Delete old file from S3 if it exists and is different from new one
@@ -194,14 +216,14 @@ router.post('/assignment/:taskId', [
       result = await db.query(`
         INSERT INTO submissions (
           task_id, student_id, content, s3_key, s3_url, original_file_name, 
-          file_size, file_type, max_score, status
+          file_size, file_type, file_path, max_score, status
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'submitted')
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'submitted')
         RETURNING id, content, s3_key, s3_url, original_file_name, file_size, 
-                 file_type, status, submitted_at
+                 file_type, file_path, status, submitted_at
       `, [
         taskId, user.id, content, s3Key, s3Url, originalFileName, 
-        fileSize, fileType, task.max_points
+        fileSize, fileType, localFilePath, task.max_points
       ]);
       
       console.log('✅ Submission created successfully:', result.rows[0]);
@@ -1036,7 +1058,7 @@ router.get('/task/:taskId/students-simple', [
         s.score,
         s.max_score,
         s.feedback,
-        s.file_name,
+        s.original_file_name as file_name,
         s.content
       FROM users u
       INNER JOIN submissions s ON u.id = s.student_id
