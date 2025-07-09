@@ -730,7 +730,7 @@ const SubmissionsManagement = ({ taskId }) => {
         {/* Debug Controls */}
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
           <h3 className="text-sm font-medium text-gray-900 mb-2">Debug Controls</h3>
-          <div className="flex gap-2">
+          <div className="flex gap-2 mb-4">
             <button
               onClick={testEndpoint}
               className="px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded hover:bg-blue-200"
@@ -749,6 +749,30 @@ const SubmissionsManagement = ({ taskId }) => {
             >
               Create Test Students
             </button>
+          </div>
+          
+          {/* Raw Data Display */}
+          <div className="bg-white border rounded p-3 text-xs">
+            <h4 className="font-medium mb-2">Raw API Data (for debugging):</h4>
+            <div className="space-y-2">
+              <div>
+                <strong>Students Data:</strong>
+                <pre className="text-xs bg-gray-100 p-2 rounded mt-1 overflow-auto max-h-32">
+                  {JSON.stringify(studentsData, null, 2)}
+                </pre>
+              </div>
+              <div>
+                <strong>Submissions Data:</strong>
+                <pre className="text-xs bg-gray-100 p-2 rounded mt-1 overflow-auto max-h-32">
+                  {JSON.stringify(submissionsData, null, 2)}
+                </pre>
+              </div>
+              <div>
+                <strong>Processed Counts:</strong>
+                <p>Students: {students.length}, Submissions: {submissions.length}</p>
+                <p>Submitted: {submittedStudents.length}, Pending: {notSubmittedStudents.length}</p>
+              </div>
+            </div>
           </div>
         </div>
 
