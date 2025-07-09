@@ -37,6 +37,9 @@ const TaskDetails = () => {
     {
       onSuccess: () => {
         queryClient.invalidateQueries(['task', id]);
+        queryClient.invalidateQueries(['taskSubmissions', id]);
+        queryClient.invalidateQueries(['taskStudents', id]);
+        queryClient.invalidateQueries(['taskStudentsForce', id]);
         setSubmissionContent('');
         setSelectedFile(null);
         setIsSubmitting(false);
