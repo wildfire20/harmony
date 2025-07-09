@@ -368,6 +368,7 @@ const TaskDetails = () => {
 // Submissions Management Component for Teachers/Admins
 const SubmissionsManagement = ({ taskId }) => {
   const [activeTab, setActiveTab] = useState('overview');
+  const queryClient = useQueryClient();
   
   // Fetch task submissions
   const { data: submissionsData, isLoading: submissionsLoading, error: submissionsError, refetch: refetchSubmissions } = useQuery(
@@ -432,7 +433,22 @@ const SubmissionsManagement = ({ taskId }) => {
   );
 
   const submissions = submissionsData?.submissions || [];
-  let students = studentsData?.data?.students || studentsData?.students || [];
+  let students = [];
+  
+  // FIXED: Properly extract students from the correct API response structure
+  if (studentsData?.success && studentsData?.data?.students) {
+    students = studentsData.data.students;
+    console.log('✅ Using studentsData.data.students (correct path)');
+  } else if (studentsData?.data?.students) {
+    students = studentsData.data.students;
+    console.log('✅ Using studentsData.data.students (fallback 1)');
+  } else if (studentsData?.students) {
+    students = studentsData.students;
+    console.log('✅ Using studentsData.students (fallback 2)');
+  } else if (Array.isArray(studentsData)) {
+    students = studentsData;
+    console.log('✅ Using studentsData as array (fallback 3)');
+  }
   
   // Debug: Log all possible response formats
   console.log('=== DETAILED API RESPONSE DEBUG ===');
@@ -441,37 +457,19 @@ const SubmissionsManagement = ({ taskId }) => {
   console.log('Submissions extracted:', submissions);
   console.log('Students extracted:', students);
   
-  // FORCE REFRESH: If we have zero students but should have data, force a hard refresh
-  if (students.length === 0 && studentsData && !studentsLoading && !studentsError) {
-    console.log('🚨 ZERO STUDENTS DETECTED - Forcing data refresh...');
-    console.log('StudentsData exists:', !!studentsData);
-    console.log('StudentsData structure:', Object.keys(studentsData || {}));
-    
-    // Try alternative data access patterns
-    if (studentsData.data && studentsData.data.students) {
-      students = studentsData.data.students;
-      console.log('✅ Fixed: Using studentsData.data.students');
-    } else if (studentsData.students) {
-      students = studentsData.students;
-      console.log('✅ Fixed: Using studentsData.students');
-    } else if (Array.isArray(studentsData)) {
-      students = studentsData;
-      console.log('✅ Fixed: Using studentsData as array');
-    }
-  }
+  // REMOVED CONFUSING FALLBACK LOGIC - The API response structure is clear from the debug data
+  // The backend returns: { success: true, data: { students: [...], stats: {...} } }
   
-  // Additional fallback: Try different response formats
+  console.log('=== FINAL STUDENTS COUNT ===');
+  console.log('Students array length:', students.length);
+  console.log('Students array content:', students);
+  
+  // If we still have no students but the API shows data, there's a parsing issue
   if (students.length === 0 && studentsData) {
-    if (studentsData.data && Array.isArray(studentsData.data)) {
-      students = studentsData.data;
-      console.log('✅ Using studentsData.data as array');
-    } else if (Array.isArray(studentsData)) {
-      students = studentsData;
-      console.log('✅ Using studentsData as array');
-    } else if (studentsData.success && studentsData.data) {
-      students = studentsData.data.students || [];
-      console.log('✅ Using studentsData.data.students');
-    }
+    console.log('🚨 CRITICAL: API returned data but students array is empty');
+    console.log('StudentsData keys:', Object.keys(studentsData));
+    console.log('StudentsData.data keys:', studentsData.data ? Object.keys(studentsData.data) : 'No data key');
+    console.log('StudentsData.data.students:', studentsData.data?.students);
   }
   
   // Fallback: If no students found but we have submissions, create student entries from submissions
