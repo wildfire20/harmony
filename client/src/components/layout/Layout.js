@@ -70,14 +70,14 @@ const Layout = () => {
   const getUserStatus = () => {
     if (user?.role === 'admin') return 'Administrator';
     if (user?.role === 'teacher') return 'Teacher';
-    if (user?.role === 'student') return `Grade ${user?.grade || 'N/A'}`;
+    if (user?.role === 'student') return `Grade ${user?.grade_name || user?.grade || 'N/A'}`;
     return 'User';
   };
 
   const getUserBadge = () => {
     if (user?.role === 'admin') return <StatusIndicator status="active" label="Admin" />;
     if (user?.role === 'teacher') return <DepartmentBadge department={user?.department || 'General'} />;
-    if (user?.role === 'student') return <StatusIndicator status="active" label={`Grade ${user?.grade || 'N/A'}`} />;
+    if (user?.role === 'student') return <StatusIndicator status="active" label={`Grade ${user?.grade_name || user?.grade || 'N/A'}`} />;
     return null;
   };
 

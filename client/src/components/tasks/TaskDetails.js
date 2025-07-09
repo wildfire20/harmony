@@ -441,6 +441,25 @@ const SubmissionsManagement = ({ taskId }) => {
   console.log('Submissions extracted:', submissions);
   console.log('Students extracted:', students);
   
+  // FORCE REFRESH: If we have zero students but should have data, force a hard refresh
+  if (students.length === 0 && studentsData && !studentsLoading && !studentsError) {
+    console.log('🚨 ZERO STUDENTS DETECTED - Forcing data refresh...');
+    console.log('StudentsData exists:', !!studentsData);
+    console.log('StudentsData structure:', Object.keys(studentsData || {}));
+    
+    // Try alternative data access patterns
+    if (studentsData.data && studentsData.data.students) {
+      students = studentsData.data.students;
+      console.log('✅ Fixed: Using studentsData.data.students');
+    } else if (studentsData.students) {
+      students = studentsData.students;
+      console.log('✅ Fixed: Using studentsData.students');
+    } else if (Array.isArray(studentsData)) {
+      students = studentsData;
+      console.log('✅ Fixed: Using studentsData as array');
+    }
+  }
+  
   // Additional fallback: Try different response formats
   if (students.length === 0 && studentsData) {
     if (studentsData.data && Array.isArray(studentsData.data)) {
