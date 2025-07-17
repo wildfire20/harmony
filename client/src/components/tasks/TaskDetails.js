@@ -1046,56 +1046,94 @@ const TaskDetails = () => {
                         </p>
                       </div>
                       
-                      {/* Iframe with fallback */}
+                      {/* Document Viewer - Enhanced for Better Compatibility */}
                       <div className="flex-1 relative">
-                        <iframe
-                          src={markingModal.documentUrl}
-                          className="w-full h-full"
-                          title="Document for marking"
-                          onLoad={() => console.log('Document iframe loaded successfully')}
-                          onError={(e) => {
-                            console.error('Document iframe failed to load:', e);
-                            // Hide iframe and show fallback
-                            e.target.style.display = 'none';
-                            const fallback = e.target.nextElementSibling;
-                            if (fallback) fallback.style.display = 'flex';
-                          }}
-                        />
-                        
-                        {/* Fallback when iframe is blocked */}
-                        <div 
-                          className="absolute inset-0 bg-white flex items-center justify-center"
-                          style={{ display: 'none' }}
-                        >
-                          <div className="text-center">
-                            <FileText className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                            <h3 className="text-lg font-medium text-gray-900 mb-2">
-                              Document Preview Blocked
-                            </h3>
-                            <p className="text-gray-600 mb-4">
-                              The document cannot be displayed in the preview due to security restrictions.
-                            </p>
-                            <div className="space-y-2">
-                              <button
-                                onClick={() => window.open(markingModal.documentUrl, '_blank')}
-                                className="block w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                              >
-                                Open Document in New Tab
-                              </button>
-                              <button
-                                onClick={() => {
-                                  const a = document.createElement('a');
-                                  a.href = markingModal.documentUrl;
-                                  a.download = markingModal.submission?.original_file_name || 'document';
-                                  a.click();
-                                }}
-                                className="block w-full px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-                              >
-                                Download Document
-                              </button>
-                            </div>
-                          </div>
-                        </div>
+                        {(() => {
+                          const fileType = markingModal.submission?.file_type || '';
+                          const isImage = fileType.includes('image/');
+                          const isPDF = fileType.includes('pdf');
+                          
+                          if (isImage) {
+                            // For images, display directly
+                            return (
+                              <div className="flex items-center justify-center h-full p-4">
+                                <img
+                                  src={markingModal.documentUrl}
+                                  alt="Student submission"
+                                  className="max-w-full max-h-full object-contain shadow-lg rounded"
+                                  onError={(e) => {
+                                    console.error('Image failed to load');
+                                    e.target.style.display = 'none';
+                                    e.target.nextElementSibling.style.display = 'block';
+                                  }}
+                                />
+                                <div className="hidden text-center">
+                                  <FileText className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                                  <p className="text-gray-600">Image could not be loaded</p>
+                                  <button
+                                    onClick={() => window.open(markingModal.documentUrl, '_blank')}
+                                    className="mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                                  >
+                                    Open in New Tab
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          } else {
+                            // For all other files, provide download/view options
+                            return (
+                              <div className="flex items-center justify-center h-full">
+                                <div className="text-center max-w-md mx-auto p-6">
+                                  <div className="mb-6">
+                                    {isPDF ? (
+                                      <div className="bg-red-100 p-4 rounded-lg mb-4">
+                                        <FileText className="h-16 w-16 text-red-600 mx-auto mb-4" />
+                                        <h3 className="text-lg font-medium text-gray-900 mb-2">PDF Document</h3>
+                                      </div>
+                                    ) : (
+                                      <div className="bg-blue-100 p-4 rounded-lg mb-4">
+                                        <FileText className="h-16 w-16 text-blue-600 mx-auto mb-4" />
+                                        <h3 className="text-lg font-medium text-gray-900 mb-2">Document File</h3>
+                                      </div>
+                                    )}
+                                  </div>
+                                  
+                                  <p className="text-gray-600 mb-4">
+                                    <strong>File:</strong> {markingModal.submission?.original_file_name || 'Document'}
+                                  </p>
+                                  
+                                  <p className="text-sm text-gray-500 mb-6">
+                                    Click below to view or download the document for review
+                                  </p>
+                                  
+                                  <div className="space-y-3">
+                                    <button
+                                      onClick={() => window.open(markingModal.documentUrl, '_blank')}
+                                      className="block w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                                    >
+                                      📖 Open Document in New Tab
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        const a = document.createElement('a');
+                                        a.href = markingModal.documentUrl;
+                                        a.download = markingModal.submission?.original_file_name || 'document';
+                                        a.click();
+                                      }}
+                                      className="block w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                                    >
+                                      💾 Download Document
+                                    </button>
+                                  </div>
+                                  
+                                  <p className="text-xs text-gray-400 mt-4">
+                                    Files are securely stored and accessed via encrypted URLs
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          }
+                        })()}
                       </div>
                     </div>
                   ) : (
@@ -1554,14 +1592,26 @@ const TeacherSubmissionsView = ({ taskId, onDownloadSubmission, onOpenGradingMod
               )}
               
               {(submission.file_path || submission.s3_key) && (
-                <div className="mt-2">
-                  <button
-                    onClick={() => onDownloadSubmission(submission.id, submission.original_file_name)}
-                    className="inline-flex items-center text-sm text-blue-600 hover:text-blue-700"
-                  >
-                    <Download className="h-4 w-4 mr-1" />
-                    Download File ({submission.original_file_name || 'attachment'})
-                  </button>
+                <div className="mt-2 space-y-2">
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => onDownloadSubmission(submission.id, submission.original_file_name)}
+                      className="inline-flex items-center text-sm text-blue-600 hover:text-blue-700"
+                    >
+                      <Download className="h-4 w-4 mr-1" />
+                      Download File
+                    </button>
+                    <button
+                      onClick={() => onOpenMarkingModal(submission)}
+                      className="inline-flex items-center text-sm text-green-600 hover:text-green-700"
+                    >
+                      <Eye className="h-4 w-4 mr-1" />
+                      View Document
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    File: {submission.original_file_name || 'attachment'}
+                  </p>
                 </div>
               )}
 
