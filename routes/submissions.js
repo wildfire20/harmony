@@ -669,6 +669,80 @@ router.get('/:id/download', [
   }
 });
 
+// View submission file in browser (serves file content directly)
+router.get('/:id/view', [
+  authenticate,
+  authorizeResourceAccess('submission')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      SELECT s3_key, s3_url, original_file_name, file_path, file_type 
+      FROM submissions WHERE id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Submission not found' 
+      });
+    }
+
+    const submission = result.rows[0];
+
+    // If file is stored in S3
+    if (submission.s3_key) {
+      try {
+        // Get the file content from S3
+        const fileContent = await s3Service.getFileContent(submission.s3_key);
+        
+        // Set appropriate headers for viewing in browser
+        const fileName = submission.original_file_name || 'submission';
+        const fileType = submission.file_type || 'application/octet-stream';
+        
+        res.setHeader('Content-Type', fileType);
+        res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        
+        // Send the file content
+        return res.send(fileContent);
+      } catch (s3Error) {
+        console.error('❌ S3 view error:', s3Error);
+        return res.status(500).json({ 
+          success: false,
+          message: 'File temporarily unavailable. Please try again later.' 
+        });
+      }
+    }
+
+    // Fallback: check for legacy local file
+    if (submission.file_path && require('fs').existsSync(submission.file_path)) {
+      const fileName = submission.original_file_name || path.basename(submission.file_path);
+      const fileType = submission.file_type || 'application/octet-stream';
+      
+      res.setHeader('Content-Type', fileType);
+      res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+      
+      return res.sendFile(path.resolve(submission.file_path));
+    }
+
+    // No file found
+    return res.status(404).json({ 
+      success: false,
+      message: 'Submission file not found' 
+    });
+
+  } catch (error) {
+    console.error('❌ View submission file error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error viewing file' 
+    });
+  }
+});
+
 // View submission file in browser
 router.get('/:id/view', [
   authenticate,

@@ -200,6 +200,34 @@ class S3Service {
   }
 
   /**
+   * Get file content from S3 as Buffer
+   * @param {string} s3Key - S3 key of the file
+   * @returns {Promise<Buffer>} File content as buffer
+   */
+  async getFileContent(s3Key) {
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: s3Key,
+      });
+
+      const response = await this.s3Client.send(command);
+      
+      // Convert the stream to buffer
+      const chunks = [];
+      for await (const chunk of response.Body) {
+        chunks.push(chunk);
+      }
+      
+      return Buffer.concat(chunks);
+
+    } catch (error) {
+      console.error('❌ Failed to get file content:', error);
+      throw new Error(`Failed to get file content: ${error.message}`);
+    }
+  }
+
+  /**
    * Check if file exists in S3
    * @param {string} s3Key - S3 key of the file
    * @returns {Promise<boolean>} Whether file exists
