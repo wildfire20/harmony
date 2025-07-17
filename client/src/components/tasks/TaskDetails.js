@@ -424,17 +424,89 @@ const TaskDetails = () => {
       // Check if we got a JSON response with signed URL
       if (response.data && typeof response.data === 'object' && response.data.downloadUrl) {
         console.log('Got signed URL for document viewing:', response.data.downloadUrl);
-        // Open the signed URL directly in a new tab
-        window.open(response.data.downloadUrl, '_blank');
-        toast.success('Document opened in new tab');
+        
+        // Create a new window with a loading message first
+        const newWindow = window.open('', '_blank');
+        if (newWindow) {
+          newWindow.document.write(`
+            <html>
+              <head>
+                <title>Loading Document...</title>
+                <style>
+                  body { 
+                    font-family: Arial, sans-serif; 
+                    display: flex; 
+                    justify-content: center; 
+                    align-items: center; 
+                    height: 100vh; 
+                    margin: 0; 
+                    background: #f5f5f5;
+                  }
+                  .loader { 
+                    text-align: center; 
+                  }
+                </style>
+              </head>
+              <body>
+                <div class="loader">
+                  <h3>Loading document...</h3>
+                  <p>Please wait while we fetch your document.</p>
+                </div>
+              </body>
+            </html>
+          `);
+        }
+        
+        // Fetch the file content and create blob URL
+        try {
+          const fileResponse = await fetch(response.data.downloadUrl);
+          if (!fileResponse.ok) {
+            throw new Error(`HTTP error! status: ${fileResponse.status}`);
+          }
+          
+          const blob = await fileResponse.blob();
+          const blobUrl = window.URL.createObjectURL(blob);
+          
+          // Update the window with the actual document
+          if (newWindow && !newWindow.closed) {
+            newWindow.location.href = blobUrl;
+            
+            // Clean up the blob URL after a delay
+            setTimeout(() => window.URL.revokeObjectURL(blobUrl), 30000);
+          } else {
+            // If window was blocked or closed, create a new one
+            window.open(blobUrl, '_blank');
+            setTimeout(() => window.URL.revokeObjectURL(blobUrl), 30000);
+          }
+          
+          toast.success('Document opened in new tab');
+        } catch (fetchError) {
+          console.error('Error fetching file from signed URL:', fetchError);
+          
+          // Close the loading window if it exists
+          if (newWindow && !newWindow.closed) {
+            newWindow.close();
+          }
+          
+          // Fallback to download behavior
+          const a = document.createElement('a');
+          a.href = response.data.downloadUrl;
+          a.download = response.data.fileName || 'document';
+          a.target = '_blank';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          
+          toast.info('Document downloaded due to viewing restrictions');
+        }
       } else {
-        // Fallback: create blob URL and open in new tab
+        // Fallback: create blob URL from response data
         console.log('Creating blob URL for document viewing');
         const blob = new Blob([response.data]);
-        const url = window.URL.createObjectURL(blob);
-        window.open(url, '_blank');
-        // Clean up the blob URL after a short delay
-        setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+        const blobUrl = window.URL.createObjectURL(blob);
+        window.open(blobUrl, '_blank');
+        // Clean up the blob URL after a delay
+        setTimeout(() => window.URL.revokeObjectURL(blobUrl), 30000);
         toast.success('Document opened in new tab');
       }
     } catch (error) {
