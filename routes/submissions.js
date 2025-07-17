@@ -22,12 +22,12 @@ const upload = multer({
     console.log('File field name:', file.fieldname);
     console.log('File original name:', file.originalname);
     console.log('File mimetype:', file.mimetype);
-    console.log('Expected field name: file');
+    console.log('Expected field names: file, gradedDocument');
     
-    // Check if the field name is exactly 'file'
-    if (file.fieldname !== 'file') {
+    // Check if the field name is 'file' (for student submissions) or 'gradedDocument' (for teacher graded documents)
+    if (file.fieldname !== 'file' && file.fieldname !== 'gradedDocument') {
       console.log('❌ Submissions file rejected - wrong field name:', file.fieldname);
-      return cb(new Error(`Invalid field name. Expected 'file', got '${file.fieldname}'`));
+      return cb(new Error(`Invalid field name. Expected 'file' or 'gradedDocument', got '${file.fieldname}'`));
     }
     
     const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|txt|ppt|pptx|xls|xlsx|zip|rar|mp4|mp3|avi|mov/;
