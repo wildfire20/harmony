@@ -767,7 +767,11 @@ router.get('/:id/attachment/download', [
     }
 
     try {
-      const signedUrl = await s3Service.getSignedUrl(task.attachment_s3_key, 300); // 5 minutes expiry
+      const signedUrl = await s3Service.getDownloadUrl(
+        task.attachment_s3_key, 
+        task.attachment_original_name || 'task-attachment',
+        300 // 5 minutes expiry
+      );
       console.log('✅ Task attachment signed URL generated successfully');
       
       // Return JSON with signed URL instead of redirecting

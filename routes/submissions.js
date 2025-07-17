@@ -628,7 +628,11 @@ router.get('/:id/download', [
     // If file is stored in S3
     if (submission.s3_key) {
       try {
-        const signedUrl = await s3Service.getSignedUrl(submission.s3_key, 300); // 5 minutes expiry
+        const signedUrl = await s3Service.getDownloadUrl(
+          submission.s3_key, 
+          submission.original_file_name || 'submission',
+          300 // 5 minutes expiry
+        );
         return res.json({
           success: true,
           downloadUrl: signedUrl,
@@ -2732,10 +2736,10 @@ router.get('/:id/download-graded-document', [
     }
 
     try {
-      const signedUrl = await s3Service.getSignedUrl(
+      const signedUrl = await s3Service.getDownloadUrl(
         submission.graded_document_s3_key, 
-        300, // 5 minutes expiry
-        'attachment' // Force download
+        submission.graded_document_original_name || 'graded-document',
+        300 // 5 minutes expiry
       );
       
       return res.json({

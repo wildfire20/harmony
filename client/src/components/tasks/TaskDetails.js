@@ -352,19 +352,26 @@ const TaskDetails = () => {
   // Download graded document handler
   const handleDownloadGradedDocument = async (submissionId) => {
     try {
+      console.log('🔽 Starting graded document download for submission:', submissionId);
       const response = await submissionsAPI.downloadGradedDocument(submissionId);
       
       // Check if we got a JSON response with signed URL
       if (response.data && typeof response.data === 'object' && response.data.downloadUrl) {
-        console.log('Got signed URL for graded document download');
+        console.log('Got signed URL for graded document download:', response.data.downloadUrl);
         
         // For signed URLs, we need to fetch the actual file content first
         try {
-          const fileResponse = await fetch(response.data.downloadUrl);
+          console.log('🔗 Fetching file from S3 signed URL...');
+          const fileResponse = await fetch(response.data.downloadUrl, {
+            method: 'GET',
+            mode: 'cors'
+          });
+          
           if (!fileResponse.ok) {
             throw new Error(`HTTP error! status: ${fileResponse.status}`);
           }
           
+          console.log('✅ File fetch successful, creating blob...');
           const blob = await fileResponse.blob();
           const url = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
@@ -375,10 +382,12 @@ const TaskDetails = () => {
           document.body.removeChild(a);
           window.URL.revokeObjectURL(url);
           
+          console.log('✅ Download completed successfully');
           toast.success('Graded document downloaded successfully');
         } catch (fetchError) {
           console.error('Error fetching file from signed URL:', fetchError);
-          // Fallback: open the signed URL in a new tab
+          // Fallback: try opening the signed URL directly in a new tab
+          console.log('🔄 Fallback: Opening signed URL in new tab');
           window.open(response.data.downloadUrl, '_blank');
           toast.success('Graded document opened in new tab');
         }
