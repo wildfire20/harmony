@@ -1616,15 +1616,6 @@ const TeacherSubmissionsView = ({ taskId, onDownloadSubmission, onOpenGradingMod
                     {submission.status === 'graded' ? 'Edit Grade' : 'Grade'}
                   </button>
                   
-                  {(submission.file_path || submission.s3_key) && (
-                    <button
-                      onClick={() => onOpenMarkingModal(submission)}
-                      className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 flex items-center space-x-1"
-                    >
-                      <Edit className="h-3 w-3" />
-                      <span>Mark Document</span>
-                    </button>
-                  )}
                   <span className={`px-2 py-1 text-xs font-medium rounded-full ${
                     submission.status === 'graded' 
                       ? 'bg-green-100 text-green-800'
