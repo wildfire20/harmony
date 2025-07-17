@@ -1203,10 +1203,32 @@ const TeacherSubmissionsView = ({ taskId, onDownloadSubmission, onOpenGradingMod
     }
   );
 
+  // Fetch students data for accurate total count
+  const { data: studentsData, isLoading: studentsLoading, error: studentsError } = useQuery(
+    ['task-students', taskId],
+    async () => {
+      const response = await submissionsAPI.getTaskStudents(taskId);
+      console.log('React Query students response:', response);
+      return response.data; // Extract the actual data from axios response
+    },
+    { 
+      enabled: !!taskId,
+      onSuccess: (data) => {
+        console.log('Students API Response (onSuccess):', data);
+      },
+      onError: (error) => {
+        console.error('Students API Error:', error);
+        console.error('Error Response:', error.response?.data);
+        console.error('Error Status:', error.response?.status);
+        console.error('Error Message:', error.message);
+      }
+    }
+  );
+
   const submissions = Array.isArray(submissionsData?.submissions) ? submissionsData.submissions : [];
   
   // Calculate stats
-  const totalStudents = submissions.length;
+  const totalStudents = (studentsData?.data?.students || []).length;
   const submittedCount = submissions.filter(s => s.submitted_at).length;
   const gradedCount = submissions.filter(s => s.status === 'graded').length;
   const pendingCount = submittedCount - gradedCount;
@@ -1215,7 +1237,7 @@ const TeacherSubmissionsView = ({ taskId, onDownloadSubmission, onOpenGradingMod
   console.log('Extracted Submissions:', submissions);
   console.log('Is submissions array?', Array.isArray(submissions));
 
-  if (submissionsLoading) {
+  if (submissionsLoading || studentsLoading) {
     return (
       <div className="bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-medium text-gray-900 mb-4">Student Submissions</h3>
@@ -1224,14 +1246,14 @@ const TeacherSubmissionsView = ({ taskId, onDownloadSubmission, onOpenGradingMod
     );
   }
 
-  if (submissionsError) {
+  if (submissionsError || studentsError) {
     return (
       <div className="bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-medium text-gray-900 mb-4">Student Submissions</h3>
         <div className="text-red-600">
-          <p>Error loading submissions: {submissionsError.response?.data?.message || submissionsError.message}</p>
+          <p>Error loading data: {(submissionsError || studentsError)?.response?.data?.message || (submissionsError || studentsError)?.message}</p>
           <pre className="text-xs mt-2 bg-gray-100 p-2 rounded">
-            {JSON.stringify(submissionsError.response?.data, null, 2)}
+            {JSON.stringify((submissionsError || studentsError)?.response?.data, null, 2)}
           </pre>
         </div>
       </div>
