@@ -247,23 +247,64 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
       
       console.log('📖 View URL:', viewUrl);
       
-      // Open in new tab
-      const newWindow = window.open(viewUrl, '_blank');
+      // For certain file types, create a blob URL for better browser handling
+      const ext = document.filename ? document.filename.split('.').pop().toLowerCase() : '';
+      const viewableInBrowser = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'txt'].includes(ext);
       
-      if (newWindow) {
-        toast.success('Document opened in new tab');
+      if (viewableInBrowser) {
+        try {
+          // Fetch the file content first
+          const response = await fetch(viewUrl);
+          if (response.ok) {
+            const blob = await response.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            
+            // Open the blob URL in a new tab
+            const newWindow = window.open(blobUrl, '_blank');
+            
+            if (newWindow) {
+              toast.success('Document opened in new tab');
+              
+              // Clean up the blob URL after a delay
+              setTimeout(() => {
+                URL.revokeObjectURL(blobUrl);
+              }, 10000);
+            } else {
+              toast.error('Popup blocked. Please allow popups for this site.');
+              // Fallback to direct URL
+              window.open(viewUrl, '_blank');
+            }
+          } else {
+            throw new Error('Failed to fetch document');
+          }
+        } catch (fetchError) {
+          console.log('Fetch failed, falling back to direct URL:', fetchError);
+          // Fallback to direct URL approach
+          const newWindow = window.open(viewUrl, '_blank');
+          if (newWindow) {
+            toast.success('Document opened in new tab');
+          } else {
+            toast.error('Popup blocked. Please allow popups for this site.');
+          }
+        }
       } else {
-        // Fallback if popup was blocked
-        toast.error('Popup blocked. Please allow popups for this site.');
+        // For non-viewable files, use direct URL
+        const newWindow = window.open(viewUrl, '_blank');
         
-        // Try alternative approach by creating a link element
-        const a = document.createElement('a');
-        a.href = viewUrl;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        if (newWindow) {
+          toast.success('Document opened in new tab');
+        } else {
+          toast.error('Popup blocked. Please allow popups for this site.');
+          
+          // Try alternative approach by creating a link element
+          const a = document.createElement('a');
+          a.href = viewUrl;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
       }
     } catch (error) {
       console.error('View document error:', error);
