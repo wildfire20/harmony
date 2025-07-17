@@ -3,7 +3,14 @@ const db = require('../config/database');
 
 const authenticate = async (req, res, next) => {
   try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
+    // Check for token in Authorization header first, then query parameter
+    let token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    // If no token in header, check query parameter (for view endpoints)
+    if (!token && req.query.token) {
+      token = req.query.token;
+      console.log('🔍 Using token from query parameter for view endpoint');
+    }
     
     if (!token) {
       console.log('❌ No token provided');
