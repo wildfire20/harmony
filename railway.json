@@ -1,0 +1,26 @@
+{
+  "name": "harmony-learning-institute",
+  "description": "Complete school management system with student and teacher panels",
+  "keywords": ["education", "school", "management", "student", "teacher"],
+  "repository": "https://github.com/wildfire20/harmony",
+  "env": {
+    "NODE_ENV": {
+      "description": "Node environment",
+      "value": "production"
+    },
+    "JWT_SECRET": {
+      "description": "JWT secret key for authentication",
+      "generator": "secret"
+    },
+    "FRONTEND_URL": {
+      "description": "Frontend URL for CORS",
+      "value": "https://your-app-name.railway.app"
+    }
+  },
+  "addons": ["postgresql:hobby-dev"],
+  "buildpacks": [
+    {
+      "url": "heroku/nodejs"
+    }
+  ]
+}
