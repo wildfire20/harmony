@@ -280,7 +280,9 @@ router.get('/:id', [
     if (user.role === 'student') {
       const submissionResult = await db.query(`
         SELECT id, content, file_path, quiz_answers, score, max_score, feedback,
-               status, submitted_at, graded_at, attempt_number
+               status, submitted_at, graded_at, attempt_number,
+               graded_document_s3_key, graded_document_s3_url, graded_document_original_name,
+               graded_document_file_size, graded_document_file_type, graded_document_uploaded_at
         FROM submissions 
         WHERE task_id = $1 AND student_id = $2
         ORDER BY attempt_number DESC

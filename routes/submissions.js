@@ -396,6 +396,8 @@ router.get('/task/:taskId', [
       SELECT s.id, s.content, s.file_path, s.s3_key, s.s3_url, s.original_file_name,
              s.file_size, s.file_type, s.score, s.max_score, s.feedback,
              s.status, s.submitted_at, s.graded_at, s.attempt_number,
+             s.graded_document_s3_key, s.graded_document_s3_url, s.graded_document_original_name,
+             s.graded_document_file_size, s.graded_document_file_type, s.graded_document_uploaded_at,
              u.first_name, u.last_name, u.student_number
       FROM submissions s
       JOIN users u ON s.student_id = u.id
@@ -2604,6 +2606,157 @@ router.get('/:id/download-marked-document', [
     res.status(500).json({ 
       success: false,
       message: 'Server error downloading marked document' 
+    });
+  }
+});
+
+// Upload graded document (teachers only)
+router.put('/:id/upload-graded-document', [
+  authenticate,
+  authorize('teacher', 'admin', 'super_admin'),
+  authorizeResourceAccess('submission'),
+  upload.single('gradedDocument')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = req.user;
+
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'No graded document file uploaded' 
+      });
+    }
+
+    console.log('=== UPLOAD GRADED DOCUMENT ===');
+    console.log('Submission ID:', id);
+    console.log('File:', req.file);
+    console.log('User:', user.id);
+
+    // Get submission details
+    const submissionResult = await db.query(`
+      SELECT s.id, s.student_id, t.title as task_title
+      FROM submissions s
+      JOIN tasks t ON s.task_id = t.id
+      WHERE s.id = $1
+    `, [id]);
+
+    if (submissionResult.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Submission not found' 
+      });
+    }
+
+    const submission = submissionResult.rows[0];
+
+    // Upload to S3
+    const fileName = `graded-documents/${req.file.originalname}-${Date.now()}-${Math.random().toString(36).substring(7)}${path.extname(req.file.originalname)}`;
+    
+    let s3Key, s3Url;
+    try {
+      const uploadResult = await s3Service.uploadFile(req.file.buffer, fileName, req.file.mimetype);
+      s3Key = uploadResult.key;
+      s3Url = uploadResult.url;
+      
+      console.log('✅ File uploaded to S3:', { s3Key, s3Url });
+    } catch (s3Error) {
+      console.error('❌ S3 upload error:', s3Error);
+      return res.status(500).json({ 
+        success: false,
+        message: 'Failed to upload file to storage' 
+      });
+    }
+
+    // Update submission with graded document info
+    const result = await db.query(`
+      UPDATE submissions 
+      SET graded_document_s3_key = $1, 
+          graded_document_s3_url = $2,
+          graded_document_original_name = $3,
+          graded_document_file_size = $4,
+          graded_document_file_type = $5,
+          graded_document_uploaded_at = CURRENT_TIMESTAMP
+      WHERE id = $6
+      RETURNING id, graded_document_original_name
+    `, [s3Key, s3Url, req.file.originalname, req.file.size, req.file.mimetype, id]);
+
+    console.log('✅ Graded document uploaded successfully');
+
+    res.json({
+      success: true,
+      message: 'Graded document uploaded successfully',
+      data: {
+        submissionId: id,
+        fileName: req.file.originalname,
+        fileSize: req.file.size
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Upload graded document error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error uploading graded document' 
+    });
+  }
+});
+
+// Download graded document
+router.get('/:id/download-graded-document', [
+  authenticate,
+  authorizeResourceAccess('submission')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      SELECT graded_document_s3_key, graded_document_original_name, graded_document_file_type
+      FROM submissions WHERE id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Submission not found' 
+      });
+    }
+
+    const submission = result.rows[0];
+
+    if (!submission.graded_document_s3_key) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'No graded document found for this submission' 
+      });
+    }
+
+    try {
+      const signedUrl = await s3Service.getSignedUrl(
+        submission.graded_document_s3_key, 
+        300, // 5 minutes expiry
+        'attachment' // Force download
+      );
+      
+      return res.json({
+        success: true,
+        downloadUrl: signedUrl,
+        fileName: submission.graded_document_original_name || 'graded-document',
+        message: 'Graded document download URL generated successfully'
+      });
+    } catch (s3Error) {
+      console.error('❌ S3 graded document download error:', s3Error);
+      return res.status(500).json({ 
+        success: false,
+        message: 'Graded document temporarily unavailable. Please try again later.' 
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Download graded document error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error downloading graded document' 
     });
   }
 });

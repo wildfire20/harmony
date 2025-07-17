@@ -40,6 +40,7 @@ const TaskDetails = () => {
   });
   const [gradeValue, setGradeValue] = useState('');
   const [feedback, setFeedback] = useState('');
+  const [gradedDocumentFile, setGradedDocumentFile] = useState(null);
   const [isGrading, setIsGrading] = useState(false);
 
   // Document marking modal state
@@ -316,6 +317,47 @@ const TaskDetails = () => {
     }
   };
 
+  // Download graded document handler
+  const handleDownloadGradedDocument = async (submissionId) => {
+    try {
+      const response = await submissionsAPI.downloadGradedDocument(submissionId);
+      
+      // Check if we got a JSON response with signed URL
+      if (response.data && typeof response.data === 'object' && response.data.downloadUrl) {
+        console.log('Got signed URL for graded document download');
+        // Use the signed URL to download the file
+        const a = document.createElement('a');
+        a.href = response.data.downloadUrl;
+        a.download = response.data.fileName || 'graded-document';
+        a.target = '_blank'; // Open in new tab as fallback
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        toast.success('Graded document download started successfully');
+      } else {
+        // Fallback to blob handling for backwards compatibility
+        console.log('Fallback to blob download for graded document');
+        const blob = new Blob([response.data]);
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'graded-document';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        toast.success('Graded document download started!');
+      }
+    } catch (error) {
+      console.error('Download graded document error:', error);
+      if (error.response?.status === 404) {
+        toast.error('No graded document available for this submission');
+      } else {
+        toast.error('Failed to download graded document');
+      }
+    }
+  };
+
   // Grading modal handlers
   const openGradingModal = (submission) => {
     setGradingModal({ isOpen: true, submission });
@@ -327,6 +369,7 @@ const TaskDetails = () => {
     setGradingModal({ isOpen: false, submission: null });
     setGradeValue('');
     setFeedback('');
+    setGradedDocumentFile(null);
   };
 
   const handleSubmitGrade = async () => {
@@ -337,12 +380,23 @@ const TaskDetails = () => {
 
     setIsGrading(true);
     try {
+      // First submit the grade and feedback
       await submissionsAPI.gradeSubmission(gradingModal.submission.id, {
         score: parseFloat(gradeValue),
         feedback: feedback.trim()
       });
+
+      // If there's a graded document file, upload it
+      if (gradedDocumentFile) {
+        const formData = new FormData();
+        formData.append('gradedDocument', gradedDocumentFile);
+        
+        await submissionsAPI.uploadGradedDocument(gradingModal.submission.id, formData);
+        toast.success('Grade and graded document submitted successfully!');
+      } else {
+        toast.success('Grade submitted successfully!');
+      }
       
-      toast.success('Grade submitted successfully!');
       queryClient.invalidateQueries(['task', id]);
       closeGradingModal();
     } catch (error) {
@@ -608,10 +662,21 @@ const TaskDetails = () => {
                         <div className="mt-3">
                           <button
                             onClick={() => viewMarkedDocument(task.submission.id)}
-                            className="inline-flex items-center px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                            className="inline-flex items-center px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 mr-2"
                           >
                             <Eye className="h-3 w-3 mr-1" />
                             View Marked Document
+                          </button>
+                        </div>
+                      )}
+                      {task.submission.status === 'graded' && task.submission.graded_document_s3_key && (
+                        <div className="mt-3">
+                          <button
+                            onClick={() => handleDownloadGradedDocument(task.submission.id)}
+                            className="inline-flex items-center px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                          >
+                            <Download className="h-3 w-3 mr-1" />
+                            Download Graded Document
                           </button>
                         </div>
                       )}
@@ -792,6 +857,64 @@ const TaskDetails = () => {
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Enter feedback for the student..."
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Upload Graded Document (Optional)
+                  </label>
+                  <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
+                    <div className="space-y-1 text-center">
+                      <svg
+                        className="mx-auto h-12 w-12 text-gray-400"
+                        stroke="currentColor"
+                        fill="none"
+                        viewBox="0 0 48 48"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
+                          strokeWidth={2}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      <div className="flex text-sm text-gray-600">
+                        <label
+                          htmlFor="graded-document-upload"
+                          className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500"
+                        >
+                          <span>Upload graded document</span>
+                          <input
+                            id="graded-document-upload"
+                            name="graded-document-upload"
+                            type="file"
+                            className="sr-only"
+                            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                            onChange={(e) => setGradedDocumentFile(e.target.files[0])}
+                          />
+                        </label>
+                        <p className="pl-1">or drag and drop</p>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        PDF, DOC, DOCX, JPG, PNG up to 10MB
+                      </p>
+                      {gradedDocumentFile && (
+                        <div className="mt-2">
+                          <p className="text-sm text-green-600">
+                            Selected: {gradedDocumentFile.name}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setGradedDocumentFile(null)}
+                            className="mt-1 text-xs text-red-600 hover:text-red-800"
+                          >
+                            Remove file
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex justify-end space-x-3">
@@ -1381,6 +1504,20 @@ const TeacherSubmissionsView = ({ taskId, onDownloadSubmission, onOpenGradingMod
                   >
                     <Download className="h-4 w-4 mr-1" />
                     Download File ({submission.original_file_name || 'attachment'})
+                  </button>
+                </div>
+              )}
+
+              {/* Graded Document Section */}
+              {submission.status === 'graded' && submission.graded_document_s3_key && (
+                <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded">
+                  <p className="text-sm font-medium text-green-800 mb-1">Graded Document:</p>
+                  <button
+                    onClick={() => handleDownloadGradedDocument(submission.id)}
+                    className="inline-flex items-center text-sm text-green-600 hover:text-green-700"
+                  >
+                    <Download className="h-4 w-4 mr-1" />
+                    Download Graded Document ({submission.graded_document_original_name || 'graded-document'})
                   </button>
                 </div>
               )}

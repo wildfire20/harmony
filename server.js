@@ -153,6 +153,47 @@ const initializeTargetAudienceColumn = async () => {
   }
 };
 
+// Initialize graded document columns
+const initializeGradedDocumentColumns = async () => {
+  try {
+    console.log('🔄 Adding graded document columns to submissions table...');
+    
+    // Check if columns already exist
+    const checkColumns = await db.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'submissions' 
+      AND column_name IN ('graded_document_s3_key', 'graded_document_s3_url', 'graded_document_original_name', 'graded_document_file_size', 'graded_document_file_type', 'graded_document_uploaded_at')
+    `);
+
+    const existingColumns = checkColumns.rows.map(row => row.column_name);
+    console.log('Existing graded document columns:', existingColumns);
+
+    const columnsToAdd = [
+      { name: 'graded_document_s3_key', definition: 'graded_document_s3_key TEXT' },
+      { name: 'graded_document_s3_url', definition: 'graded_document_s3_url TEXT' },
+      { name: 'graded_document_original_name', definition: 'graded_document_original_name TEXT' },
+      { name: 'graded_document_file_size', definition: 'graded_document_file_size INTEGER' },
+      { name: 'graded_document_file_type', definition: 'graded_document_file_type TEXT' },
+      { name: 'graded_document_uploaded_at', definition: 'graded_document_uploaded_at TIMESTAMP' }
+    ];
+
+    for (const column of columnsToAdd) {
+      if (!existingColumns.includes(column.name)) {
+        await db.query(`ALTER TABLE submissions ADD COLUMN ${column.definition}`);
+        console.log(`✅ Added column: ${column.name}`);
+      } else {
+        console.log(`⚠️ Column already exists: ${column.name}`);
+      }
+    }
+
+    console.log('✅ Graded document columns initialized successfully');
+
+  } catch (error) {
+    console.log('❌ Graded document columns initialization failed:', error.message);
+  }
+};
+
 const app = express();
 
 // Production security enhancements
@@ -549,6 +590,13 @@ const startServer = async () => {
       console.log('✅ Target audience column initialized');
     } catch (targetError) {
       console.warn('⚠️ Target audience column initialization failed:', targetError.message);
+    }
+    
+    try {
+      await initializeGradedDocumentColumns();
+      console.log('✅ Graded document columns initialized');
+    } catch (gradedDocError) {
+      console.warn('⚠️ Graded document columns initialization failed:', gradedDocError.message);
     }
     
     console.log('🎉 Server fully initialized and ready!');

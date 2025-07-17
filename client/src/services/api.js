@@ -128,6 +128,10 @@ export const submissionsAPI = {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
   downloadMarkedDocument: (id) => api.get(`/submissions/${id}/download-marked-document`, { responseType: 'blob' }),
+  uploadGradedDocument: (id, formData) => api.put(`/submissions/${id}/upload-graded-document`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  downloadGradedDocument: (id) => api.get(`/submissions/${id}/download-graded-document`, { responseType: 'blob' }),
   getTaskSubmissions: (taskId, status) => api.get(`/submissions/task/${taskId}${status ? `?status=${status}` : ''}`),
   getTaskStudents: (taskId) => api.get(`/submissions/task/${taskId}/students-simple`),
   getTaskStudentsForce: (taskId) => api.get(`/submissions/task/${taskId}/force-students`),
