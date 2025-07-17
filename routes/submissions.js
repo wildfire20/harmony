@@ -2656,8 +2656,8 @@ router.put('/:id/upload-graded-document', [
     let s3Key, s3Url;
     try {
       const uploadResult = await s3Service.uploadFile(req.file.buffer, fileName, req.file.mimetype);
-      s3Key = uploadResult.key;
-      s3Url = uploadResult.url;
+      s3Key = uploadResult.s3Key;
+      s3Url = uploadResult.s3Url;
       
       console.log('✅ File uploaded to S3:', { s3Key, s3Url });
     } catch (s3Error) {

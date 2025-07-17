@@ -669,15 +669,6 @@ const TaskDetails = () => {
                           </button>
                         </div>
                       )}
-                      {/* Debug submission data */}
-                      {console.log('🔍 Submission Debug:', {
-                        status: task.submission.status,
-                        graded_document_s3_key: task.submission.graded_document_s3_key,
-                        graded_document_original_name: task.submission.graded_document_original_name,
-                        graded_document_uploaded_at: task.submission.graded_document_uploaded_at,
-                        all_graded_fields: Object.keys(task.submission).filter(key => key.includes('graded_document'))
-                      })}
-                      
                       {task.submission.status === 'graded' && task.submission.graded_document_s3_key && (
                         <div className="mt-3">
                           <button
@@ -686,22 +677,6 @@ const TaskDetails = () => {
                           >
                             <Download className="h-3 w-3 mr-1" />
                             Download Graded Document
-                          </button>
-                        </div>
-                      )}
-                      
-                      {/* Temporary debug button to test if download function works */}
-                      {task.submission.status === 'graded' && (
-                        <div className="mt-3">
-                          <button
-                            onClick={() => {
-                              console.log('🧪 Testing graded document download for submission:', task.submission.id);
-                              handleDownloadGradedDocument(task.submission.id);
-                            }}
-                            className="inline-flex items-center px-3 py-1 text-sm bg-purple-600 text-white rounded hover:bg-purple-700"
-                          >
-                            <Download className="h-3 w-3 mr-1" />
-                            Test Download Graded Document
                           </button>
                         </div>
                       )}

@@ -125,7 +125,9 @@ router.get('/grade/:gradeId/class/:classId', authenticate, async (req, res) => {
                t.attachment_file_size, t.attachment_file_type,
                u.first_name as teacher_first_name, u.last_name as teacher_last_name,
                g.name as grade_name, c.name as class_name,
-               s.id as submission_id, s.status as submission_status, s.score, s.submitted_at
+               s.id as submission_id, s.status as submission_status, s.score, s.submitted_at,
+               s.graded_document_s3_key, s.graded_document_s3_url, s.graded_document_original_name,
+               s.graded_document_file_size, s.graded_document_file_type, s.graded_document_uploaded_at
         FROM tasks t
         JOIN users u ON t.created_by = u.id
         JOIN grades g ON t.grade_id = g.id
