@@ -3,6 +3,7 @@ import { Upload, Download, File, Trash2, Calendar, User, FileText, BookOpen, Clo
 import { useAuth } from '../../contexts/AuthContext';
 import { usersAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
+import { toast } from 'react-hot-toast';
 
 const DocumentLibrary = ({ gradeId = null, classId = null }) => {
   const { user, token } = useAuth();
@@ -238,42 +239,36 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
   };
 
   const handleViewDocument = async (document) => {
-    console.log('Viewing document:', document);
-    console.log('File extension:', getFileExtension(document.filename));
-    console.log('Is viewable in browser:', isViewableInBrowser(document.filename));
+    console.log('🔍 Opening document in new tab:', document);
     
-    // For viewable files (PDFs, images, text), try to get a signed URL for viewing
-    if (isViewableInBrowser(document.filename)) {
-      try {
-        // Fetch the signed URL from the backend for viewing
-        const response = await fetch(`/api/documents/view/${document.id}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+    try {
+      // Use direct URL approach like TaskDetails.js - create a URL that serves the file directly
+      const viewUrl = `/api/documents/view/${document.id}?token=${encodeURIComponent(token)}`;
+      
+      console.log('📖 View URL:', viewUrl);
+      
+      // Open in new tab
+      const newWindow = window.open(viewUrl, '_blank');
+      
+      if (newWindow) {
+        toast.success('Document opened in new tab');
+      } else {
+        // Fallback if popup was blocked
+        toast.error('Popup blocked. Please allow popups for this site.');
         
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.viewUrl) {
-            // Store the signed URL with the document for viewing
-            document.signedViewUrl = data.viewUrl;
-            console.log('Got signed URL for viewing:', data.viewUrl);
-          } else {
-            console.error('Failed to get signed URL:', data);
-            // Still show the modal but without the view capability
-          }
-        } else {
-          console.error('Document not accessible:', response.status);
-          // Still show the modal but without the view capability
-        }
-      } catch (error) {
-        console.error('Error fetching signed URL for viewing:', error);
-        // Still show the modal but without the view capability
+        // Try alternative approach by creating a link element
+        const a = document.createElement('a');
+        a.href = viewUrl;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
       }
+    } catch (error) {
+      console.error('View document error:', error);
+      toast.error('Failed to open document');
     }
-    
-    // Always show the modal - it will decide what to display based on file type and available URLs
-    setViewingDocument(document);
   };
 
   const getDocumentUrl = (documentId) => {
