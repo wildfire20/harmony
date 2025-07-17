@@ -738,9 +738,45 @@ router.get('/view/:id', authenticateFlexible, async (req, res) => {
         
         // Set appropriate headers for viewing in browser
         const fileName = document.original_file_name || document.file_name || 'document';
-        const fileType = document.file_type || 'application/octet-stream';
         
-        res.setHeader('Content-Type', fileType);
+        // Determine content type based on file extension for better browser compatibility
+        const ext = path.extname(fileName).toLowerCase();
+        let contentType = 'application/octet-stream';
+        
+        switch (ext) {
+          case '.pdf':
+            contentType = 'application/pdf';
+            break;
+          case '.jpg':
+          case '.jpeg':
+            contentType = 'image/jpeg';
+            break;
+          case '.png':
+            contentType = 'image/png';
+            break;
+          case '.gif':
+            contentType = 'image/gif';
+            break;
+          case '.webp':
+            contentType = 'image/webp';
+            break;
+          case '.txt':
+            contentType = 'text/plain';
+            break;
+          case '.doc':
+            contentType = 'application/msword';
+            break;
+          case '.docx':
+            contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+            break;
+          default:
+            // Use stored file_type as fallback, but prefer extension-based detection
+            contentType = document.file_type || 'application/octet-stream';
+        }
+        
+        console.log('📄 Serving file:', { fileName, ext, contentType });
+        
+        res.setHeader('Content-Type', contentType);
         res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -773,9 +809,45 @@ router.get('/view/:id', authenticateFlexible, async (req, res) => {
       
       // Set appropriate headers for viewing in browser
       const fileName = document.original_file_name || document.file_name || path.basename(document.file_path);
-      const fileType = document.file_type || 'application/octet-stream';
       
-      res.setHeader('Content-Type', fileType);
+      // Determine content type based on file extension for better browser compatibility
+      const ext = path.extname(fileName).toLowerCase();
+      let contentType = 'application/octet-stream';
+      
+      switch (ext) {
+        case '.pdf':
+          contentType = 'application/pdf';
+          break;
+        case '.jpg':
+        case '.jpeg':
+          contentType = 'image/jpeg';
+          break;
+        case '.png':
+          contentType = 'image/png';
+          break;
+        case '.gif':
+          contentType = 'image/gif';
+          break;
+        case '.webp':
+          contentType = 'image/webp';
+          break;
+        case '.txt':
+          contentType = 'text/plain';
+          break;
+        case '.doc':
+          contentType = 'application/msword';
+          break;
+        case '.docx':
+          contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+          break;
+        default:
+          // Use stored file_type as fallback, but prefer extension-based detection
+          contentType = document.file_type || 'application/octet-stream';
+      }
+      
+      console.log('📄 Serving local file:', { fileName, ext, contentType });
+      
+      res.setHeader('Content-Type', contentType);
       res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('X-Content-Type-Options', 'nosniff');
