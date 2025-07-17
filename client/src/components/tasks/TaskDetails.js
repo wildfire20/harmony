@@ -1231,7 +1231,7 @@ const TeacherSubmissionsView = ({ taskId, onDownloadSubmission, onOpenGradingMod
   const totalStudents = (studentsData?.data?.students || []).length;
   const submittedCount = submissions.filter(s => s.submitted_at).length;
   const gradedCount = submissions.filter(s => s.status === 'graded').length;
-  const pendingCount = submittedCount - gradedCount;
+  const pendingCount = totalStudents - submittedCount; // Students who haven't submitted yet
   
   console.log('SubmissionsData:', submissionsData);
   console.log('Extracted Submissions:', submissions);
@@ -1299,7 +1299,7 @@ const TeacherSubmissionsView = ({ taskId, onDownloadSubmission, onOpenGradingMod
               <div>
                 <div className="text-2xl font-bold text-yellow-900">{pendingCount}</div>
                 <div className="text-xs text-yellow-600">Pending</div>
-                <div className="text-xs text-gray-500">Calculated</div>
+                <div className="text-xs text-gray-500">Not submitted</div>
               </div>
             </div>
           </div>
