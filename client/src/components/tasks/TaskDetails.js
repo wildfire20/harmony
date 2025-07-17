@@ -415,6 +415,34 @@ const TaskDetails = () => {
     }
   };
 
+  // View document in new tab handler
+  const handleViewDocument = async (submissionId) => {
+    try {
+      console.log('🔍 Opening document in new tab for submission:', submissionId);
+      const response = await submissionsAPI.downloadSubmission(submissionId);
+      
+      // Check if we got a JSON response with signed URL
+      if (response.data && typeof response.data === 'object' && response.data.downloadUrl) {
+        console.log('Got signed URL for document viewing:', response.data.downloadUrl);
+        // Open the signed URL directly in a new tab
+        window.open(response.data.downloadUrl, '_blank');
+        toast.success('Document opened in new tab');
+      } else {
+        // Fallback: create blob URL and open in new tab
+        console.log('Creating blob URL for document viewing');
+        const blob = new Blob([response.data]);
+        const url = window.URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        // Clean up the blob URL after a short delay
+        setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+        toast.success('Document opened in new tab');
+      }
+    } catch (error) {
+      console.error('View document error:', error);
+      toast.error('Failed to open document');
+    }
+  };
+
   // Grading modal handlers
   const openGradingModal = (submission) => {
     setGradingModal({ isOpen: true, submission });
@@ -858,6 +886,7 @@ const TaskDetails = () => {
             onDownloadSubmission={handleDownloadSubmission}
             onOpenGradingModal={openGradingModal}
             onOpenMarkingModal={openMarkingModal}
+            onViewDocument={handleViewDocument}
           />
         )}
       </div>
@@ -1398,7 +1427,7 @@ const getDueDateStatus = (dueDate) => {
 };
 
 // Teacher Submissions View Component
-const TeacherSubmissionsView = ({ taskId, onDownloadSubmission, onOpenGradingModal, onOpenMarkingModal }) => {
+const TeacherSubmissionsView = ({ taskId, onDownloadSubmission, onOpenGradingModal, onOpenMarkingModal, onViewDocument }) => {
   const { data: submissionsData, isLoading: submissionsLoading, error: submissionsError } = useQuery(
     ['task-submissions', taskId],
     async () => {
@@ -1602,7 +1631,7 @@ const TeacherSubmissionsView = ({ taskId, onDownloadSubmission, onOpenGradingMod
                       Download File
                     </button>
                     <button
-                      onClick={() => onOpenMarkingModal(submission)}
+                      onClick={() => onViewDocument(submission.id)}
                       className="inline-flex items-center text-sm text-green-600 hover:text-green-700"
                     >
                       <Eye className="h-4 w-4 mr-1" />
