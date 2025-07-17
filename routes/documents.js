@@ -776,10 +776,19 @@ router.get('/view/:id', authenticateFlexible, async (req, res) => {
         
         console.log('📄 Serving file:', { fileName, ext, contentType });
         
+        // Force inline viewing for viewable file types
+        const viewableExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.txt'];
+        const isViewable = viewableExtensions.includes(ext);
+        
         res.setHeader('Content-Type', contentType);
-        res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+        if (isViewable) {
+          res.setHeader('Content-Disposition', 'inline');
+        } else {
+          res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+        }
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('X-Frame-Options', 'SAMEORIGIN');
         
         // Send the file content
         return res.send(fileContent);
@@ -847,10 +856,19 @@ router.get('/view/:id', authenticateFlexible, async (req, res) => {
       
       console.log('📄 Serving local file:', { fileName, ext, contentType });
       
+      // Force inline viewing for viewable file types
+      const viewableExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.txt'];
+      const isViewable = viewableExtensions.includes(ext);
+      
       res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+      if (isViewable) {
+        res.setHeader('Content-Disposition', 'inline');
+      } else {
+        res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+      }
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('X-Frame-Options', 'SAMEORIGIN');
       
       // Send the file directly
       return res.sendFile(path.resolve(document.file_path));
