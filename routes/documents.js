@@ -730,52 +730,23 @@ router.get('/view/:id', authenticateFlexible, async (req, res) => {
 
     // Handle file serving - S3 or local fallback for viewing
     if (document.s3_key) {
-      console.log('✅ Generating signed URL for S3 view:', document.s3_key);
+      console.log('✅ Getting file content from S3 for direct view:', document.s3_key);
 
       try {
-        // Set appropriate content type based on file extension
-        const ext = path.extname(document.original_file_name || document.file_name).toLowerCase();
-        let contentType = 'application/octet-stream';
+        // Get file content directly from S3
+        const fileContent = await s3Service.getFileContent(document.s3_key);
         
-        switch (ext) {
-          case '.pdf':
-            contentType = 'application/pdf';
-            break;
-          case '.jpg':
-          case '.jpeg':
-            contentType = 'image/jpeg';
-            break;
-          case '.png':
-            contentType = 'image/png';
-            break;
-          case '.gif':
-            contentType = 'image/gif';
-            break;
-          case '.txt':
-            contentType = 'text/plain';
-            break;
-          default:
-            // For other file types, return download URL instead of attempting to view
-            const downloadUrl = await s3Service.getSignedUrl(document.s3_key, 300);
-            return res.json({
-              success: true,
-              downloadUrl: downloadUrl,
-              fileName: document.original_file_name || document.file_name,
-              contentType: 'application/octet-stream'
-            });
-        }
-
-        // Generate signed URL for viewing
-        const signedUrl = await s3Service.getSignedUrl(document.s3_key, 3600); // 1 hour for viewing
-        console.log('✅ Signed URL generated for viewing');
+        // Set appropriate headers for viewing in browser
+        const fileName = document.original_file_name || document.file_name || 'document';
+        const fileType = document.file_type || 'application/octet-stream';
         
-        // Return URL as JSON for frontend to handle
-        return res.json({
-          success: true,
-          viewUrl: signedUrl,
-          fileName: document.original_file_name || document.file_name,
-          contentType: contentType
-        });
+        res.setHeader('Content-Type', fileType);
+        res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        
+        // Send the file content
+        return res.send(fileContent);
         
       } catch (s3Error) {
         console.log('❌ S3 view error:', s3Error);
@@ -800,42 +771,17 @@ router.get('/view/:id', authenticateFlexible, async (req, res) => {
         });
       }
       
-      // Set appropriate content type based on file extension
-      const ext = path.extname(document.original_file_name || document.file_name).toLowerCase();
-      let contentType = 'application/octet-stream';
+      // Set appropriate headers for viewing in browser
+      const fileName = document.original_file_name || document.file_name || path.basename(document.file_path);
+      const fileType = document.file_type || 'application/octet-stream';
       
-      switch (ext) {
-        case '.pdf':
-          contentType = 'application/pdf';
-          break;
-        case '.jpg':
-        case '.jpeg':
-          contentType = 'image/jpeg';
-          break;
-        case '.png':
-          contentType = 'image/png';
-          break;
-        case '.gif':
-          contentType = 'image/gif';
-          break;
-        case '.txt':
-          contentType = 'text/plain';
-          break;
-        default:
-          // For other file types, serve as download
-          res.setHeader('Content-Disposition', `attachment; filename="${document.original_file_name || document.file_name}"`);
-          contentType = 'application/octet-stream';
-      }
+      res.setHeader('Content-Type', fileType);
+      res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
       
-      // Set headers for inline viewing
-      res.setHeader('Content-Type', contentType);
-      if (ext === '.pdf' || ext === '.jpg' || ext === '.jpeg' || ext === '.png' || ext === '.gif' || ext === '.txt') {
-        res.setHeader('Content-Disposition', 'inline');
-      }
-      
-      // Stream the file
-      const fileStream = fs.createReadStream(document.file_path);
-      fileStream.pipe(res);
+      // Send the file directly
+      return res.sendFile(path.resolve(document.file_path));
       
     } else {
       console.log('❌ Document missing both S3 key and file path');
