@@ -253,15 +253,31 @@ const TaskDetails = () => {
       // Check if we got a JSON response with signed URL
       if (response.data && typeof response.data === 'object' && response.data.downloadUrl) {
         console.log('Got signed URL for task attachment download');
-        // Use the signed URL to download the file
-        const a = document.createElement('a');
-        a.href = response.data.downloadUrl;
-        a.download = response.data.fileName || task.attachment_original_name || 'task-attachment';
-        a.target = '_blank'; // Open in new tab as fallback
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        toast.success('Download started successfully');
+        
+        // For signed URLs, fetch the actual file content first
+        try {
+          const fileResponse = await fetch(response.data.downloadUrl);
+          if (!fileResponse.ok) {
+            throw new Error(`HTTP error! status: ${fileResponse.status}`);
+          }
+          
+          const blob = await fileResponse.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = response.data.fileName || task.attachment_original_name || 'task-attachment';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+          
+          toast.success('Download completed successfully');
+        } catch (fetchError) {
+          console.error('Error fetching file from signed URL:', fetchError);
+          // Fallback: open the signed URL in a new tab
+          window.open(response.data.downloadUrl, '_blank');
+          toast.success('File opened in new tab');
+        }
       } else {
         // Fallback to blob handling for backwards compatibility
         console.log('Fallback to blob download for task attachment');
@@ -289,15 +305,31 @@ const TaskDetails = () => {
       // Check if we got a JSON response with signed URL
       if (response.data && typeof response.data === 'object' && response.data.downloadUrl) {
         console.log('Got signed URL for submission download');
-        // Use the signed URL to download the file
-        const a = document.createElement('a');
-        a.href = response.data.downloadUrl;
-        a.download = response.data.fileName || fileName || 'submission';
-        a.target = '_blank'; // Open in new tab as fallback
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        toast.success('Download started successfully');
+        
+        // For signed URLs, fetch the actual file content first
+        try {
+          const fileResponse = await fetch(response.data.downloadUrl);
+          if (!fileResponse.ok) {
+            throw new Error(`HTTP error! status: ${fileResponse.status}`);
+          }
+          
+          const blob = await fileResponse.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = response.data.fileName || fileName || 'submission';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+          
+          toast.success('Download completed successfully');
+        } catch (fetchError) {
+          console.error('Error fetching file from signed URL:', fetchError);
+          // Fallback: open the signed URL in a new tab
+          window.open(response.data.downloadUrl, '_blank');
+          toast.success('File opened in new tab');
+        }
       } else {
         // Fallback to blob handling for backwards compatibility
         console.log('Fallback to blob download for submission');
@@ -325,15 +357,31 @@ const TaskDetails = () => {
       // Check if we got a JSON response with signed URL
       if (response.data && typeof response.data === 'object' && response.data.downloadUrl) {
         console.log('Got signed URL for graded document download');
-        // Use the signed URL to download the file
-        const a = document.createElement('a');
-        a.href = response.data.downloadUrl;
-        a.download = response.data.fileName || 'graded-document';
-        a.target = '_blank'; // Open in new tab as fallback
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        toast.success('Graded document download started successfully');
+        
+        // For signed URLs, we need to fetch the actual file content first
+        try {
+          const fileResponse = await fetch(response.data.downloadUrl);
+          if (!fileResponse.ok) {
+            throw new Error(`HTTP error! status: ${fileResponse.status}`);
+          }
+          
+          const blob = await fileResponse.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = response.data.fileName || 'graded-document';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+          
+          toast.success('Graded document downloaded successfully');
+        } catch (fetchError) {
+          console.error('Error fetching file from signed URL:', fetchError);
+          // Fallback: open the signed URL in a new tab
+          window.open(response.data.downloadUrl, '_blank');
+          toast.success('Graded document opened in new tab');
+        }
       } else {
         // Fallback to blob handling for backwards compatibility
         console.log('Fallback to blob download for graded document');
