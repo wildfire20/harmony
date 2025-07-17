@@ -86,7 +86,7 @@ export const tasksAPI = {
   updateTask: (id, data) => api.put(`/tasks/${id}`, data),
   deleteTask: (id) => api.delete(`/tasks/${id}`),
   getTaskSubmissions: (id, status) => api.get(`/tasks/${id}/submissions${status ? `?status=${status}` : ''}`),
-  downloadAttachment: (id) => api.get(`/tasks/${id}/attachment/download`, { responseType: 'blob' }),
+  downloadAttachment: (id) => api.get(`/tasks/${id}/attachment/download`),
 };
 
 // Quizzes API
@@ -131,7 +131,7 @@ export const submissionsAPI = {
   uploadGradedDocument: (id, formData) => api.put(`/submissions/${id}/upload-graded-document`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
-  downloadGradedDocument: (id) => api.get(`/submissions/${id}/download-graded-document`, { responseType: 'blob' }),
+  downloadGradedDocument: (id) => api.get(`/submissions/${id}/download-graded-document`),
   getTaskSubmissions: (taskId, status) => api.get(`/submissions/task/${taskId}${status ? `?status=${status}` : ''}`),
   getTaskStudents: (taskId) => api.get(`/submissions/task/${taskId}/students-simple`),
   getTaskStudentsForce: (taskId) => api.get(`/submissions/task/${taskId}/force-students`),
