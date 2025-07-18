@@ -2,10 +2,6 @@ const db = require('./config/database');
 const fs = require('fs');
 const path = require('path');
 
-const db = require('./config/database');
-const fs = require('fs');
-const path = require('path');
-
 async function initializeInvoiceSchema() {
   try {
     console.log('🔄 Initializing invoice schema...');

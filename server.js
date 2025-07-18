@@ -720,6 +720,14 @@ const startServer = async () => {
       console.warn('⚠️ Invoice system initialization failed:', invoiceError.message);
     }
     
+    try {
+      const fixDatabaseSchema = require('./fix-database-schema');
+      await fixDatabaseSchema();
+      console.log('✅ Database schema fix applied successfully');
+    } catch (schemaError) {
+      console.warn('⚠️ Database schema fix failed:', schemaError.message);
+    }
+    
     console.log('🎉 Server fully initialized and ready!');
     
   } catch (error) {
