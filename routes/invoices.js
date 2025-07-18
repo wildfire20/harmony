@@ -605,18 +605,8 @@ router.post('/process-bank-statement', [
         }
 
         if (invoiceResult.rows.length === 0) {
-          // Log unmatched transaction to database
-          await client.query(`
-            INSERT INTO payment_transactions (
-              reference_number, amount, transaction_date, 
-              description
-            ) VALUES ($1, $2, $3, $4)
-          `, [
-            transaction.reference,
-            transaction.amount,
-            transaction.date,
-            `UNMATCHED: ${transaction.description}`
-          ]);
+          // For unmatched transactions, just count them (don't insert to DB due to NOT NULL constraints)
+          console.log(`UNMATCHED: Transaction ${transaction.reference} - ${transaction.description}`);
           
           await client.query('COMMIT');
           
@@ -686,12 +676,13 @@ router.post('/process-bank-statement', [
         
         const transactionResult = await client.query(`
           INSERT INTO payment_transactions (
-            invoice_id, reference_number, amount, transaction_date,
+            invoice_id, student_id, reference_number, amount, transaction_date,
             description
-          ) VALUES ($1, $2, $3, $4, $5)
+          ) VALUES ($1, $2, $3, $4, $5, $6)
           RETURNING id
         `, [
           invoice.id,
+          invoice.student_id,
           transaction.reference,
           transaction.amount,
           transaction.date,
