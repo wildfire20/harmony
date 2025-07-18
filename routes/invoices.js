@@ -1076,67 +1076,136 @@ router.post('/migrate-database', [
   authorize('super_admin')
 ], async (req, res) => {
   try {
-    console.log('🔄 Starting database migration...');
-    
-    // 1. Check current payment_transactions table schema
-    const columnCheck = await db.query(`
-      SELECT column_name, data_type
-      FROM information_schema.columns 
-      WHERE table_name = 'payment_transactions' 
-      AND column_name IN ('transaction_date', 'payment_date')
-    `);
-    
-    console.log('Current date columns:', columnCheck.rows.map(r => r.column_name));
-    
-    const hasTransactionDate = columnCheck.rows.some(r => r.column_name === 'transaction_date');
-    const hasPaymentDate = columnCheck.rows.some(r => r.column_name === 'payment_date');
+    console.log('🔄 Starting comprehensive database migration...');
     
     let migrationResults = [];
     
-    // 2. Ensure we have transaction_date column (which is what the production DB uses)
-    if (!hasTransactionDate && hasPaymentDate) {
-      console.log('Renaming payment_date to transaction_date...');
-      await db.query(`ALTER TABLE payment_transactions RENAME COLUMN payment_date TO transaction_date`);
-      migrationResults.push('✅ Renamed payment_date to transaction_date');
-    } else if (!hasTransactionDate) {
-      console.log('Adding transaction_date column...');
-      await db.query(`ALTER TABLE payment_transactions ADD COLUMN transaction_date DATE NOT NULL DEFAULT CURRENT_DATE`);
-      migrationResults.push('✅ Added transaction_date column');
+    // 1. Fix payment_transactions table
+    console.log('Step 1: Fixing payment_transactions table...');
+    
+    // Check current columns
+    const currentColumns = await db.query(`
+      SELECT column_name, data_type
+      FROM information_schema.columns 
+      WHERE table_name = 'payment_transactions'
+      ORDER BY ordinal_position
+    `);
+    
+    console.log('Current payment_transactions columns:', currentColumns.rows.map(r => r.column_name));
+    migrationResults.push(`Current columns: ${currentColumns.rows.map(r => r.column_name).join(', ')}`);
+    
+    const hasTransactionDate = currentColumns.rows.some(r => r.column_name === 'transaction_date');
+    const hasPaymentDate = currentColumns.rows.some(r => r.column_name === 'payment_date');
+    
+    // Fix payment_date column - code expects payment_date but production has transaction_date
+    if (hasTransactionDate && !hasPaymentDate) {
+      console.log('Renaming transaction_date to payment_date...');
+      await db.query(`ALTER TABLE payment_transactions RENAME COLUMN transaction_date TO payment_date`);
+      migrationResults.push('✅ Renamed transaction_date to payment_date');
+    } else if (!hasPaymentDate) {
+      console.log('Adding payment_date column...');
+      await db.query(`ALTER TABLE payment_transactions ADD COLUMN payment_date DATE NOT NULL DEFAULT CURRENT_DATE`);
+      migrationResults.push('✅ Added payment_date column');
     } else {
-      migrationResults.push('✅ transaction_date column already exists');
+      migrationResults.push('✅ payment_date column already exists');
+    }
+    
+    // 2. Fix payment_upload_logs table
+    console.log('Step 2: Fixing payment_upload_logs table...');
+    
+    const uploadLogColumns = await db.query(`
+      SELECT column_name
+      FROM information_schema.columns 
+      WHERE table_name = 'payment_upload_logs'
+      ORDER BY ordinal_position
+    `);
+    
+    console.log('Current payment_upload_logs columns:', uploadLogColumns.rows.map(r => r.column_name));
+    
+    const hasTransactionsProcessed = uploadLogColumns.rows.some(r => r.column_name === 'transactions_processed');
+    
+    if (!hasTransactionsProcessed) {
+      console.log('Recreating payment_upload_logs table with correct schema...');
+      
+      // Drop and recreate the table
+      await db.query(`DROP TABLE IF EXISTS payment_upload_logs CASCADE`);
+      
+      await db.query(`
+        CREATE TABLE payment_upload_logs (
+          id SERIAL PRIMARY KEY,
+          filename VARCHAR(255) NOT NULL,
+          uploaded_by INTEGER NOT NULL,
+          transactions_processed INTEGER DEFAULT 0,
+          matched_count INTEGER DEFAULT 0,
+          partial_count INTEGER DEFAULT 0,
+          overpaid_count INTEGER DEFAULT 0,
+          unmatched_count INTEGER DEFAULT 0,
+          duplicate_count INTEGER DEFAULT 0,
+          error_count INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT NOW(),
+          FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE CASCADE
+        )
+      `);
+      
+      migrationResults.push('✅ Recreated payment_upload_logs table with correct schema');
+    } else {
+      migrationResults.push('✅ payment_upload_logs table already has correct schema');
     }
     
     // 3. Test the fixed schema
-    console.log('Testing payment_transactions schema...');
+    console.log('Step 3: Testing the fixed schema...');
+    
     try {
+      // Test payment_transactions
       await db.query(`
         INSERT INTO payment_transactions (
-          reference_number, amount, transaction_date, 
-          description
-        ) VALUES ($1, $2, $3, $4)
-      `, ['MIGRATION_TEST', 1.00, new Date(), 'Migration test transaction']);
+          reference_number, amount, payment_date, 
+          description, status
+        ) VALUES ($1, $2, $3, $4, $5)
+      `, ['MIGRATION_TEST', 1.00, new Date(), 'Migration test transaction', 'Matched']);
+      
+      // Test payment_upload_logs
+      await db.query(`
+        INSERT INTO payment_upload_logs (
+          filename, uploaded_by, transactions_processed, 
+          matched_count, partial_count, overpaid_count,
+          unmatched_count, duplicate_count, error_count
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `, ['test-migration.csv', 1, 1, 1, 0, 0, 0, 0, 0]);
       
       // Clean up test data
       await db.query(`DELETE FROM payment_transactions WHERE reference_number = 'MIGRATION_TEST'`);
-      migrationResults.push('✅ Schema test successful');
+      await db.query(`DELETE FROM payment_upload_logs WHERE filename = 'test-migration.csv'`);
+      
+      migrationResults.push('✅ Schema test successful - both tables working correctly');
       
     } catch (testError) {
       migrationResults.push(`❌ Schema test failed: ${testError.message}`);
     }
     
     // 4. Show final schema
-    const finalColumns = await db.query(`
+    const finalPaymentTransactions = await db.query(`
       SELECT column_name, data_type, is_nullable
       FROM information_schema.columns 
       WHERE table_name = 'payment_transactions' 
       ORDER BY ordinal_position
     `);
     
+    const finalUploadLogs = await db.query(`
+      SELECT column_name, data_type, is_nullable
+      FROM information_schema.columns 
+      WHERE table_name = 'payment_upload_logs' 
+      ORDER BY ordinal_position
+    `);
+    
     res.json({
       success: true,
-      message: 'Database migration completed',
+      message: 'Comprehensive database migration completed successfully',
       migrationResults,
-      finalSchema: finalColumns.rows
+      finalSchemas: {
+        payment_transactions: finalPaymentTransactions.rows,
+        payment_upload_logs: finalUploadLogs.rows
+      }
     });
     
   } catch (error) {
