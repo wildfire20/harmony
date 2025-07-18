@@ -544,7 +544,7 @@ router.post('/process-bank-statement', [
         // Check for duplicate transactions
         const duplicateCheck = await client.query(`
           SELECT id FROM payment_transactions 
-          WHERE reference_number = $1 AND amount = $2 AND transaction_date = $3
+          WHERE reference_number = $1 AND amount = $2 AND payment_date = $3
         `, [transaction.reference, transaction.amount, transaction.date]);
 
         if (duplicateCheck.rows.length > 0) {
@@ -676,7 +676,7 @@ router.post('/process-bank-statement', [
         
         const transactionResult = await client.query(`
           INSERT INTO payment_transactions (
-            invoice_id, student_id, student_number, reference_number, amount, transaction_date,
+            invoice_id, student_id, student_number, reference_number, amount, payment_date,
             description
           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
           RETURNING id
@@ -824,7 +824,7 @@ router.get('/transactions', [
     let query = `
       SELECT 
         pt.id, pt.invoice_id, pt.reference_number, pt.amount, 
-        pt.transaction_date, pt.description, pt.created_at,
+        pt.payment_date, pt.description, pt.created_at,
         i.student_number, i.amount_due, i.status as invoice_status,
         s.first_name, s.last_name
       FROM payment_transactions pt
@@ -850,17 +850,17 @@ router.get('/transactions', [
 
     if (dateFrom) {
       paramCount++;
-      query += ` AND pt.transaction_date >= $${paramCount}`;
+      query += ` AND pt.payment_date >= $${paramCount}`;
       queryParams.push(dateFrom);
     }
 
     if (dateTo) {
       paramCount++;
-      query += ` AND pt.transaction_date <= $${paramCount}`;
+      query += ` AND pt.payment_date <= $${paramCount}`;
       queryParams.push(dateTo);
     }
 
-    query += ` ORDER BY pt.transaction_date DESC, pt.created_at DESC`;
+    query += ` ORDER BY pt.payment_date DESC, pt.created_at DESC`;
 
     // Add pagination
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -893,13 +893,13 @@ router.get('/transactions', [
 
     if (dateFrom) {
       countParamIndex++;
-      countQuery += ` AND pt.transaction_date >= $${countParamIndex}`;
+      countQuery += ` AND pt.payment_date >= $${countParamIndex}`;
       countParams.push(dateFrom);
     }
 
     if (dateTo) {
       countParamIndex++;
-      countQuery += ` AND pt.transaction_date <= $${countParamIndex}`;
+      countQuery += ` AND pt.payment_date <= $${countParamIndex}`;
       countParams.push(dateTo);
     }
 
