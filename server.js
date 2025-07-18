@@ -721,11 +721,20 @@ const startServer = async () => {
     }
     
     try {
-      const fixDatabaseSchema = require('./fix-database-schema');
-      await fixDatabaseSchema();
-      console.log('✅ Database schema fix applied successfully');
-    } catch (schemaError) {
-      console.warn('⚠️ Database schema fix failed:', schemaError.message);
+      const quickDatabaseFix = require('./quick-db-fix');
+      await quickDatabaseFix();
+      console.log('✅ Quick database fix applied successfully');
+    } catch (quickFixError) {
+      console.warn('⚠️ Quick database fix failed:', quickFixError.message);
+      
+      // Fallback to original fix
+      try {
+        const fixDatabaseSchema = require('./fix-database-schema');
+        await fixDatabaseSchema();
+        console.log('✅ Fallback database schema fix applied successfully');
+      } catch (schemaError) {
+        console.warn('⚠️ Fallback database schema fix failed:', schemaError.message);
+      }
     }
     
     console.log('🎉 Server fully initialized and ready!');
