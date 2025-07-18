@@ -544,7 +544,7 @@ router.post('/process-bank-statement', [
         // Check for duplicate transactions
         const duplicateCheck = await client.query(`
           SELECT id FROM payment_transactions 
-          WHERE reference_number = $1 AND amount = $2 AND payment_date = $3
+          WHERE reference_number = $1 AND amount = $2 AND transaction_date = $3
         `, [transaction.reference, transaction.amount, transaction.date]);
 
         if (duplicateCheck.rows.length > 0) {
@@ -608,7 +608,7 @@ router.post('/process-bank-statement', [
           // Log unmatched transaction to database
           await client.query(`
             INSERT INTO payment_transactions (
-              reference_number, amount, payment_date, 
+              reference_number, amount, transaction_date, 
               description, uploaded_by, status
             ) VALUES ($1, $2, $3, $4, $5, $6)
           `, [
@@ -688,7 +688,7 @@ router.post('/process-bank-statement', [
         
         const transactionResult = await client.query(`
           INSERT INTO payment_transactions (
-            invoice_id, reference_number, amount, payment_date,
+            invoice_id, reference_number, amount, transaction_date,
             description, uploaded_by, status
           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
           RETURNING id
@@ -836,7 +836,7 @@ router.get('/transactions', [
     let query = `
       SELECT 
         pt.id, pt.invoice_id, pt.reference_number, pt.amount, 
-        pt.payment_date, pt.status, pt.description, pt.created_at,
+        pt.transaction_date, pt.status, pt.description, pt.created_at,
         i.student_number, i.amount_due, i.status as invoice_status,
         s.first_name, s.last_name
       FROM payment_transactions pt
@@ -862,17 +862,17 @@ router.get('/transactions', [
 
     if (dateFrom) {
       paramCount++;
-      query += ` AND pt.payment_date >= $${paramCount}`;
+      query += ` AND pt.transaction_date >= $${paramCount}`;
       queryParams.push(dateFrom);
     }
 
     if (dateTo) {
       paramCount++;
-      query += ` AND pt.payment_date <= $${paramCount}`;
+      query += ` AND pt.transaction_date <= $${paramCount}`;
       queryParams.push(dateTo);
     }
 
-    query += ` ORDER BY pt.payment_date DESC, pt.created_at DESC`;
+    query += ` ORDER BY pt.transaction_date DESC, pt.created_at DESC`;
 
     // Add pagination
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -905,13 +905,13 @@ router.get('/transactions', [
 
     if (dateFrom) {
       countParamIndex++;
-      countQuery += ` AND pt.payment_date >= $${countParamIndex}`;
+      countQuery += ` AND pt.transaction_date >= $${countParamIndex}`;
       countParams.push(dateFrom);
     }
 
     if (dateTo) {
       countParamIndex++;
-      countQuery += ` AND pt.payment_date <= $${countParamIndex}`;
+      countQuery += ` AND pt.transaction_date <= $${countParamIndex}`;
       countParams.push(dateTo);
     }
 
@@ -1105,17 +1105,17 @@ router.post('/migrate-database', [
     
     let migrationResults = [];
     
-    // 2. Fix payment_date column
-    if (hasTransactionDate && !hasPaymentDate) {
-      console.log('Renaming transaction_date to payment_date...');
-      await db.query(`ALTER TABLE payment_transactions RENAME COLUMN transaction_date TO payment_date`);
-      migrationResults.push('✅ Renamed transaction_date to payment_date');
-    } else if (!hasPaymentDate) {
-      console.log('Adding payment_date column...');
-      await db.query(`ALTER TABLE payment_transactions ADD COLUMN payment_date DATE NOT NULL DEFAULT CURRENT_DATE`);
-      migrationResults.push('✅ Added payment_date column');
+    // 2. Ensure we have transaction_date column (which is what the production DB uses)
+    if (!hasTransactionDate && hasPaymentDate) {
+      console.log('Renaming payment_date to transaction_date...');
+      await db.query(`ALTER TABLE payment_transactions RENAME COLUMN payment_date TO transaction_date`);
+      migrationResults.push('✅ Renamed payment_date to transaction_date');
+    } else if (!hasTransactionDate) {
+      console.log('Adding transaction_date column...');
+      await db.query(`ALTER TABLE payment_transactions ADD COLUMN transaction_date DATE NOT NULL DEFAULT CURRENT_DATE`);
+      migrationResults.push('✅ Added transaction_date column');
     } else {
-      migrationResults.push('✅ payment_date column already exists');
+      migrationResults.push('✅ transaction_date column already exists');
     }
     
     // 3. Test the fixed schema
@@ -1123,7 +1123,7 @@ router.post('/migrate-database', [
     try {
       await db.query(`
         INSERT INTO payment_transactions (
-          reference_number, amount, payment_date, 
+          reference_number, amount, transaction_date, 
           description, status
         ) VALUES ($1, $2, $3, $4, $5)
       `, ['MIGRATION_TEST', 1.00, new Date(), 'Migration test transaction', 'Matched']);
