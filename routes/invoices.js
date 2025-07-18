@@ -1082,4 +1082,83 @@ router.delete('/clear-all', [
   }
 });
 
+// Database migration endpoint - SUPER ADMIN ONLY
+router.post('/migrate-database', [
+  authenticate,
+  authorize('super_admin')
+], async (req, res) => {
+  try {
+    console.log('🔄 Starting database migration...');
+    
+    // 1. Check current payment_transactions table schema
+    const columnCheck = await db.query(`
+      SELECT column_name, data_type
+      FROM information_schema.columns 
+      WHERE table_name = 'payment_transactions' 
+      AND column_name IN ('transaction_date', 'payment_date')
+    `);
+    
+    console.log('Current date columns:', columnCheck.rows.map(r => r.column_name));
+    
+    const hasTransactionDate = columnCheck.rows.some(r => r.column_name === 'transaction_date');
+    const hasPaymentDate = columnCheck.rows.some(r => r.column_name === 'payment_date');
+    
+    let migrationResults = [];
+    
+    // 2. Fix payment_date column
+    if (hasTransactionDate && !hasPaymentDate) {
+      console.log('Renaming transaction_date to payment_date...');
+      await db.query(`ALTER TABLE payment_transactions RENAME COLUMN transaction_date TO payment_date`);
+      migrationResults.push('✅ Renamed transaction_date to payment_date');
+    } else if (!hasPaymentDate) {
+      console.log('Adding payment_date column...');
+      await db.query(`ALTER TABLE payment_transactions ADD COLUMN payment_date DATE NOT NULL DEFAULT CURRENT_DATE`);
+      migrationResults.push('✅ Added payment_date column');
+    } else {
+      migrationResults.push('✅ payment_date column already exists');
+    }
+    
+    // 3. Test the fixed schema
+    console.log('Testing payment_transactions schema...');
+    try {
+      await db.query(`
+        INSERT INTO payment_transactions (
+          reference_number, amount, payment_date, 
+          description, status
+        ) VALUES ($1, $2, $3, $4, $5)
+      `, ['MIGRATION_TEST', 1.00, new Date(), 'Migration test transaction', 'Matched']);
+      
+      // Clean up test data
+      await db.query(`DELETE FROM payment_transactions WHERE reference_number = 'MIGRATION_TEST'`);
+      migrationResults.push('✅ Schema test successful');
+      
+    } catch (testError) {
+      migrationResults.push(`❌ Schema test failed: ${testError.message}`);
+    }
+    
+    // 4. Show final schema
+    const finalColumns = await db.query(`
+      SELECT column_name, data_type, is_nullable
+      FROM information_schema.columns 
+      WHERE table_name = 'payment_transactions' 
+      ORDER BY ordinal_position
+    `);
+    
+    res.json({
+      success: true,
+      message: 'Database migration completed',
+      migrationResults,
+      finalSchema: finalColumns.rows
+    });
+    
+  } catch (error) {
+    console.error('Migration error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Database migration failed',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
