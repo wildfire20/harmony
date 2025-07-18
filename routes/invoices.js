@@ -609,14 +609,13 @@ router.post('/process-bank-statement', [
           await client.query(`
             INSERT INTO payment_transactions (
               reference_number, amount, transaction_date, 
-              description, status
-            ) VALUES ($1, $2, $3, $4, $5)
+              description
+            ) VALUES ($1, $2, $3, $4)
           `, [
             transaction.reference,
             transaction.amount,
             transaction.date,
-            `UNMATCHED: ${transaction.description}`,
-            'Unmatched'
+            `UNMATCHED: ${transaction.description}`
           ]);
           
           await client.query('COMMIT');
@@ -688,16 +687,15 @@ router.post('/process-bank-statement', [
         const transactionResult = await client.query(`
           INSERT INTO payment_transactions (
             invoice_id, reference_number, amount, transaction_date,
-            description, status
-          ) VALUES ($1, $2, $3, $4, $5, $6)
+            description
+          ) VALUES ($1, $2, $3, $4, $5)
           RETURNING id
         `, [
           invoice.id,
           transaction.reference,
           transaction.amount,
           transaction.date,
-          transaction.description,
-          'Matched'
+          transaction.description
         ]);
         
         console.log('Transaction recorded with ID:', transactionResult.rows[0].id);
@@ -834,7 +832,7 @@ router.get('/transactions', [
     let query = `
       SELECT 
         pt.id, pt.invoice_id, pt.reference_number, pt.amount, 
-        pt.transaction_date, pt.status, pt.description, pt.created_at,
+        pt.transaction_date, pt.description, pt.created_at,
         i.student_number, i.amount_due, i.status as invoice_status,
         s.first_name, s.last_name
       FROM payment_transactions pt
@@ -1122,9 +1120,9 @@ router.post('/migrate-database', [
       await db.query(`
         INSERT INTO payment_transactions (
           reference_number, amount, transaction_date, 
-          description, status
-        ) VALUES ($1, $2, $3, $4, $5)
-      `, ['MIGRATION_TEST', 1.00, new Date(), 'Migration test transaction', 'Matched']);
+          description
+        ) VALUES ($1, $2, $3, $4)
+      `, ['MIGRATION_TEST', 1.00, new Date(), 'Migration test transaction']);
       
       // Clean up test data
       await db.query(`DELETE FROM payment_transactions WHERE reference_number = 'MIGRATION_TEST'`);
