@@ -676,13 +676,14 @@ router.post('/process-bank-statement', [
         
         const transactionResult = await client.query(`
           INSERT INTO payment_transactions (
-            invoice_id, student_id, reference_number, amount, transaction_date,
+            invoice_id, student_id, student_number, reference_number, amount, transaction_date,
             description
-          ) VALUES ($1, $2, $3, $4, $5, $6)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
           RETURNING id
         `, [
           invoice.id,
           invoice.student_id,
+          invoice.student_number,
           transaction.reference,
           transaction.amount,
           transaction.date,
