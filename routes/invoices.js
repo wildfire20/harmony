@@ -609,14 +609,13 @@ router.post('/process-bank-statement', [
           await client.query(`
             INSERT INTO payment_transactions (
               reference_number, amount, transaction_date, 
-              description, uploaded_by, status
-            ) VALUES ($1, $2, $3, $4, $5, $6)
+              description, status
+            ) VALUES ($1, $2, $3, $4, $5)
           `, [
             transaction.reference,
             transaction.amount,
             transaction.date,
             `UNMATCHED: ${transaction.description}`,
-            req.user.id,
             'Unmatched'
           ]);
           
@@ -689,8 +688,8 @@ router.post('/process-bank-statement', [
         const transactionResult = await client.query(`
           INSERT INTO payment_transactions (
             invoice_id, reference_number, amount, transaction_date,
-            description, uploaded_by, status
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            description, status
+          ) VALUES ($1, $2, $3, $4, $5, $6)
           RETURNING id
         `, [
           invoice.id,
@@ -698,7 +697,6 @@ router.post('/process-bank-statement', [
           transaction.amount,
           transaction.date,
           transaction.description,
-          req.user.id,
           'Matched'
         ]);
         
