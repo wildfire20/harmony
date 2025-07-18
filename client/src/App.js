@@ -30,6 +30,7 @@ import Quizzes from './components/quizzes/Quizzes';
 import UserManagement from './components/users/UserManagement';
 import Analytics from './components/analytics/Analytics';
 import DebugPage from './components/debug/DebugPage';
+import PaymentDashboard from './components/payments/PaymentDashboard';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -130,6 +131,12 @@ const AppContent = () => {
         <Route path="analytics" element={
           <ProtectedRoute roles={['admin', 'super_admin']}>
             <Analytics />
+          </ProtectedRoute>
+        } />
+        
+        <Route path="payments" element={
+          <ProtectedRoute roles={['admin', 'super_admin']}>
+            <PaymentDashboard />
           </ProtectedRoute>
         } />
         

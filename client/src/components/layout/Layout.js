@@ -15,7 +15,8 @@ import {
   FileText,
   Award,
   Calendar,
-  Bell
+  Bell,
+  CreditCard
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import HarmonyLogo from '../common/HarmonyLogo';
@@ -44,7 +45,8 @@ const Layout = () => {
     ...(isAdmin ? [
       { name: 'Admin Panel', href: '/admin', icon: Settings, color: 'harmony-navy' },
       { name: 'Users', href: '/users', icon: Users, color: 'harmony-secondary' },
-      { name: 'Analytics', href: '/analytics', icon: BarChart3, color: 'harmony-gold' }
+      { name: 'Analytics', href: '/analytics', icon: BarChart3, color: 'harmony-gold' },
+      { name: 'Payments', href: '/payments', icon: CreditCard, color: 'harmony-gold' }
     ] : []),
   ];
 

@@ -36,6 +36,7 @@ const documentRoutes = require('./routes/documents');
 const calendarRoutes = require('./routes/calendar');
 const analyticsRoutes = require('./routes/analytics');
 const s3HealthRoutes = require('./routes/s3-health');
+const invoiceRoutes = require('./routes/invoices');
 
 // Import database
 const db = require('./config/database');
@@ -194,6 +195,118 @@ const initializeGradedDocumentColumns = async () => {
   }
 };
 
+// Initialize invoice and payment tables
+const initializeInvoiceSystem = async () => {
+  try {
+    console.log('🔄 Initializing invoice and payment system...');
+    
+    // Create invoices table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS invoices (
+        id SERIAL PRIMARY KEY,
+        student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        student_number VARCHAR(50) NOT NULL,
+        amount_due DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+        amount_paid DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+        outstanding_balance DECIMAL(10, 2) GENERATED ALWAYS AS (amount_due - amount_paid) STORED,
+        overpaid_amount DECIMAL(10, 2) GENERATED ALWAYS AS (
+          CASE 
+            WHEN amount_paid > amount_due THEN amount_paid - amount_due 
+            ELSE 0 
+          END
+        ) STORED,
+        due_date DATE NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'Unpaid' CHECK (status IN ('Unpaid', 'Partial', 'Paid', 'Overpaid')),
+        reference_number VARCHAR(100) NOT NULL,
+        created_by INTEGER NOT NULL REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create payment_transactions table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id SERIAL PRIMARY KEY,
+        invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        student_number VARCHAR(50) NOT NULL,
+        reference_number VARCHAR(100) NOT NULL,
+        amount DECIMAL(10, 2) NOT NULL,
+        transaction_date DATE NOT NULL,
+        description TEXT,
+        matched_by INTEGER REFERENCES users(id),
+        matched_at TIMESTAMP,
+        bank_statement_upload_id INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create payment_upload_logs table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS payment_upload_logs (
+        id SERIAL PRIMARY KEY,
+        filename VARCHAR(255) NOT NULL,
+        file_hash VARCHAR(64) NOT NULL UNIQUE,
+        total_transactions INTEGER NOT NULL,
+        matched_transactions INTEGER NOT NULL DEFAULT 0,
+        total_amount DECIMAL(12, 2) NOT NULL,
+        matched_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+        upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        uploaded_by INTEGER NOT NULL REFERENCES users(id),
+        status VARCHAR(20) DEFAULT 'completed' CHECK (status IN ('processing', 'completed', 'failed'))
+      )
+    `);
+
+    // Create indexes
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS idx_invoices_student ON invoices(student_id);
+      CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
+      CREATE INDEX IF NOT EXISTS idx_invoices_due_date ON invoices(due_date);
+      CREATE INDEX IF NOT EXISTS idx_invoices_reference ON invoices(reference_number);
+      
+      CREATE INDEX IF NOT EXISTS idx_payment_transactions_invoice ON payment_transactions(invoice_id);
+      CREATE INDEX IF NOT EXISTS idx_payment_transactions_student ON payment_transactions(student_id);
+      CREATE INDEX IF NOT EXISTS idx_payment_transactions_reference ON payment_transactions(reference_number);
+      CREATE INDEX IF NOT EXISTS idx_payment_transactions_date ON payment_transactions(transaction_date);
+      
+      CREATE INDEX IF NOT EXISTS idx_payment_upload_logs_hash ON payment_upload_logs(file_hash);
+      CREATE INDEX IF NOT EXISTS idx_payment_upload_logs_date ON payment_upload_logs(upload_date);
+    `);
+
+    // Create triggers for automatic status updates
+    await db.query(`
+      CREATE OR REPLACE FUNCTION update_invoice_status()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        UPDATE invoices SET status = 
+          CASE 
+            WHEN amount_paid = 0 THEN 'Unpaid'
+            WHEN amount_paid < amount_due THEN 'Partial'
+            WHEN amount_paid = amount_due THEN 'Paid'
+            WHEN amount_paid > amount_due THEN 'Overpaid'
+          END,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = NEW.invoice_id;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+    `);
+
+    await db.query(`
+      DROP TRIGGER IF EXISTS payment_transaction_status_update ON payment_transactions;
+      CREATE TRIGGER payment_transaction_status_update
+        AFTER INSERT OR UPDATE OR DELETE ON payment_transactions
+        FOR EACH ROW EXECUTE FUNCTION update_invoice_status();
+    `);
+
+    console.log('✅ Invoice and payment system initialized successfully');
+
+  } catch (error) {
+    console.log('❌ Invoice system initialization failed:', error.message);
+  }
+};
+
 const app = express();
 
 // Production security enhancements
@@ -309,6 +422,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/invoices', invoiceRoutes);
 app.use('/api/downloads', require('./routes/downloads'));
 app.use('/api', s3HealthRoutes);
 
@@ -597,6 +711,13 @@ const startServer = async () => {
       console.log('✅ Graded document columns initialized');
     } catch (gradedDocError) {
       console.warn('⚠️ Graded document columns initialization failed:', gradedDocError.message);
+    }
+    
+    try {
+      await initializeInvoiceSystem();
+      console.log('✅ Invoice system initialized');
+    } catch (invoiceError) {
+      console.warn('⚠️ Invoice system initialization failed:', invoiceError.message);
     }
     
     console.log('🎉 Server fully initialized and ready!');
