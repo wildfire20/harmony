@@ -605,13 +605,7 @@ router.post('/process-bank-statement', [
         }
 
         if (invoiceResult.rows.length === 0) {
-          // No matching invoice found
-          results.unmatched.push({
-            ...transaction,
-            reason: 'No matching invoice found'
-          });
-
-          // Log unmatched transaction
+          // Log unmatched transaction to database
           await client.query(`
             INSERT INTO payment_transactions (
               reference_number, amount, payment_date, 
@@ -627,6 +621,12 @@ router.post('/process-bank-statement', [
           ]);
           
           await client.query('COMMIT');
+          
+          // Add to results AFTER successful commit
+          results.unmatched.push({
+            ...transaction,
+            reason: 'No matching invoice found'
+          });
           continue;
         }
 
@@ -640,6 +640,7 @@ router.post('/process-bank-statement', [
 
         // Determine payment status
         let newStatus, amountPaid, newOutstanding, overpaidAmount;
+        let resultCategory = null;
 
         if (transaction.amount >= outstandingAmount) {
           // Full payment or overpayment
@@ -649,18 +650,14 @@ router.post('/process-bank-statement', [
             newOutstanding = 0;
             overpaidAmount = 0;
             console.log(`MATCHED: Exact payment of ${transaction.amount} for invoice ${invoice.reference_number}`);
-            results.matched.push({ ...transaction, invoice: invoice.reference_number });
+            resultCategory = 'matched';
           } else {
             newStatus = 'Overpaid';
             amountPaid = (invoice.amount_paid || 0) + transaction.amount;
             newOutstanding = 0;
             overpaidAmount = transaction.amount - outstandingAmount;
             console.log(`OVERPAID: Payment of ${transaction.amount} exceeds outstanding ${outstandingAmount} by ${overpaidAmount} for invoice ${invoice.reference_number}`);
-            results.overpaid.push({ 
-              ...transaction, 
-              invoice: invoice.reference_number,
-              overpaidAmount 
-            });
+            resultCategory = 'overpaid';
           }
         } else {
           // Partial payment
@@ -669,11 +666,7 @@ router.post('/process-bank-statement', [
           newOutstanding = outstandingAmount - transaction.amount;
           overpaidAmount = 0;
           console.log(`PARTIAL: Payment of ${transaction.amount} is less than outstanding ${outstandingAmount}, remaining: ${newOutstanding} for invoice ${invoice.reference_number}`);
-          results.partial.push({ 
-            ...transaction, 
-            invoice: invoice.reference_number,
-            remainingBalance: newOutstanding 
-          });
+          resultCategory = 'partial';
         }
 
         // Update invoice - only update fields we can modify (not computed columns)
@@ -714,6 +707,23 @@ router.post('/process-bank-statement', [
         // Commit the transaction
         await client.query('COMMIT');
         console.log(`Successfully processed transaction for ${transaction.reference}`);
+
+        // Add to results AFTER successful commit
+        if (resultCategory === 'matched') {
+          results.matched.push({ ...transaction, invoice: invoice.reference_number });
+        } else if (resultCategory === 'overpaid') {
+          results.overpaid.push({ 
+            ...transaction, 
+            invoice: invoice.reference_number,
+            overpaidAmount 
+          });
+        } else if (resultCategory === 'partial') {
+          results.partial.push({ 
+            ...transaction, 
+            invoice: invoice.reference_number,
+            remainingBalance: newOutstanding 
+          });
+        }
 
       } catch (error) {
         await client.query('ROLLBACK');
