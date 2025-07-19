@@ -636,30 +636,35 @@ router.post('/process-bank-statement', [
         let newStatus, amountPaid, newOutstanding, overpaidAmount;
         let resultCategory = null;
 
-        if (transaction.amount >= outstandingAmount) {
+        // Ensure numeric values for calculations
+        const currentAmountPaid = parseFloat(invoice.amount_paid || 0);
+        const transactionAmount = parseFloat(transaction.amount);
+        const outstandingAmountNum = parseFloat(outstandingAmount);
+
+        if (transactionAmount >= outstandingAmountNum) {
           // Full payment or overpayment
-          if (transaction.amount === outstandingAmount) {
+          if (transactionAmount === outstandingAmountNum) {
             newStatus = 'Paid';
-            amountPaid = (invoice.amount_paid || 0) + transaction.amount;
+            amountPaid = currentAmountPaid + transactionAmount;
             newOutstanding = 0;
             overpaidAmount = 0;
-            console.log(`MATCHED: Exact payment of ${transaction.amount} for invoice ${invoice.reference_number}, new amount_paid: ${amountPaid}`);
+            console.log(`MATCHED: Exact payment of ${transactionAmount} for invoice ${invoice.reference_number}, new amount_paid: ${amountPaid}`);
             resultCategory = 'matched';
           } else {
             newStatus = 'Overpaid';
-            amountPaid = (invoice.amount_paid || 0) + transaction.amount;
+            amountPaid = currentAmountPaid + transactionAmount;
             newOutstanding = 0;
-            overpaidAmount = transaction.amount - outstandingAmount;
-            console.log(`OVERPAID: Payment of ${transaction.amount} exceeds outstanding ${outstandingAmount} by ${overpaidAmount} for invoice ${invoice.reference_number}`);
+            overpaidAmount = transactionAmount - outstandingAmountNum;
+            console.log(`OVERPAID: Payment of ${transactionAmount} exceeds outstanding ${outstandingAmountNum} by ${overpaidAmount} for invoice ${invoice.reference_number}`);
             resultCategory = 'overpaid';
           }
         } else {
           // Partial payment
           newStatus = 'Partial';
-          amountPaid = (invoice.amount_paid || 0) + transaction.amount;
-          newOutstanding = outstandingAmount - transaction.amount;
+          amountPaid = currentAmountPaid + transactionAmount;
+          newOutstanding = outstandingAmountNum - transactionAmount;
           overpaidAmount = 0;
-          console.log(`PARTIAL: Payment of ${transaction.amount} is less than outstanding ${outstandingAmount}, remaining: ${newOutstanding} for invoice ${invoice.reference_number}`);
+          console.log(`PARTIAL: Payment of ${transactionAmount} is less than outstanding ${outstandingAmountNum}, remaining: ${newOutstanding} for invoice ${invoice.reference_number}`);
           resultCategory = 'partial';
         }
 
