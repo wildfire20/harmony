@@ -6,6 +6,8 @@
 
 /* Import mobile-responsive styles */
 @import './mobile-responsive.css';
+@import './components/ui/MobileButtonStyles.css';
+@import './components/ui/MobileLayoutEnhancements.css';
 
 /* Harmony Learning Institute - Official Brand Colors */
 :root {

@@ -136,17 +136,17 @@ const Quizzes = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="quizzes-header space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <Award className="h-8 w-8 text-harmony-gold" />
-          <h1 className="text-3xl font-bold text-gray-900">Quizzes</h1>
+          <h1 className="mobile-heading-1 text-3xl font-bold text-gray-900">Quizzes</h1>
         </div>
-        <div className="flex space-x-3">
+        <div className="quizzes-filter-row flex space-x-3">
           <select 
             value={filter} 
             onChange={(e) => setFilter(e.target.value)}
-            className="bg-white border border-gray-300 rounded-md px-3 py-2"
+            className="quizzes-filter-select bg-white border border-gray-300 rounded-md px-3 py-2"
           >
             <option value="all">All Quizzes</option>
             <option value="active">Active</option>
@@ -155,7 +155,7 @@ const Quizzes = () => {
           {(user?.role === 'teacher' || user?.role === 'admin' || user?.role === 'super_admin') && (
             <button 
               onClick={handleCreateQuiz}
-              className="bg-harmony-gold text-white px-4 py-2 rounded-md hover:bg-opacity-90 flex items-center space-x-2"
+              className="mobile-btn-gold bg-harmony-gold text-white px-4 py-2 rounded-md hover:bg-opacity-90 flex items-center space-x-2 sm:w-auto"
             >
               <Plus className="h-4 w-4" />
               <span>Create Quiz</span>
@@ -193,7 +193,7 @@ const Quizzes = () => {
               <div className="mt-6">
                 <button 
                   onClick={handleCreateQuiz}
-                  className="bg-harmony-gold text-white px-6 py-2 rounded-md hover:bg-opacity-90 flex items-center space-x-2 mx-auto"
+                  className="mobile-btn-gold bg-harmony-gold text-white px-6 py-2 rounded-md hover:bg-opacity-90 flex items-center space-x-2 mx-auto sm:w-auto"
                 >
                   <Plus className="h-4 w-4" />
                   <span>Create Your First Quiz</span>
@@ -203,31 +203,31 @@ const Quizzes = () => {
           </div>
         </div>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <div className="quiz-grid grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {quizzes.map((quiz) => (
-            <div key={quiz.task_id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <div className="flex items-start justify-between mb-4">
+            <div key={quiz.task_id} className="quiz-card bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="quiz-card-header flex items-start justify-between mb-4">
                 <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">{quiz.title}</h3>
-                  <p className="text-gray-600 text-sm mb-3 line-clamp-2">{quiz.description}</p>
+                  <h3 className="quiz-title text-lg font-semibold text-gray-900 mb-2">{quiz.title}</h3>
+                  <p className="quiz-description text-gray-600 text-sm mb-3 line-clamp-2">{quiz.description}</p>
                   
-                  <div className="flex items-center space-x-4 text-sm text-gray-500 mb-3">
-                    <div className="flex items-center space-x-1">
+                  <div className="quiz-meta-row flex items-center space-x-4 text-sm text-gray-500 mb-3">
+                    <div className="quiz-due-date flex items-center space-x-1">
                       <Clock className="h-4 w-4" />
                       <span>Due: {formatDate(quiz.due_date)}</span>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between mb-4">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(quiz.quiz_status)}`}>
+                  <div className="quiz-status-row flex items-center justify-between mb-4">
+                    <span className={`quiz-status-badge px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(quiz.quiz_status)}`}>
                       {quiz.quiz_status.replace('_', ' ').toUpperCase()}
                     </span>
-                    <span className="text-sm text-gray-500">
+                    <span className="quiz-points text-sm text-gray-500">
                       {quiz.max_points} points
                     </span>
                   </div>
 
-                  <div className="text-xs text-gray-500 mb-4">
+                  <div className="quiz-class-info text-xs text-gray-500 mb-4">
                     {quiz.grade_name} - {quiz.class_name}
                     {quiz.time_limit && (
                       <span className="ml-2">• {quiz.time_limit} min limit</span>
@@ -235,19 +235,19 @@ const Quizzes = () => {
                   </div>
 
                   {user?.role === 'student' && quiz.student_status && (
-                    <div className="mb-4 p-3 bg-gray-50 rounded-md">
+                    <div className="quiz-student-status mb-4 p-3 bg-gray-50 rounded-md">
                       <div className="text-sm">
-                        <div className="flex justify-between">
+                        <div className="quiz-student-status-row flex justify-between">
                           <span>Attempts:</span>
                           <span>{quiz.student_status.attempts}/{quiz.attempts_allowed}</span>
                         </div>
                         {quiz.student_status.best_score !== null && (
-                          <div className="flex justify-between">
+                          <div className="quiz-student-status-row flex justify-between">
                             <span>Best Score:</span>
                             <span>{quiz.student_status.best_score}/{quiz.max_points}</span>
                           </div>
                         )}
-                        <div className="flex justify-between">
+                        <div className="quiz-student-status-row flex justify-between">
                           <span>Status:</span>
                           <span className="capitalize">{quiz.student_status.status.replace('_', ' ')}</span>
                         </div>
@@ -257,11 +257,11 @@ const Quizzes = () => {
                 </div>
               </div>
 
-              <div className="flex space-x-2">
+              <div className="mobile-btn-group flex space-x-2">
                 {user?.role === 'student' && quiz.student_status?.can_attempt && (
                   <button 
                     onClick={() => handleTakeQuiz(quiz)}
-                    className="flex-1 bg-harmony-secondary text-white px-3 py-2 rounded-md hover:bg-opacity-90 flex items-center justify-center space-x-1 text-sm"
+                    className="mobile-btn-success flex-1 bg-harmony-secondary text-white px-3 py-2 rounded-md hover:bg-opacity-90 flex items-center justify-center space-x-1 text-sm sm:flex-initial"
                   >
                     <Play className="h-4 w-4" />
                     <span>Take Quiz</span>
@@ -272,21 +272,19 @@ const Quizzes = () => {
                   <>
                     <button 
                       onClick={() => handleViewResults(quiz)}
-                      className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 flex items-center justify-center space-x-1 text-sm"
+                      className="mobile-btn-compact mobile-btn-secondary flex-1 bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 flex items-center justify-center space-x-1 text-sm sm:flex-initial"
                     >
                       <BarChart3 className="h-4 w-4" />
                       <span>Results</span>
                     </button>
                     <button 
                       onClick={() => handleDeleteQuiz(quiz.task_id)}
-                      className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-md"
+                      className="mobile-btn-icon danger px-3 py-2 text-red-600 hover:bg-red-50 rounded-md"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </>
                 )}
-
-
               </div>
             </div>
           ))}
