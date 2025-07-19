@@ -952,14 +952,14 @@ router.get('/export/csv', [
 
     let query = `
       SELECT 
-        i.reference_number, s.first_name, s.last_name, s.student_number,
+        i.reference_number, u.first_name, u.last_name, i.student_number,
         i.amount_due, i.amount_paid, i.outstanding_balance, i.overpaid_amount,
         i.due_date, i.status, i.created_at, i.updated_at,
         g.name as grade_name, c.name as class_name
       FROM invoices i
-      LEFT JOIN students s ON i.student_id = s.id
-      LEFT JOIN grades g ON s.grade_id = g.id
-      LEFT JOIN classes c ON s.class_id = c.id
+      LEFT JOIN users u ON i.student_id = u.id
+      LEFT JOIN grades g ON u.grade_id = g.id
+      LEFT JOIN classes c ON u.class_id = c.id
       WHERE 1=1
     `;
 
@@ -997,21 +997,28 @@ router.get('/export/csv', [
 
     result.rows.forEach(row => {
       const csvRow = [
-        row.reference_number,
-        row.student_number,
-        row.first_name,
-        row.last_name,
+        row.reference_number || '',
+        row.student_number || '',  // This comes from the invoice table
+        row.first_name || '',
+        row.last_name || '',
         row.grade_name || '',
         row.class_name || '',
-        row.amount_due,
+        row.amount_due || 0,
         row.amount_paid || 0,
         row.outstanding_balance || 0,
         row.overpaid_amount || 0,
         row.due_date?.toISOString().split('T')[0] || '',
-        row.status,
+        row.status || '',
         row.created_at?.toISOString().split('T')[0] || '',
         row.updated_at?.toISOString().split('T')[0] || ''
-      ].map(field => `"${field}"`).join(',');
+      ].map(field => {
+        // Handle special characters and quotes in CSV
+        const stringField = String(field);
+        if (stringField.includes('"') || stringField.includes(',') || stringField.includes('\n')) {
+          return `"${stringField.replace(/"/g, '""')}"`;
+        }
+        return `"${stringField}"`;
+      }).join(',');
       
       csvContent += csvRow + '\n';
     });
