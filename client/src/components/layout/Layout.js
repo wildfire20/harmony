@@ -250,7 +250,7 @@ const Layout = () => {
             </div>
           </div>
           
-          <main className="flex-1 relative overflow-y-auto focus:outline-none">
+          <main className="flex-1 relative overflow-y-auto focus:outline-none" style={{ paddingBottom: isMobile ? '80px' : '0' }}>
             <div className={`${isMobile ? 'py-2 px-3' : 'py-4 px-2'} sm:py-6 sm:px-4`}>
               <div className="max-w-7xl mx-auto">
                 <Outlet />
@@ -258,39 +258,41 @@ const Layout = () => {
             </div>
           </main>
           
-          {/* Enhanced Footer */}
-          <div className="bg-gradient-primary px-4 py-6 relative overflow-hidden">
+          {/* Enhanced Footer - Fixed on mobile */}
+          <div className={`bg-gradient-primary px-4 py-3 relative overflow-hidden ${
+            isMobile ? 'fixed bottom-0 left-0 right-0 z-40' : ''
+          }`}>
             <div className="absolute inset-0 bg-black bg-opacity-10"></div>
             <div className="relative flex items-center justify-center">
-              <div className="flex items-center space-x-6">
+              <div className={`flex items-center ${isMobile ? 'space-x-3' : 'space-x-6'}`}>
                 {/* Harmony Logo */}
-                <div className="flex items-center space-x-3">
-                  <HarmonyLogo size={32} showText={false} theme="white" />
+                <div className="flex items-center space-x-2">
+                  <HarmonyLogo size={isMobile ? 24 : 32} showText={false} theme="white" />
                   <div className="text-white">
-                    <div className="font-brand font-bold text-lg">Harmony Learning</div>
-                    <div className="text-sm opacity-90">Excellence in Education</div>
+                    <div className={`font-brand font-bold ${isMobile ? 'text-sm' : 'text-lg'}`}>Harmony Learning</div>
+                    <div className={`opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>Excellence in Education</div>
                   </div>
                 </div>
                 
                 {/* Divider */}
-                <div className="hidden sm:block w-px h-12 bg-white bg-opacity-30"></div>
+                <div className={`${isMobile ? 'hidden' : 'hidden sm:block'} w-px h-8 bg-white bg-opacity-30`}></div>
                 
                 {/* AutoM8 Logo */}
-                <div className="flex items-center space-x-3">
-                  <div className="h-8 w-8 border-2 border-white rounded-lg flex items-center justify-center">
+                <div className="flex items-center space-x-2">
+                  <div className={`border-2 border-white rounded-lg flex items-center justify-center ${isMobile ? 'h-6 w-6' : 'h-8 w-8'}`}>
                     <div className="flex flex-col items-center">
-                      <div className="h-1 w-1 bg-white rounded-full mb-0.5"></div>
+                      <div className={`bg-white rounded-full mb-0.5 ${isMobile ? 'h-0.5 w-0.5' : 'h-1 w-1'}`}></div>
                       <div className="flex space-x-0.5">
-                        <div className="h-1 w-1 bg-white rounded-full"></div>
-                        <div className="h-1 w-1 bg-white rounded-full"></div>
-                        <div className="h-1 w-1 bg-white rounded-full"></div>
+                        <div className={`bg-white rounded-full ${isMobile ? 'h-0.5 w-0.5' : 'h-1 w-1'}`}></div>
+                        <div className={`bg-white rounded-full ${isMobile ? 'h-0.5 w-0.5' : 'h-1 w-1'}`}></div>
+                        <div className={`bg-white rounded-full ${isMobile ? 'h-0.5 w-0.5' : 'h-1 w-1'}`}></div>
                       </div>
-                      <div className="h-px w-3 bg-white mt-0.5"></div>
+                      <div className={`bg-white mt-0.5 ${isMobile ? 'h-px w-2' : 'h-px w-3'}`}></div>
                     </div>
                   </div>
                   <div className="text-white">
-                    <div className="font-bold text-lg">AutoM8</div>
-                    <div className="text-sm opacity-90">Streamlining Innovation</div>
+                    <div className={`font-bold ${isMobile ? 'text-sm' : 'text-lg'}`}>AutoM8</div>
+                    <div className={`opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>Streamlining Innovation</div>
                   </div>
                 </div>
               </div>

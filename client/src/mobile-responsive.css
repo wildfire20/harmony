@@ -313,6 +313,30 @@ button, a, .btn, .nav-item, .card, .tab {
   scrollbar-width: thin;
 }
 
+/* Mobile body padding for fixed footer */
+@media screen and (max-width: 767px) {
+  body {
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  
+  /* Ensure main content doesn't get hidden behind fixed footer */
+  .layout-main-mobile {
+    min-height: calc(100vh - 80px);
+    padding-bottom: 80px;
+  }
+  
+  /* Fixed footer z-index and positioning */
+  .fixed-footer-mobile {
+    position: fixed !important;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    transform: translateZ(0); /* Force GPU acceleration */
+    -webkit-transform: translateZ(0);
+  }
+}
+
 /* Mobile-friendly dropdowns */
 @media screen and (max-width: 767px) {
   select {
@@ -380,6 +404,23 @@ button, a, .btn, .nav-item, .card, .tab {
 
 /* Enhanced mobile navigation bar */
 @media screen and (max-width: 767px) {
+  /* Fixed footer for mobile */
+  .mobile-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 40;
+    background: var(--harmony-gradient-primary);
+    padding: 12px 16px;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+  }
+  
+  /* Adjust main content for fixed footer */
+  .mobile-content-with-footer {
+    padding-bottom: 80px;
+  }
+  
   .mobile-nav-bar {
     position: fixed;
     top: 0;
