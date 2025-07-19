@@ -34,10 +34,13 @@ router.get('/', authenticate, async (req, res) => {
     } else if (user.role === 'teacher') {
       // Teachers see announcements for their assigned grade/class or global announcements for staff/everyone
       query += ` AND (
-        (a.grade_id = $1 AND a.class_id = $2) OR 
-        (a.grade_id IS NULL AND a.class_id IS NULL AND a.target_audience IN ($3, $4))
+        EXISTS (
+          SELECT 1 FROM teacher_assignments ta 
+          WHERE ta.teacher_id = $1 AND ta.grade_id = a.grade_id AND ta.class_id = a.class_id
+        ) OR 
+        (a.grade_id IS NULL AND a.class_id IS NULL AND a.target_audience IN ($2, $3))
       )`;
-      params.push(user.grade_id, user.class_id, 'everyone', 'staff');
+      params.push(user.id, 'everyone', 'staff');
     } else if (user.role === 'admin' || user.role === 'super_admin') {
       // Admins see all announcements
       query += ' AND a.target_audience IN ($1, $2, $3)';
