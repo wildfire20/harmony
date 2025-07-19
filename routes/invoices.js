@@ -419,13 +419,19 @@ router.post('/process-bank-statement', [
             
             // Try to find amount
             if (columnMapping.amount) {
-              amount = parseFloat(row[columnMapping.amount]);
+              let amountStr = row[columnMapping.amount];
+              // Clean the amount string - remove commas, spaces, and currency symbols
+              amountStr = amountStr.toString().replace(/[,\s]/g, '').replace(/[^\d.-]/g, '');
+              amount = parseFloat(amountStr);
+              console.log(`Amount parsing: "${row[columnMapping.amount]}" -> "${amountStr}" -> ${amount}`);
             } else {
               // Fallback: look for any numeric field that could be amount
               for (const [key, value] of Object.entries(row)) {
-                const numValue = parseFloat(value);
+                let cleanValue = value.toString().replace(/[,\s]/g, '').replace(/[^\d.-]/g, '');
+                const numValue = parseFloat(cleanValue);
                 if (!isNaN(numValue) && numValue > 0) {
                   amount = numValue;
+                  console.log(`Fallback amount parsing: "${value}" -> "${cleanValue}" -> ${numValue}`);
                   break;
                 }
               }
@@ -624,7 +630,7 @@ router.post('/process-bank-statement', [
         console.log(`Invoice found: ${invoice.reference_number}`);
         console.log(`Invoice amount_due: ${invoice.amount_due}, amount_paid: ${invoice.amount_paid || 0}`);
         console.log(`Outstanding amount: ${outstandingAmount}`);
-        console.log(`Transaction amount: ${transaction.amount}`);
+        console.log(`Transaction amount: ${transaction.amount} (type: ${typeof transaction.amount})`);
 
         // Determine payment status
         let newStatus, amountPaid, newOutstanding, overpaidAmount;
@@ -637,7 +643,7 @@ router.post('/process-bank-statement', [
             amountPaid = (invoice.amount_paid || 0) + transaction.amount;
             newOutstanding = 0;
             overpaidAmount = 0;
-            console.log(`MATCHED: Exact payment of ${transaction.amount} for invoice ${invoice.reference_number}`);
+            console.log(`MATCHED: Exact payment of ${transaction.amount} for invoice ${invoice.reference_number}, new amount_paid: ${amountPaid}`);
             resultCategory = 'matched';
           } else {
             newStatus = 'Overpaid';
@@ -658,16 +664,20 @@ router.post('/process-bank-statement', [
         }
 
         // Update invoice - only update fields we can modify (not computed columns)
-        console.log(`Updating invoice ${invoice.id} with status: ${newStatus}, amount_paid: ${amountPaid}`);
+        console.log(`Updating invoice ${invoice.id} with status: ${newStatus}, amount_paid: ${amountPaid} (type: ${typeof amountPaid})`);
+        
+        // Ensure amountPaid is a proper number with 2 decimal places
+        const properAmountPaid = Math.round(amountPaid * 100) / 100;
+        console.log(`Properly formatted amount_paid: ${properAmountPaid}`);
         
         const updateResult = await client.query(`
           UPDATE invoices SET 
             status = $1, 
-            amount_paid = $2, 
+            amount_paid = $2::DECIMAL(10,2), 
             updated_at = NOW()
           WHERE id = $3
           RETURNING id, status, amount_paid, outstanding_balance
-        `, [newStatus, amountPaid, invoice.id]);
+        `, [newStatus, properAmountPaid, invoice.id]);
         
         console.log('Invoice update result:', updateResult.rows[0]);
 
