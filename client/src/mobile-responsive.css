@@ -504,6 +504,40 @@ button, a, .btn, .nav-item, .card, .tab {
   }
 }
 
+/* Mobile sidebar user account fixed positioning */
+@media screen and (max-width: 767px) {
+  .mobile-sidebar-container {
+    position: relative;
+    height: 100vh;
+    overflow: hidden;
+  }
+  
+  .mobile-sidebar-content {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 80px; /* Leave space for user account */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .mobile-sidebar-user {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  
+  /* Ensure navigation has proper padding to avoid overlap */
+  .mobile-nav-padding {
+    padding-bottom: 24px;
+  }
+}
+
 /* Android Chrome specific fixes */
 @media screen and (-webkit-min-device-pixel-ratio: 0) {
   .android-fix {

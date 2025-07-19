@@ -107,7 +107,7 @@ const Layout = () => {
             onClick={() => setSidebarOpen(false)}
             onTouchStart={() => setSidebarOpen(false)}
           />
-          <div className={`relative flex-1 flex flex-col max-w-xs w-full ${
+          <div className={`relative flex-1 flex flex-col max-w-xs w-full mobile-sidebar-container ${
             theme === 'dark' ? 'bg-gray-800' : 'bg-white'
           }`}>
             <div className="absolute top-0 right-0 -mr-12 pt-2">
@@ -120,19 +120,19 @@ const Layout = () => {
                 <X className="h-6 w-6 text-white" />
               </button>
             </div>
-            <div className="flex-1 h-0 pt-5 pb-4 overflow-y-auto">
+            <div className="mobile-sidebar-content pt-5 pb-4">
               <div className="flex-shrink-0 flex items-center px-4 mb-4">
                 <HarmonyLogo size={40} showText={true} theme={theme} />
               </div>
-              <nav className="mt-5 px-2 space-y-1">
+              <nav className="mt-5 px-2 space-y-1 mobile-nav-padding">
                 {navigation.map((item) => (
                   <NavItem key={item.name} item={item} onClick={() => setSidebarOpen(false)} />
                 ))}
               </nav>
             </div>
-            <div className={`flex-shrink-0 flex border-t p-4 ${
-              theme === 'dark' ? 'border-gray-700' : 'border-gray-200'
-            } ${isMobile ? 'mb-20' : ''}`}>
+            <div className={`mobile-sidebar-user flex border-t p-4 ${
+              theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+            }`}>
               <div className="flex items-center w-full">
                 <div className="h-12 w-12 bg-gradient-primary rounded-full flex items-center justify-center">
                   <User className="h-6 w-6 text-white" />
