@@ -673,18 +673,16 @@ router.post('/process-bank-statement', [
         
         // Ensure amountPaid is a proper number with 2 decimal places
         const properAmountPaid = Math.round(amountPaid * 100) / 100;
-        const properOverpaid = Math.round((overpaidAmount || 0) * 100) / 100;
-        console.log(`Properly formatted values - amount_paid: ${properAmountPaid}, overpaid: ${properOverpaid}`);
+        console.log(`Properly formatted values - amount_paid: ${properAmountPaid}`);
         
         const updateResult = await client.query(`
           UPDATE invoices SET 
             status = $1, 
-            amount_paid = $2::DECIMAL(10,2), 
-            overpaid_amount = $3::DECIMAL(10,2),
+            amount_paid = $2::DECIMAL(10,2),
             updated_at = NOW()
-          WHERE id = $4
+          WHERE id = $3
           RETURNING id, status, amount_paid, outstanding_balance, overpaid_amount
-        `, [newStatus, properAmountPaid, properOverpaid, invoice.id]);
+        `, [newStatus, properAmountPaid, invoice.id]);
         
         console.log('Invoice update result:', updateResult.rows[0]);
 
