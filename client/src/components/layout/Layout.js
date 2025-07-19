@@ -101,9 +101,9 @@ const Layout = () => {
     <ThemedLayout>
       <div className="h-screen flex overflow-hidden">
         {/* Mobile menu */}
-        <div className={`fixed inset-0 flex z-40 md:hidden ${sidebarOpen ? '' : 'hidden'}`}>
+        <div className={`fixed inset-0 flex z-[1100] md:hidden ${sidebarOpen ? '' : 'hidden'}`}>
           <div 
-            className="fixed inset-0 bg-gray-600 bg-opacity-75" 
+            className="fixed inset-0 bg-gray-600 bg-opacity-75 mobile-sidebar-overlay" 
             onClick={() => setSidebarOpen(false)}
             onTouchStart={() => setSidebarOpen(false)}
           />

@@ -510,6 +510,7 @@ button, a, .btn, .nav-item, .card, .tab {
     position: relative;
     height: 100vh;
     overflow: hidden;
+    z-index: 1100; /* Higher than footer z-index: 1000 */
   }
   
   .mobile-sidebar-content {
@@ -527,7 +528,7 @@ button, a, .btn, .nav-item, .card, .tab {
     bottom: 0;
     left: 0;
     right: 0;
-    z-index: 10;
+    z-index: 1110; /* Even higher to stay on top */
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
   }
@@ -535,6 +536,11 @@ button, a, .btn, .nav-item, .card, .tab {
   /* Ensure navigation has proper padding to avoid overlap */
   .mobile-nav-padding {
     padding-bottom: 24px;
+  }
+  
+  /* Mobile sidebar overlay should be above footer */
+  .mobile-sidebar-overlay {
+    z-index: 1050;
   }
 }
 
