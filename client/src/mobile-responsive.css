@@ -587,3 +587,192 @@ button, a, .btn, .nav-item, .card, .tab {
     line-height: 1.4;
   }
 }
+
+/* Enhanced Dark Mode Mobile Styles */
+[data-theme="dark"] {
+  @media screen and (max-width: 767px) {
+    /* Dark mode mobile cards */
+    .card, .card-harmony {
+      background-color: var(--harmony-gray-100) !important;
+      border-color: var(--harmony-gray-300) !important;
+      color: var(--harmony-gray-700) !important;
+    }
+    
+    /* Dark mode mobile navigation */
+    .nav-item {
+      background-color: transparent !important;
+      color: var(--harmony-gray-600) !important;
+    }
+    
+    .nav-item:hover, .nav-item:focus {
+      background-color: var(--harmony-gray-200) !important;
+      color: var(--harmony-gray-800) !important;
+    }
+    
+    /* Dark mode mobile buttons */
+    .btn, button {
+      background-color: var(--harmony-primary) !important;
+      color: white !important;
+      border-color: var(--harmony-primary) !important;
+    }
+    
+    .btn:hover, button:hover {
+      background-color: var(--harmony-primary) !important;
+      opacity: 0.9;
+    }
+    
+    /* Dark mode mobile forms */
+    .form-control {
+      background-color: var(--harmony-gray-200) !important;
+      border-color: var(--harmony-gray-300) !important;
+      color: var(--harmony-gray-700) !important;
+    }
+    
+    .form-control:focus {
+      border-color: var(--harmony-primary) !important;
+      background-color: var(--harmony-gray-100) !important;
+      box-shadow: 0 0 0 3px rgba(76, 90, 247, 0.1) !important;
+    }
+    
+    /* Dark mode mobile announcements */
+    .announcement-card {
+      background-color: var(--harmony-gray-100) !important;
+      border-color: var(--harmony-gray-300) !important;
+    }
+    
+    .announcement-title {
+      color: var(--harmony-gray-800) !important;
+    }
+    
+    .announcement-content {
+      color: var(--harmony-gray-600) !important;
+    }
+    
+    /* Dark mode mobile tasks and quizzes */
+    .task-card, .quiz-card {
+      background-color: var(--harmony-gray-100) !important;
+      border-color: var(--harmony-gray-300) !important;
+      color: var(--harmony-gray-700) !important;
+    }
+    
+    .task-title, .quiz-title {
+      color: var(--harmony-gray-800) !important;
+    }
+    
+    .task-meta, .quiz-meta {
+      color: var(--harmony-gray-500) !important;
+    }
+    
+    /* Dark mode mobile status badges */
+    .task-status, .quiz-status {
+      background-color: var(--harmony-gray-200) !important;
+      color: var(--harmony-gray-700) !important;
+    }
+    
+    /* Dark mode mobile payment dashboard */
+    .payment-stat-card {
+      background-color: var(--harmony-gray-100) !important;
+      border-color: var(--harmony-gray-300) !important;
+      color: var(--harmony-gray-700) !important;
+    }
+    
+    .payment-stat-value {
+      color: var(--harmony-gray-800) !important;
+    }
+    
+    .payment-stat-label {
+      color: var(--harmony-gray-500) !important;
+    }
+    
+    /* Dark mode mobile documents */
+    .document-card {
+      background-color: var(--harmony-gray-100) !important;
+      border-color: var(--harmony-gray-300) !important;
+      color: var(--harmony-gray-700) !important;
+    }
+    
+    .document-title {
+      color: var(--harmony-gray-800) !important;
+    }
+    
+    .document-meta {
+      color: var(--harmony-gray-500) !important;
+    }
+    
+    .document-action-btn {
+      background-color: var(--harmony-gray-200) !important;
+      border-color: var(--harmony-gray-300) !important;
+      color: var(--harmony-gray-700) !important;
+    }
+    
+    /* Dark mode mobile modals */
+    .modal {
+      background-color: var(--harmony-gray-100) !important;
+      color: var(--harmony-gray-700) !important;
+    }
+    
+    /* Dark mode mobile navigation bar */
+    .mobile-nav-bar {
+      background-color: var(--harmony-gray-50) !important;
+      border-color: var(--harmony-gray-300) !important;
+    }
+    
+    .mobile-nav-title {
+      color: var(--harmony-gray-800) !important;
+    }
+    
+    /* Dark mode mobile sidebar */
+    .mobile-sidebar-container {
+      background-color: var(--harmony-gray-50) !important;
+    }
+    
+    .mobile-sidebar-user {
+      background-color: var(--harmony-gray-50) !important;
+      border-color: var(--harmony-gray-300) !important;
+    }
+    
+    /* Dark mode mobile error/success states */
+    .error-mobile {
+      background-color: rgba(239, 68, 68, 0.1) !important;
+      border-color: rgba(239, 68, 68, 0.3) !important;
+      color: #fca5a5 !important;
+    }
+    
+    .success-mobile {
+      background-color: rgba(34, 197, 94, 0.1) !important;
+      border-color: rgba(34, 197, 94, 0.3) !important;
+      color: #86efac !important;
+    }
+    
+    /* Dark mode mobile footer */
+    .mobile-footer {
+      background: var(--harmony-gradient-primary) !important;
+    }
+    
+    /* Dark mode mobile dropdowns */
+    select {
+      background-color: var(--harmony-gray-200) !important;
+      border-color: var(--harmony-gray-300) !important;
+      color: var(--harmony-gray-700) !important;
+    }
+    
+    /* Dark mode mobile tables */
+    .table-container {
+      background-color: var(--harmony-gray-100) !important;
+    }
+    
+    table {
+      background-color: var(--harmony-gray-100) !important;
+    }
+    
+    th {
+      background-color: var(--harmony-gray-200) !important;
+      color: var(--harmony-gray-700) !important;
+    }
+    
+    td {
+      background-color: var(--harmony-gray-100) !important;
+      color: var(--harmony-gray-600) !important;
+    }
+  }
+}

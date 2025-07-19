@@ -590,3 +590,221 @@
 .calendar-wrapper {
   animation: fadeIn 0.5s ease-out;
 }
+
+/* Enhanced Dark Mode Calendar Styles */
+[data-theme="dark"] {
+  /* Dark mode calendar container */
+  .calendar-container {
+    background: linear-gradient(135deg, var(--harmony-gray-50) 0%, var(--harmony-gray-100) 100%);
+  }
+  
+  /* Dark mode header */
+  .calendar-header {
+    background-color: var(--harmony-gray-100);
+    border-color: var(--harmony-gray-300);
+  }
+  
+  .header-title h1 {
+    color: var(--harmony-gray-800);
+    background: var(--harmony-gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  /* Dark mode create event button */
+  .create-event-btn {
+    background: var(--harmony-gradient-primary);
+    box-shadow: var(--harmony-shadow-brand);
+  }
+  
+  .create-event-btn:hover {
+    box-shadow: 0 6px 20px rgba(76, 90, 247, 0.4);
+  }
+  
+  /* Dark mode error banner */
+  .error-banner {
+    background-color: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+  }
+  
+  /* Dark mode calendar legend */
+  .calendar-legend {
+    background-color: var(--harmony-gray-100);
+    border-color: var(--harmony-gray-300);
+  }
+  
+  .legend-item {
+    background-color: var(--harmony-gray-200);
+    color: var(--harmony-gray-700);
+  }
+  
+  /* Dark mode calendar wrapper */
+  .calendar-wrapper {
+    background-color: var(--harmony-gray-100);
+    border-color: var(--harmony-gray-300);
+  }
+  
+  /* Dark mode loading spinner */
+  .loading-spinner {
+    background-color: var(--harmony-gray-100);
+    border-color: var(--harmony-gray-300);
+    color: var(--harmony-gray-700);
+  }
+  
+  .loading-spinner p {
+    color: var(--harmony-gray-600);
+  }
+  
+  /* Dark mode React Big Calendar overrides */
+  .rbc-calendar {
+    background-color: var(--harmony-gray-100);
+  }
+  
+  .rbc-header {
+    background-color: var(--harmony-gray-200);
+    color: var(--harmony-gray-700);
+    border-color: var(--harmony-gray-300);
+  }
+  
+  .rbc-month-view {
+    border-color: var(--harmony-gray-300);
+  }
+  
+  .rbc-date-cell {
+    color: var(--harmony-gray-600);
+    background-color: var(--harmony-gray-100);
+  }
+  
+  .rbc-date-cell.rbc-off-range {
+    color: var(--harmony-gray-400);
+    background-color: var(--harmony-gray-50);
+  }
+  
+  .rbc-date-cell.rbc-now {
+    background-color: rgba(76, 90, 247, 0.1);
+    color: var(--harmony-primary);
+  }
+  
+  .rbc-day-bg {
+    background-color: var(--harmony-gray-100);
+    border-color: var(--harmony-gray-300);
+  }
+  
+  .rbc-day-bg.rbc-today {
+    background-color: rgba(76, 90, 247, 0.05);
+  }
+  
+  .rbc-toolbar {
+    background-color: var(--harmony-gray-200);
+    border-color: var(--harmony-gray-300);
+  }
+  
+  .rbc-toolbar button {
+    background-color: var(--harmony-gray-100);
+    border-color: var(--harmony-gray-300);
+    color: var(--harmony-gray-700);
+  }
+  
+  .rbc-toolbar button:hover {
+    background-color: var(--harmony-gray-200);
+    border-color: var(--harmony-gray-400);
+  }
+  
+  .rbc-toolbar button.rbc-active {
+    background-color: var(--harmony-primary);
+    color: white;
+    border-color: var(--harmony-primary);
+  }
+  
+  .rbc-toolbar-label {
+    color: var(--harmony-gray-800);
+  }
+  
+  /* Dark mode modal styles */
+  .modal-overlay {
+    background: rgba(0, 0, 0, 0.8);
+  }
+  
+  .modal-content {
+    background-color: var(--harmony-gray-100);
+    color: var(--harmony-gray-700);
+  }
+  
+  .modal-header {
+    border-color: var(--harmony-gray-300);
+  }
+  
+  .modal-header h3 {
+    color: var(--harmony-gray-800);
+  }
+  
+  .close-btn {
+    color: var(--harmony-gray-500);
+  }
+  
+  .close-btn:hover {
+    background-color: var(--harmony-gray-200);
+    color: var(--harmony-gray-700);
+  }
+  
+  /* Dark mode event details */
+  .event-details h4 {
+    color: var(--harmony-gray-800);
+  }
+  
+  .event-details p {
+    color: var(--harmony-gray-600);
+  }
+  
+  .event-details strong {
+    color: var(--harmony-gray-700);
+  }
+  
+  /* Dark mode form styles */
+  .form-group label {
+    color: var(--harmony-gray-700);
+  }
+  
+  .form-group input,
+  .form-group textarea,
+  .form-group select {
+    background-color: var(--harmony-gray-200);
+    border-color: var(--harmony-gray-300);
+    color: var(--harmony-gray-700);
+  }
+  
+  .form-group input:focus,
+  .form-group textarea:focus,
+  .form-group select:focus {
+    border-color: var(--harmony-primary);
+    background-color: var(--harmony-gray-100);
+    box-shadow: 0 0 0 3px rgba(76, 90, 247, 0.1);
+  }
+  
+  /* Dark mode form actions */
+  .form-actions {
+    border-color: var(--harmony-gray-300);
+  }
+  
+  .form-actions button[type="button"] {
+    background-color: var(--harmony-gray-200);
+    border-color: var(--harmony-gray-300);
+    color: var(--harmony-gray-700);
+  }
+  
+  .form-actions button[type="button"]:hover {
+    background-color: var(--harmony-gray-300);
+  }
+  
+  .form-actions button[type="submit"] {
+    background: var(--harmony-gradient-primary);
+    border-color: var(--harmony-primary);
+  }
+  
+  .form-actions button[type="submit"]:hover {
+    background: var(--harmony-gradient-primary);
+    opacity: 0.9;
+  }
+}

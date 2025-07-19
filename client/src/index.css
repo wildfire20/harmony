@@ -52,23 +52,37 @@
   --harmony-shadow-pink: 0 10px 25px -3px rgba(233, 30, 99, 0.25);
 }
 
-/* Dark Theme Variables - Professional */
+/* Dark Theme Variables - Enhanced Professional */
 [data-theme="dark"] {
-  --harmony-primary: #3949ab;
-  --harmony-secondary: #f06292;
-  --harmony-accent: #263238;
-  --harmony-gold: #ffca28;
+  --harmony-primary: #4c5af7;
+  --harmony-secondary: #ff4081;
+  --harmony-accent: #121826;
+  --harmony-gold: #ffd740;
   
-  --harmony-gray-50: #263238;
-  --harmony-gray-100: #37474f;
-  --harmony-gray-200: #455a64;
-  --harmony-gray-300: #546e7a;
-  --harmony-gray-400: #607d8b;
-  --harmony-gray-500: #78909c;
-  --harmony-gray-600: #90a4ae;
-  --harmony-gray-700: #b0bec5;
-  --harmony-gray-800: #cfd8dc;
-  --harmony-gray-900: #eceff1;
+  /* Enhanced dark grays with better contrast */
+  --harmony-gray-50: #0f1419;    /* Deep dark background */
+  --harmony-gray-100: #1a202c;   /* Card backgrounds */
+  --harmony-gray-200: #2d3748;   /* Elevated surfaces */
+  --harmony-gray-300: #4a5568;   /* Borders and dividers */
+  --harmony-gray-400: #718096;   /* Subtle text */
+  --harmony-gray-500: #a0aec0;   /* Secondary text */
+  --harmony-gray-600: #cbd5e0;   /* Primary text */
+  --harmony-gray-700: #e2e8f0;   /* High contrast text */
+  --harmony-gray-800: #f7fafc;   /* Pure text (rare) */
+  --harmony-gray-900: #ffffff;   /* Maximum contrast */
+  
+  /* Dark theme gradients */
+  --harmony-gradient-primary: linear-gradient(135deg, #4c5af7 0%, #6366f1 100%);
+  --harmony-gradient-secondary: linear-gradient(135deg, #ff4081 0%, #ff6ec7 100%);
+  --harmony-gradient-hero: linear-gradient(135deg, #0f1419 0%, #1a202c 50%, #2d3748 100%);
+  --harmony-gradient-accent: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+  
+  /* Enhanced dark shadows */
+  --harmony-shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+  --harmony-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --harmony-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
+  --harmony-shadow-brand: 0 10px 25px -3px rgba(76, 90, 247, 0.4);
+  --harmony-shadow-pink: 0 10px 25px -3px rgba(255, 64, 129, 0.4);
 }
 
 /* Mobile-first responsive design */
@@ -369,3 +383,136 @@ code {
 .status-submitted { @apply bg-blue-100 text-blue-800; }
 .status-graded { @apply bg-green-100 text-green-800; }
 .status-returned { @apply bg-yellow-100 text-yellow-800; }
+
+/* Enhanced Dark Mode Styles */
+[data-theme="dark"] {
+  /* Dark mode component styling */
+  .card-harmony {
+    background: var(--harmony-gray-100);
+    border-color: var(--harmony-gray-300);
+    color: var(--harmony-gray-700);
+  }
+  
+  .card-harmony:hover {
+    background: var(--harmony-gray-200);
+    border-color: var(--harmony-gray-400);
+  }
+  
+  /* Dark mode navigation */
+  .nav-item-harmony:hover {
+    background: linear-gradient(135deg, rgba(76, 90, 247, 0.1) 0%, rgba(255, 64, 129, 0.05) 100%);
+  }
+  
+  /* Dark mode buttons */
+  .btn-harmony-primary {
+    background: var(--harmony-gradient-primary);
+    box-shadow: var(--harmony-shadow-brand);
+  }
+  
+  .btn-harmony-secondary {
+    background: var(--harmony-gradient-secondary);
+    box-shadow: var(--harmony-shadow-pink);
+  }
+  
+  /* Dark mode announcements */
+  .announcement-card {
+    background: var(--harmony-gray-100) !important;
+    border-color: var(--harmony-gray-300) !important;
+    color: var(--harmony-gray-700) !important;
+  }
+  
+  .announcement-title {
+    color: var(--harmony-gray-800) !important;
+  }
+  
+  .announcement-content {
+    color: var(--harmony-gray-600) !important;
+  }
+  
+  /* Dark mode badges */
+  .priority-low { 
+    background: var(--harmony-gray-200) !important; 
+    color: var(--harmony-gray-700) !important; 
+  }
+  .priority-normal { 
+    background: rgba(76, 90, 247, 0.2) !important; 
+    color: #a5b4fc !important; 
+  }
+  .priority-high { 
+    background: rgba(255, 215, 0, 0.2) !important; 
+    color: #fde047 !important; 
+  }
+  .priority-urgent { 
+    background: rgba(255, 64, 129, 0.2) !important; 
+    color: #fca5a5 !important; 
+  }
+  
+  /* Dark mode status colors */
+  .status-draft { 
+    background: var(--harmony-gray-200) !important; 
+    color: var(--harmony-gray-700) !important; 
+  }
+  .status-submitted { 
+    background: rgba(76, 90, 247, 0.2) !important; 
+    color: #a5b4fc !important; 
+  }
+  .status-graded { 
+    background: rgba(34, 197, 94, 0.2) !important; 
+    color: #86efac !important; 
+  }
+  .status-returned { 
+    background: rgba(255, 215, 0, 0.2) !important; 
+    color: #fde047 !important; 
+  }
+  
+  /* Dark mode forms */
+  input, textarea, select {
+    background-color: var(--harmony-gray-200) !important;
+    border-color: var(--harmony-gray-300) !important;
+    color: var(--harmony-gray-700) !important;
+  }
+  
+  input:focus, textarea:focus, select:focus {
+    border-color: var(--harmony-primary) !important;
+    background-color: var(--harmony-gray-100) !important;
+  }
+  
+  input::placeholder, textarea::placeholder {
+    color: var(--harmony-gray-500) !important;
+  }
+  
+  /* Dark mode table styling */
+  table {
+    background-color: var(--harmony-gray-100) !important;
+  }
+  
+  th {
+    background-color: var(--harmony-gray-200) !important;
+    color: var(--harmony-gray-700) !important;
+    border-color: var(--harmony-gray-300) !important;
+  }
+  
+  td {
+    background-color: var(--harmony-gray-100) !important;
+    color: var(--harmony-gray-600) !important;
+    border-color: var(--harmony-gray-300) !important;
+  }
+  
+  /* Dark mode modals */
+  .modal-content {
+    background-color: var(--harmony-gray-100) !important;
+    color: var(--harmony-gray-700) !important;
+    border-color: var(--harmony-gray-300) !important;
+  }
+  
+  /* Dark mode sidebar enhancements */
+  .sidebar {
+    background-color: var(--harmony-gray-50) !important;
+    border-color: var(--harmony-gray-300) !important;
+  }
+  
+  /* Dark mode footer */
+  .fixed-footer-mobile {
+    background: var(--harmony-gradient-primary) !important;
+  }
+}

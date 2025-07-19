@@ -341,6 +341,143 @@
   }
 }
 
+/* Enhanced Dark Mode Analytics Styles */
+[data-theme="dark"] {
+  /* Dark mode analytics container */
+  .analytics-container {
+    background-color: var(--harmony-gray-50);
+    color: var(--harmony-gray-700);
+  }
+  
+  /* Dark mode analytics header */
+  .analytics-header {
+    background-color: var(--harmony-gray-100);
+    border-color: var(--harmony-gray-300);
+  }
+  
+  .analytics-header h2 {
+    color: var(--harmony-gray-800);
+    background: var(--harmony-gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  /* Dark mode stats grid */
+  .stats-grid {
+    gap: 25px;
+  }
+  
+  .stat-item, .stat-card {
+    background-color: var(--harmony-gray-100);
+    border-color: var(--harmony-gray-300);
+    color: var(--harmony-gray-700);
+  }
+  
+  .stat-value {
+    color: var(--harmony-primary);
+  }
+  
+  .stat-label {
+    color: var(--harmony-gray-500);
+  }
+  
+  /* Dark mode charts */
+  .chart-container {
+    background-color: var(--harmony-gray-100);
+    border-color: var(--harmony-gray-300);
+  }
+  
+  .chart-container h3 {
+    color: var(--harmony-gray-800);
+  }
+  
+  /* Dark mode task list */
+  .task-item {
+    border-color: var(--harmony-gray-300);
+    background-color: var(--harmony-gray-100);
+  }
+  
+  .task-item:hover {
+    background-color: var(--harmony-gray-200);
+  }
+  
+  .task-title {
+    color: var(--harmony-gray-700);
+  }
+  
+  .task-type {
+    background-color: rgba(76, 90, 247, 0.2);
+    color: #a5b4fc;
+  }
+  
+  .task-score {
+    color: #86efac;
+  }
+  
+  /* Dark mode class statistics */
+  .class-stats {
+    background-color: var(--harmony-gray-200);
+    border-color: var(--harmony-gray-300);
+  }
+  
+  .perf-item {
+    background-color: var(--harmony-gray-200);
+    border-color: var(--harmony-primary);
+  }
+  
+  .perf-item strong {
+    color: var(--harmony-gray-700);
+  }
+  
+  /* Dark mode additional stats */
+  .stat-section {
+    background-color: var(--harmony-gray-100);
+    border-color: var(--harmony-gray-300);
+  }
+  
+  .stat-section h3 {
+    color: var(--harmony-gray-800);
+  }
+  
+  /* Dark mode error message */
+  .error-message {
+    background-color: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+  }
+  
+  .error-message h3 {
+    color: #f87171;
+  }
+  
+  .error-message button {
+    background: var(--harmony-gradient-primary);
+    color: white;
+  }
+  
+  .error-message button:hover {
+    background: var(--harmony-gradient-primary);
+    opacity: 0.9;
+  }
+  
+  /* Dark mode alert styles */
+  .alert-danger {
+    background-color: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+  }
+  
+  .alert button {
+    color: var(--harmony-gray-500);
+  }
+  
+  .alert button:hover {
+    background-color: var(--harmony-gray-200);
+    color: var(--harmony-gray-700);
+  }
+}
+
 /* Custom Recharts Tooltips */
 .recharts-tooltip-wrapper {
   border-radius: 6px;
