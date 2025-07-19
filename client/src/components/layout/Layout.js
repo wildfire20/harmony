@@ -132,7 +132,7 @@ const Layout = () => {
             </div>
             <div className={`flex-shrink-0 flex border-t p-4 ${
               theme === 'dark' ? 'border-gray-700' : 'border-gray-200'
-            }`}>
+            } ${isMobile ? 'mb-20' : ''}`}>
               <div className="flex items-center w-full">
                 <div className="h-12 w-12 bg-gradient-primary rounded-full flex items-center justify-center">
                   <User className="h-6 w-6 text-white" />
@@ -250,8 +250,8 @@ const Layout = () => {
             </div>
           </div>
           
-          <main className="flex-1 relative overflow-y-auto focus:outline-none" style={{ paddingBottom: isMobile ? '80px' : '0' }}>
-            <div className={`${isMobile ? 'py-2 px-3' : 'py-4 px-2'} sm:py-6 sm:px-4`}>
+          <main className="flex-1 relative overflow-y-auto focus:outline-none" style={{ paddingBottom: isMobile ? '100px' : '0' }}>
+            <div className={`${isMobile ? 'py-2 px-3 pb-6' : 'py-4 px-2'} sm:py-6 sm:px-4`}>
               <div className="max-w-7xl mx-auto">
                 <Outlet />
               </div>
