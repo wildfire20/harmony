@@ -22,12 +22,15 @@ import { useAuth } from '../../contexts/AuthContext';
 import HarmonyLogo from '../common/HarmonyLogo';
 import { ThemeToggle, useTheme, ThemedLayout } from '../common/ThemeProvider';
 import { StatusIndicator, DepartmentBadge, AchievementBadge } from '../common/BrandingElements';
+import { useResponsive, useTouchDevice } from '../../hooks/useResponsive';
 
 const Layout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, logout, isAdmin } = useAuth();
   const { theme } = useTheme();
   const navigate = useNavigate();
+  const { isMobile, isTablet } = useResponsive();
+  const isTouch = useTouchDevice();
 
   const handleLogout = async () => {
     await logout();
@@ -56,7 +59,9 @@ const Layout = () => {
         navigate(item.href);
         if (onClick) onClick();
       }}
-      className={`group flex items-center px-3 py-3 text-base font-medium rounded-lg w-full text-left transition-all duration-300 min-h-12 touch-manipulation
+      className={`group flex items-center px-3 py-3 text-base font-medium rounded-lg w-full text-left transition-all duration-300 touch-manipulation
+        ${isMobile ? 'min-h-14 text-lg' : 'min-h-12'}
+        ${isTouch ? 'min-h-12 min-w-12' : ''}
         ${theme === 'dark' 
           ? 'text-gray-300 hover:bg-gray-700 hover:text-white' 
           : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
@@ -97,7 +102,11 @@ const Layout = () => {
       <div className="h-screen flex overflow-hidden">
         {/* Mobile menu */}
         <div className={`fixed inset-0 flex z-40 md:hidden ${sidebarOpen ? '' : 'hidden'}`}>
-          <div className="fixed inset-0 bg-gray-600 bg-opacity-75" onClick={() => setSidebarOpen(false)} />
+          <div 
+            className="fixed inset-0 bg-gray-600 bg-opacity-75" 
+            onClick={() => setSidebarOpen(false)}
+            onTouchStart={() => setSidebarOpen(false)}
+          />
           <div className={`relative flex-1 flex flex-col max-w-xs w-full ${
             theme === 'dark' ? 'bg-gray-800' : 'bg-white'
           }`}>
@@ -106,6 +115,7 @@ const Layout = () => {
                 className="ml-1 flex items-center justify-center h-12 w-12 rounded-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white hover:bg-gray-600 hover:bg-opacity-50 transition-colors duration-200 touch-manipulation"
                 onClick={() => setSidebarOpen(false)}
                 aria-label="Close navigation menu"
+                style={{ minHeight: '48px', minWidth: '48px' }}
               >
                 <X className="h-6 w-6 text-white" />
               </button>
@@ -229,15 +239,19 @@ const Layout = () => {
                 } focus:outline-none focus:ring-2 focus:ring-inset focus:ring-harmony-primary`}
                 onClick={() => setSidebarOpen(true)}
                 aria-label="Open navigation menu"
+                style={{ minHeight: '48px', minWidth: '48px' }}
               >
                 <Menu className="h-6 w-6" />
               </button>
+              <div className="flex items-center space-x-2">
+                <HarmonyLogo size={32} showText={true} theme={theme} />
+              </div>
               <ThemeToggle />
             </div>
           </div>
           
           <main className="flex-1 relative overflow-y-auto focus:outline-none">
-            <div className="py-4 px-2 sm:py-6 sm:px-4">
+            <div className={`${isMobile ? 'py-2 px-3' : 'py-4 px-2'} sm:py-6 sm:px-4`}>
               <div className="max-w-7xl mx-auto">
                 <Outlet />
               </div>

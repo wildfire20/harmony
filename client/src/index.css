@@ -4,6 +4,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import mobile-responsive styles */
+@import './mobile-responsive.css';
+
 /* Harmony Learning Institute - Official Brand Colors */
 :root {
   /* Primary Brand Colors - Matching Official Logo */
