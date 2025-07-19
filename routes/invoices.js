@@ -671,22 +671,20 @@ router.post('/process-bank-statement', [
         // Update invoice - only update fields we can modify (not computed columns)
         console.log(`Updating invoice ${invoice.id} with status: ${newStatus}, amount_paid: ${amountPaid} (type: ${typeof amountPaid})`);
         
-        // Ensure amountPaid and newOutstanding are proper numbers with 2 decimal places
+        // Ensure amountPaid is a proper number with 2 decimal places
         const properAmountPaid = Math.round(amountPaid * 100) / 100;
-        const properOutstanding = Math.round(newOutstanding * 100) / 100;
         const properOverpaid = Math.round((overpaidAmount || 0) * 100) / 100;
-        console.log(`Properly formatted values - amount_paid: ${properAmountPaid}, outstanding: ${properOutstanding}, overpaid: ${properOverpaid}`);
+        console.log(`Properly formatted values - amount_paid: ${properAmountPaid}, overpaid: ${properOverpaid}`);
         
         const updateResult = await client.query(`
           UPDATE invoices SET 
             status = $1, 
             amount_paid = $2::DECIMAL(10,2), 
-            outstanding_balance = $3::DECIMAL(10,2),
-            overpaid_amount = $4::DECIMAL(10,2),
+            overpaid_amount = $3::DECIMAL(10,2),
             updated_at = NOW()
-          WHERE id = $5
+          WHERE id = $4
           RETURNING id, status, amount_paid, outstanding_balance, overpaid_amount
-        `, [newStatus, properAmountPaid, properOutstanding, properOverpaid, invoice.id]);
+        `, [newStatus, properAmountPaid, properOverpaid, invoice.id]);
         
         console.log('Invoice update result:', updateResult.rows[0]);
 
