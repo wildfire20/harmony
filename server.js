@@ -424,7 +424,6 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/s3-health', s3HealthRoutes);
 app.use('/api/invoices', invoiceRoutes);
-app.use('/api/fix', fixOwnershipRoutes);
 app.use('/api/downloads', require('./routes/downloads'));
 app.use('/api', s3HealthRoutes);
 
