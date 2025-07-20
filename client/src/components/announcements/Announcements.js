@@ -393,13 +393,20 @@ const Announcements = () => {
                       <div>
                         By: {announcement.author_first_name} {announcement.author_last_name}
                       </div>
+                      {/* Debug info for teachers */}
+                      {user?.role === 'teacher' && (
+                        <div className="text-xs text-blue-500">
+                          ID: {announcement.created_by} | You: {user.id} | Can Delete: {canDeleteAnnouncement(announcement) ? 'Yes' : 'No'}
+                        </div>
+                      )}
                     </div>
                   </div>
                   {canDeleteAnnouncement(announcement) && (
-                    <div className="ml-4">
+                    <div className="ml-4 flex-shrink-0">
                       <button
                         onClick={() => setShowDeleteConfirm(announcement.id)}
-                        className="mobile-btn-icon danger p-2 text-gray-400 hover:text-red-500 rounded-full hover:bg-gray-100"
+                        className="p-2 text-red-400 hover:text-red-600 rounded-full hover:bg-red-50 transition-colors duration-200 border border-red-200 hover:border-red-300"
+                        title="Delete announcement"
                       >
                         <Trash2 className="h-5 w-5" />
                       </button>
