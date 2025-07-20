@@ -37,6 +37,7 @@ const calendarRoutes = require('./routes/calendar');
 const analyticsRoutes = require('./routes/analytics');
 const s3HealthRoutes = require('./routes/s3-health');
 const invoiceRoutes = require('./routes/invoices');
+const fixOwnershipRoutes = require('./routes/fix-ownership');
 
 // Import database
 const db = require('./config/database');
@@ -422,7 +423,9 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/s3-health', s3HealthRoutes);
 app.use('/api/invoices', invoiceRoutes);
+app.use('/api/fix', fixOwnershipRoutes);
 app.use('/api/downloads', require('./routes/downloads'));
 app.use('/api', s3HealthRoutes);
 
