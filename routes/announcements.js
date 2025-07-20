@@ -12,7 +12,7 @@ router.get('/', authenticate, async (req, res) => {
     
     // Build query based on user role
     let query = `
-      SELECT a.id, a.title, a.content, a.priority, a.target_audience, a.created_at, a.updated_at,
+      SELECT a.id, a.title, a.content, a.priority, a.target_audience, a.created_by, a.created_at, a.updated_at,
              u.first_name as author_first_name, u.last_name as author_last_name,
              g.name as grade_name, c.name as class_name
       FROM announcements a
@@ -87,7 +87,7 @@ router.get('/grade/:gradeId/class/:classId', [
 
     // Build query with target audience filtering
     let query = `
-      SELECT a.id, a.title, a.content, a.priority, a.target_audience, a.created_at, a.updated_at,
+      SELECT a.id, a.title, a.content, a.priority, a.target_audience, a.created_by, a.created_at, a.updated_at,
              u.first_name as author_first_name, u.last_name as author_last_name,
              g.name as grade_name, c.name as class_name
       FROM announcements a
@@ -140,7 +140,7 @@ router.get('/:id', [
     const { id } = req.params;
 
     const result = await db.query(`
-      SELECT a.id, a.title, a.content, a.priority, a.target_audience, a.created_at, a.updated_at,
+      SELECT a.id, a.title, a.content, a.priority, a.target_audience, a.created_by, a.created_at, a.updated_at,
              a.grade_id, a.class_id,
              u.first_name as author_first_name, u.last_name as author_last_name,
              g.name as grade_name, c.name as class_name
@@ -362,7 +362,7 @@ router.get('/recent/:limit?', authenticate, async (req, res) => {
     const limit = parseInt(req.params.limit) || 5;
 
     let query = `
-      SELECT a.id, a.title, a.content, a.priority, a.target_audience, a.created_at,
+      SELECT a.id, a.title, a.content, a.priority, a.target_audience, a.created_by, a.created_at,
              u.first_name as author_first_name, u.last_name as author_last_name,
              g.name as grade_name, c.name as class_name
       FROM announcements a

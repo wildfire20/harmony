@@ -237,25 +237,6 @@ const Announcements = () => {
         )}
       </div>
 
-      {/* Teacher help message */}
-      {user?.role === 'teacher' && (
-        <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-          <div className="flex">
-            <MessageSquare className="h-5 w-5 text-blue-400 mt-0.5 mr-2" />
-            <div>
-              <h3 className="text-sm font-medium text-blue-800">Teacher Delete Functionality</h3>
-              <p className="mt-1 text-sm text-blue-700">
-                You can only delete announcements that <strong>you</strong> created. Create a new announcement to test the delete functionality, 
-                or you'll see red delete buttons on announcements you've created.
-              </p>
-              <p className="mt-2 text-xs text-blue-600">
-                Debug: Your user ID is <strong>{user.id}</strong>. You can delete announcements where created_by matches this ID.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Create Announcement Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
