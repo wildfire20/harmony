@@ -248,6 +248,9 @@ const Announcements = () => {
                 You can only delete announcements that <strong>you</strong> created. Create a new announcement to test the delete functionality, 
                 or you'll see red delete buttons on announcements you've created.
               </p>
+              <p className="mt-2 text-xs text-blue-600">
+                Debug: Your user ID is <strong>{user.id}</strong>. You can delete announcements where created_by matches this ID.
+              </p>
             </div>
           </div>
         </div>
@@ -410,6 +413,11 @@ const Announcements = () => {
                         By: {announcement.author_first_name} {announcement.author_last_name}
                         {user?.role === 'teacher' && announcement.created_by === user.id && (
                           <span className="ml-2 text-green-600 text-xs font-medium">(You can delete this)</span>
+                        )}
+                        {user?.role === 'teacher' && (
+                          <span className="ml-2 text-xs text-gray-400">
+                            [Creator ID: {announcement.created_by}]
+                          </span>
                         )}
                       </div>
                     </div>
