@@ -237,6 +237,22 @@ const Announcements = () => {
         )}
       </div>
 
+      {/* Teacher help message */}
+      {user?.role === 'teacher' && (
+        <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+          <div className="flex">
+            <MessageSquare className="h-5 w-5 text-blue-400 mt-0.5 mr-2" />
+            <div>
+              <h3 className="text-sm font-medium text-blue-800">Teacher Delete Functionality</h3>
+              <p className="mt-1 text-sm text-blue-700">
+                You can only delete announcements that <strong>you</strong> created. Create a new announcement to test the delete functionality, 
+                or you'll see red delete buttons on announcements you've created.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Create Announcement Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
@@ -392,13 +408,10 @@ const Announcements = () => {
                       </div>
                       <div>
                         By: {announcement.author_first_name} {announcement.author_last_name}
+                        {user?.role === 'teacher' && announcement.created_by === user.id && (
+                          <span className="ml-2 text-green-600 text-xs font-medium">(You can delete this)</span>
+                        )}
                       </div>
-                      {/* Debug info for teachers */}
-                      {user?.role === 'teacher' && (
-                        <div className="text-xs text-blue-500">
-                          ID: {announcement.created_by} | You: {user.id} | Can Delete: {canDeleteAnnouncement(announcement) ? 'Yes' : 'No'}
-                        </div>
-                      )}
                     </div>
                   </div>
                   {canDeleteAnnouncement(announcement) && (
@@ -410,6 +423,15 @@ const Announcements = () => {
                       >
                         <Trash2 className="h-5 w-5" />
                       </button>
+                    </div>
+                  )}
+                  
+                  {/* Message for teachers when they can't delete */}
+                  {user?.role === 'teacher' && !canDeleteAnnouncement(announcement) && (
+                    <div className="ml-4 flex-shrink-0">
+                      <div className="p-2 text-gray-300" title="You can only delete announcements you created">
+                        <Trash2 className="h-5 w-5" />
+                      </div>
                     </div>
                   )}
                 </div>
