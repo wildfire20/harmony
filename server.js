@@ -37,7 +37,6 @@ const calendarRoutes = require('./routes/calendar');
 const analyticsRoutes = require('./routes/analytics');
 const s3HealthRoutes = require('./routes/s3-health');
 const invoiceRoutes = require('./routes/invoices');
-const fixOwnershipRoutes = require('./routes/fix-ownership');
 
 // Import database
 const db = require('./config/database');
