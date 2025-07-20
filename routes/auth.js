@@ -240,11 +240,33 @@ router.post('/logout', authenticate, (req, res) => {
 });
 
 // Verify token
-router.get('/verify', authenticate, (req, res) => {
-  res.json({ 
-    valid: true, 
-    user: req.user 
-  });
+router.get('/verify', authenticate, async (req, res) => {
+  try {
+    let userData = { ...req.user };
+    
+    // Get teacher assignments if user is a teacher
+    if (userData.role === 'teacher') {
+      const assignmentResult = await db.query(`
+        SELECT ta.grade_id, ta.class_id, g.name as grade_name, c.name as class_name
+        FROM teacher_assignments ta
+        JOIN grades g ON ta.grade_id = g.id
+        JOIN classes c ON ta.class_id = c.id
+        WHERE ta.teacher_id = $1
+      `, [userData.id]);
+      userData.assignments = assignmentResult.rows;
+    }
+
+    res.json({ 
+      valid: true, 
+      user: userData 
+    });
+  } catch (error) {
+    console.error('Error fetching teacher assignments in verify:', error);
+    res.json({ 
+      valid: true, 
+      user: req.user 
+    });
+  }
 });
 
 module.exports = router;
