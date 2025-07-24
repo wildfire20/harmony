@@ -432,6 +432,54 @@ router.put('/teachers/:id', [
   }
 });
 
+// Delete teacher
+router.delete('/teachers/:id', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const client = await db.getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // First, delete teacher assignments
+      await client.query('DELETE FROM teacher_assignments WHERE teacher_id = $1', [id]);
+
+      // Then delete the teacher user record
+      const result = await client.query(`
+        DELETE FROM users 
+        WHERE id = $1 AND role = 'teacher'
+        RETURNING id, email, first_name, last_name
+      `, [id]);
+
+      if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Teacher not found' });
+      }
+
+      await client.query('COMMIT');
+
+      res.json({
+        message: 'Teacher deleted successfully',
+        teacher: result.rows[0]
+      });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+  } catch (error) {
+    console.error('Delete teacher error:', error);
+    res.status(500).json({ message: 'Server error deleting teacher' });
+  }
+});
+
 // Get all students with pagination and filters
 router.get('/students', [
   authenticate,
