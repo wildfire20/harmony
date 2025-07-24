@@ -6,7 +6,7 @@
 
     <!-- Homepage -->
     <url>
-        <loc>https://harmony-learning.edu/</loc>
+        <loc>https://harmonylearning.co.za/</loc>
         <lastmod>2025-07-24</lastmod>
         <changefreq>daily</changefreq>
         <priority>1.0</priority>
@@ -14,7 +14,7 @@
 
     <!-- Login Page -->
     <url>
-        <loc>https://harmony-learning.edu/login</loc>
+        <loc>https://harmonylearning.co.za/login</loc>
         <lastmod>2025-07-24</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.8</priority>
@@ -22,7 +22,7 @@
 
     <!-- Dashboard -->
     <url>
-        <loc>https://harmony-learning.edu/dashboard</loc>
+        <loc>https://harmonylearning.co.za/dashboard</loc>
         <lastmod>2025-07-24</lastmod>
         <changefreq>daily</changefreq>
         <priority>0.9</priority>
@@ -30,7 +30,7 @@
 
     <!-- Announcements -->
     <url>
-        <loc>https://harmony-learning.edu/announcements</loc>
+        <loc>https://harmonylearning.co.za/announcements</loc>
         <lastmod>2025-07-24</lastmod>
         <changefreq>daily</changefreq>
         <priority>0.8</priority>
@@ -38,7 +38,7 @@
 
     <!-- Tasks -->
     <url>
-        <loc>https://harmony-learning.edu/tasks</loc>
+        <loc>https://harmonylearning.co.za/tasks</loc>
         <lastmod>2025-07-24</lastmod>
         <changefreq>daily</changefreq>
         <priority>0.8</priority>
@@ -46,7 +46,7 @@
 
     <!-- Quizzes -->
     <url>
-        <loc>https://harmony-learning.edu/quizzes</loc>
+        <loc>https://harmonylearning.co.za/quizzes</loc>
         <lastmod>2025-07-24</lastmod>
         <changefreq>weekly</changefreq>
         <priority>0.7</priority>
@@ -54,7 +54,7 @@
 
     <!-- Documents -->
     <url>
-        <loc>https://harmony-learning.edu/documents</loc>
+        <loc>https://harmonylearning.co.za/documents</loc>
         <lastmod>2025-07-24</lastmod>
         <changefreq>weekly</changefreq>
         <priority>0.7</priority>
@@ -62,7 +62,7 @@
 
     <!-- Calendar -->
     <url>
-        <loc>https://harmony-learning.edu/calendar</loc>
+        <loc>https://harmonylearning.co.za/calendar</loc>
         <lastmod>2025-07-24</lastmod>
         <changefreq>daily</changefreq>
         <priority>0.7</priority>
@@ -70,7 +70,7 @@
 
     <!-- Profile -->
     <url>
-        <loc>https://harmony-learning.edu/profile</loc>
+        <loc>https://harmonylearning.co.za/profile</loc>
         <lastmod>2025-07-24</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.6</priority>
@@ -78,7 +78,7 @@
 
     <!-- Analytics -->
     <url>
-        <loc>https://harmony-learning.edu/analytics</loc>
+        <loc>https://harmonylearning.co.za/analytics</loc>
         <lastmod>2025-07-24</lastmod>
         <changefreq>weekly</changefreq>
         <priority>0.6</priority>
@@ -86,7 +86,7 @@
 
     <!-- Payments -->
     <url>
-        <loc>https://harmony-learning.edu/payments</loc>
+        <loc>https://harmonylearning.co.za/payments</loc>
         <lastmod>2025-07-24</lastmod>
         <changefreq>weekly</changefreq>
         <priority>0.6</priority>

@@ -8,7 +8,7 @@
             <TileColor>#ec4899</TileColor>
         </tile>
         <notification>
-            <polling-uri src="https://harmony-learning.edu/notifications/feed/"/>
+            <polling-uri src="https://harmonylearning.co.za/notifications/feed/"/>
             <frequency>30</frequency>
             <cycle>1</cycle>
         </notification>

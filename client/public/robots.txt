@@ -1,5 +1,5 @@
 # Robots.txt for Harmony Learning Institute
-# https://harmony-learning.edu/robots.txt
+# https://harmonylearning.co.za/robots.txt
 
 User-agent: *
 Allow: /
@@ -12,7 +12,7 @@ Disallow: /private/
 Disallow: /temp/
 
 # Sitemap location
-Sitemap: https://harmony-learning.edu/sitemap.xml
+Sitemap: https://harmonylearning.co.za/sitemap.xml
 
 # Crawl delay to be respectful to server resources
 Crawl-delay: 1
