@@ -1,15 +1,78 @@
 {
   "short_name": "Harmony Learning",
-  "name": "Harmony Learning Institute",
+  "name": "Harmony Learning Institute - Excellence in Education",
+  "description": "Comprehensive school management system providing excellence in education with advanced learning platform features.",
+  "categories": ["education", "productivity", "business"],
+  "lang": "en-US",
+  "dir": "ltr",
+  "scope": "/",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#ec4899",
+  "background_color": "#ffffff",
   "icons": [
     {
       "src": "favicon.ico",
       "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/x-icon"
+      "type": "image/x-icon",
+      "purpose": "any"
+    },
+    {
+      "src": "logo192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "logo512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
     }
   ],
-  "start_url": ".",
-  "display": "standalone",
-  "theme_color": "#ec4899",
-  "background_color": "#ffffff"
+  "screenshots": [
+    {
+      "src": "screenshot-wide.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Harmony Learning Dashboard"
+    },
+    {
+      "src": "screenshot-narrow.png",
+      "sizes": "750x1334",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Harmony Learning Mobile View"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "Go to main dashboard",
+      "url": "/dashboard",
+      "icons": [{ "src": "icon-dashboard.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Announcements",
+      "short_name": "Announcements",
+      "description": "View latest announcements",
+      "url": "/announcements",
+      "icons": [{ "src": "icon-announcements.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Tasks",
+      "short_name": "Tasks",
+      "description": "Manage tasks and assignments",
+      "url": "/tasks",
+      "icons": [{ "src": "icon-tasks.png", "sizes": "96x96" }]
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false,
+  "edge_side_panel": {
+    "preferred_width": 400
+  }
 }

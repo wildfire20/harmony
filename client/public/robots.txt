@@ -1,0 +1,39 @@
+# Robots.txt for Harmony Learning Institute
+# https://harmony-learning.edu/robots.txt
+
+User-agent: *
+Allow: /
+
+# Allow all search engines to crawl the site
+Disallow: /api/
+Disallow: /admin/
+Disallow: /*.json$
+Disallow: /private/
+Disallow: /temp/
+
+# Sitemap location
+Sitemap: https://harmony-learning.edu/sitemap.xml
+
+# Crawl delay to be respectful to server resources
+Crawl-delay: 1
+
+# Popular search engines
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 1
+
+User-agent: Bingbot
+Allow: /
+Crawl-delay: 1
+
+User-agent: Slurp
+Allow: /
+Crawl-delay: 1
+
+# Block specific paths for security
+User-agent: *
+Disallow: /config/
+Disallow: /logs/
+Disallow: /.env
+Disallow: /node_modules/
+Disallow: /.git/
