@@ -369,9 +369,11 @@ async function processTransactions(transactions, userId) {
       
       // Strategy 1: Exact match
       invoiceResult = await client.query(`
-        SELECT * FROM invoices 
-        WHERE UPPER(reference_number) = UPPER($1) AND status IN ('Unpaid', 'Partial')
-        ORDER BY due_date ASC
+        SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
+        FROM invoices i
+        LEFT JOIN users u ON i.student_id = u.id
+        WHERE UPPER(i.reference_number) = UPPER($1) AND i.status IN ('Unpaid', 'Partial')
+        ORDER BY i.due_date ASC
         LIMIT 1
       `, [transaction.reference]);
 
@@ -382,9 +384,11 @@ async function processTransactions(transactions, userId) {
         console.log(`Trying padded reference: "${paddedRef}"`);
         
         invoiceResult = await client.query(`
-          SELECT * FROM invoices 
-          WHERE UPPER(reference_number) = UPPER($1) AND status IN ('Unpaid', 'Partial')
-          ORDER BY due_date ASC
+          SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
+          FROM invoices i
+          LEFT JOIN users u ON i.student_id = u.id
+          WHERE UPPER(i.reference_number) = UPPER($1) AND i.status IN ('Unpaid', 'Partial')
+          ORDER BY i.due_date ASC
           LIMIT 1
         `, [paddedRef]);
       }
@@ -396,9 +400,11 @@ async function processTransactions(transactions, userId) {
           console.log(`Trying trimmed reference: "${trimmedRef}"`);
           
           invoiceResult = await client.query(`
-            SELECT * FROM invoices 
-            WHERE UPPER(reference_number) = UPPER($1) AND status IN ('Unpaid', 'Partial')
-            ORDER BY due_date ASC
+            SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
+            FROM invoices i
+            LEFT JOIN users u ON i.student_id = u.id
+            WHERE UPPER(i.reference_number) = UPPER($1) AND i.status IN ('Unpaid', 'Partial')
+            ORDER BY i.due_date ASC
             LIMIT 1
           `, [trimmedRef]);
         }
@@ -409,9 +415,11 @@ async function processTransactions(transactions, userId) {
         console.log(`Trying partial match for: "${transaction.reference}"`);
         
         invoiceResult = await client.query(`
-          SELECT * FROM invoices 
-          WHERE UPPER(reference_number) LIKE UPPER($1) AND status IN ('Unpaid', 'Partial')
-          ORDER BY due_date ASC
+          SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
+          FROM invoices i
+          LEFT JOIN users u ON i.student_id = u.id
+          WHERE UPPER(i.reference_number) LIKE UPPER($1) AND i.status IN ('Unpaid', 'Partial')
+          ORDER BY i.due_date ASC
           LIMIT 1
         `, [`%${transaction.reference}%`]);
       }
@@ -453,12 +461,11 @@ async function processTransactions(transactions, userId) {
       console.log(`Transaction amount: ${transaction.amount}`);
 
       // Determine payment status and update invoice
-      let newStatus, amountPaid, newOutstanding, overpaidAmount;
-      let resultCategory = null;
-
       const currentAmountPaid = parseFloat(invoice.amount_paid || 0);
       const transactionAmount = parseFloat(transaction.amount);
       const outstandingAmountNum = parseFloat(outstandingAmount);
+
+      let newStatus, amountPaid, newOutstanding, overpaidAmount, resultCategory;
 
       if (transactionAmount >= outstandingAmountNum) {
         if (transactionAmount === outstandingAmountNum) {
@@ -471,8 +478,20 @@ async function processTransactions(transactions, userId) {
           newStatus = 'Overpaid';
           amountPaid = currentAmountPaid + transactionAmount;
           newOutstanding = 0;
-          overpaidAmount = transactionAmount - outstandingAmountNum;
+          // FIXED: Calculate overpaid amount based on total amount paid vs total amount due
+          overpaidAmount = amountPaid - parseFloat(invoice.amount_due);
           resultCategory = 'overpaid';
+          
+          // Enhanced logging for overpaid transactions
+          console.log(`🔄 OVERPAID PROCESSING for ${transaction.reference}:`);
+          console.log(`   Student: ${invoice.first_name || 'N/A'} ${invoice.last_name || 'N/A'} (${invoice.student_number})`);
+          console.log(`   Transaction Amount: R${transactionAmount}`);
+          console.log(`   Outstanding Amount: R${outstandingAmountNum}`);
+          console.log(`   Total Amount Due: R${invoice.amount_due}`);
+          console.log(`   Previous Amount Paid: R${currentAmountPaid}`);
+          console.log(`   New Total Amount Paid: R${amountPaid}`);
+          console.log(`   Corrected Overpaid Amount: R${overpaidAmount}`);
+          console.log(`   Transaction Description: "${transaction.description}"`);
         }
       } else {
         newStatus = 'Partial';
@@ -482,21 +501,45 @@ async function processTransactions(transactions, userId) {
         resultCategory = 'partial';
       }
 
-      // Update invoice
-      console.log(`Updating invoice ${invoice.id} with status: ${newStatus}, amount_paid: ${amountPaid}`);
+      // Update invoice with proper handling for overpaid amounts
+      console.log(`Updating invoice ${invoice.id} with status: ${newStatus}, amount_paid: ${amountPaid}, overpaid: ${overpaidAmount}`);
       
       const properAmountPaid = Math.round(amountPaid * 100) / 100;
+      const properNewOutstanding = Math.round(newOutstanding * 100) / 100;
+      const properOverpaidAmount = Math.round(overpaidAmount * 100) / 100;
       
-      const updateResult = await client.query(`
+      // Always try to update with overpaid_amount, create column if needed
+      let updateQuery = `
         UPDATE invoices SET 
           status = $1, 
           amount_paid = $2::DECIMAL(10,2),
+          outstanding_balance = $3::DECIMAL(10,2),
+          overpaid_amount = $4::DECIMAL(10,2),
           updated_at = NOW()
-        WHERE id = $3
-        RETURNING id, status, amount_paid, outstanding_balance, overpaid_amount
-      `, [newStatus, properAmountPaid, invoice.id]);
+        WHERE id = $5
+        RETURNING id, status, amount_paid, outstanding_balance, overpaid_amount, reference_number
+      `;
+      let updateParams = [newStatus, properAmountPaid, properNewOutstanding, properOverpaidAmount, invoice.id];
       
-      console.log('Invoice update result:', updateResult.rows[0]);
+      try {
+        const updateResult = await client.query(updateQuery, updateParams);
+        console.log('✅ Invoice updated successfully:', updateResult.rows[0]);
+      } catch (error) {
+        if (error.message.includes('overpaid_amount') || error.code === '42703') {
+          // Column doesn't exist, create it first
+          console.log('⚡ Creating overpaid_amount column...');
+          await client.query(`
+            ALTER TABLE invoices 
+            ADD COLUMN IF NOT EXISTS overpaid_amount DECIMAL(10,2) DEFAULT 0.00
+          `);
+          
+          // Retry the update
+          const updateResult = await client.query(updateQuery, updateParams);
+          console.log('✅ Invoice updated after creating column:', updateResult.rows[0]);
+        } else {
+          throw error; // Re-throw if it's a different error
+        }
+      }
 
       // Record transaction in payment_transactions table (matching existing schema)
       const transactionResult = await client.query(`
@@ -519,20 +562,89 @@ async function processTransactions(transactions, userId) {
       await client.query('COMMIT');
       console.log(`Successfully processed transaction for ${transaction.reference}`);
 
-      // Add to results
+      // Enhanced result data with comprehensive student and invoice information
+      const resultData = {
+        ...transaction,
+        invoice: {
+          id: invoice.id,
+          reference_number: invoice.reference_number,
+          student_id: invoice.student_id,
+          student_number: invoice.student_number || invoice.user_student_number,
+          original_amount: invoice.amount_due,
+          amount_paid: properAmountPaid,
+          outstanding_balance: properNewOutstanding,
+          overpaid_amount: properOverpaidAmount,
+          status: newStatus
+        },
+        student: {
+          id: invoice.student_id,
+          student_number: invoice.student_number || invoice.user_student_number,
+          first_name: invoice.first_name || 'Unknown',
+          last_name: invoice.last_name || 'Student',
+          name: `${invoice.first_name || 'Unknown'} ${invoice.last_name || 'Student'}`.trim()
+        },
+        processing: {
+          matched_amount: Math.min(transaction.amount, outstandingAmount),
+          transaction_amount: transaction.amount,
+          previous_balance: outstandingAmount,
+          new_balance: properNewOutstanding,
+          overpaid_amount: properOverpaidAmount
+        },
+        bank_details: {
+          description: transaction.description,
+          reference_extracted: transaction.reference,
+          amount: transaction.amount,
+          date: transaction.date
+        }
+      };
+
+      // Add to results with enhanced data
       if (resultCategory === 'matched') {
-        results.matched.push({ ...transaction, invoice: invoice.reference_number });
+        results.matched.push(resultData);
       } else if (resultCategory === 'overpaid') {
-        results.overpaid.push({ 
-          ...transaction, 
-          invoice: invoice.reference_number,
-          overpaidAmount 
+        const overpaidResult = { 
+          ...resultData,
+          overpaid_amount: properOverpaidAmount,
+          processing: {
+            ...resultData.processing,
+            overpaid_amount: properOverpaidAmount,
+            excess_payment: properOverpaidAmount,
+            payment_breakdown: {
+              transaction_amount: transaction.amount,
+              outstanding_was: outstandingAmount,
+              total_amount_due: invoice.amount_due,
+              total_amount_paid: properAmountPaid,
+              excess_amount: properOverpaidAmount
+            },
+            debug_info: {
+              invoice_reference: invoice.reference_number,
+              student_name: `${invoice.first_name || 'Unknown'} ${invoice.last_name || 'Student'}`,
+              student_number: invoice.student_number || invoice.user_student_number,
+              bank_description: transaction.description,
+              extracted_reference: transaction.reference,
+              calculation: `Total Paid: R${properAmountPaid} - Amount Due: R${invoice.amount_due} = R${properOverpaidAmount} overpaid`
+            }
+          }
+        };
+        
+        console.log(`📊 OVERPAID RESULT for ${invoice.reference_number}:`, {
+          student: `${invoice.first_name} ${invoice.last_name} (${invoice.student_number || invoice.user_student_number})`,
+          transaction_amount: transaction.amount,
+          outstanding_was: outstandingAmount,
+          overpaid_amount: properOverpaidAmount,
+          bank_description: transaction.description
         });
+        
+        results.overpaid.push(overpaidResult);
       } else if (resultCategory === 'partial') {
         results.partial.push({ 
-          ...transaction, 
-          invoice: invoice.reference_number,
-          remainingBalance: newOutstanding 
+          ...resultData,
+          remaining_balance: newOutstanding,
+          processing: {
+            ...resultData.processing,
+            remaining_balance: newOutstanding,
+            partial_amount: transaction.amount
+          }
         });
       }
 

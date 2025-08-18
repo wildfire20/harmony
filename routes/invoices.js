@@ -7,7 +7,6 @@ const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-const IntelligentCSVProcessor = require('../utils/IntelligentCSVProcessor');
 
 const router = express.Router();
 
@@ -310,7 +309,7 @@ router.get('/', [
   }
 });
 
-// Upload and process bank statement CSV with intelligent column detection
+// Upload and process bank statement CSV
 router.post('/process-bank-statement', [
   authenticate,
   authorize('admin', 'super_admin'),
@@ -326,39 +325,203 @@ router.post('/process-bank-statement', [
 
     console.log('Processing bank statement:', req.file.filename);
 
-    // Initialize the intelligent CSV processor
-    const csvProcessor = new IntelligentCSVProcessor(db);
-    
-    // Check if manual mapping was provided
-    const manualMapping = req.body.columnMapping ? JSON.parse(req.body.columnMapping) : null;
+    const transactions = [];
+    const errors = [];
+    const results = {
+      matched: [],
+      partial: [],
+      overpaid: [],
+      unmatched: [],
+      duplicates: [],
+      errors: []
+    };
 
-    let csvResult;
-    try {
-      // Process CSV with intelligent detection
-      csvResult = await csvProcessor.processCSV(req.file.path, manualMapping);
-    } catch (error) {
-      // Check if manual column mapping is needed
-      if (error.needsMapping) {
-        return res.status(200).json({
-          success: false,
-          needsMapping: true,
-          headers: error.headers,
-          detectedMapping: error.detectedMapping,
-          message: error.message,
-          uploadId: req.file.filename // Store filename for when mapping is provided
-        });
-      }
-      throw error;
-    }
+    // Parse CSV file with enhanced column detection
+    await new Promise((resolve, reject) => {
+      let headerProcessed = false;
+      let columnMapping = {};
+      
+      fs.createReadStream(req.file.path)
+        .pipe(csv())
+        .on('headers', (headers) => {
+          console.log('CSV Headers detected:', headers);
+          
+          // Create flexible column mapping
+          headers.forEach((header, index) => {
+            const normalizedHeader = header.toLowerCase().trim();
+            
+            // Map reference variations
+            if (normalizedHeader.includes('ref') || 
+                normalizedHeader.includes('student') || 
+                normalizedHeader.includes('number') ||
+                normalizedHeader === 'id') {
+              columnMapping.reference = header;
+            }
+            
+            // Map amount variations
+            if (normalizedHeader.includes('amount') || 
+                normalizedHeader.includes('value') || 
+                normalizedHeader.includes('sum') ||
+                normalizedHeader.includes('total') ||
+                normalizedHeader.includes('payment')) {
+              columnMapping.amount = header;
+            }
+            
+            // Map date variations
+            if (normalizedHeader.includes('date') || 
+                normalizedHeader.includes('time') ||
+                normalizedHeader.includes('when')) {
+              columnMapping.date = header;
+            }
+            
+            // Map description variations
+            if (normalizedHeader.includes('desc') || 
+                normalizedHeader.includes('note') || 
+                normalizedHeader.includes('comment') ||
+                normalizedHeader.includes('detail') ||
+                normalizedHeader.includes('memo')) {
+              columnMapping.description = header;
+            }
+          });
+          
+          console.log('Column mapping:', columnMapping);
+        })
+        .on('data', (row) => {
+          try {
+            // Skip empty rows
+            const rowValues = Object.values(row).filter(val => val && val.trim());
+            if (rowValues.length === 0) {
+              return;
+            }
+            
+            console.log('Processing row:', row);
+            
+            // Extract data using flexible mapping
+            let reference = '';
+            let amount = 0;
+            let date = null;
+            let description = '';
+            
+            // Try to find reference
+            if (columnMapping.reference) {
+              reference = row[columnMapping.reference];
+            } else {
+              // Fallback: look for any field that looks like a reference
+              const possibleRefs = Object.keys(row).filter(key => 
+                key.toLowerCase().includes('ref') || 
+                key.toLowerCase().includes('student') ||
+                key.toLowerCase().includes('number')
+              );
+              if (possibleRefs.length > 0) {
+                reference = row[possibleRefs[0]];
+              }
+            }
+            
+            // Try to find amount
+            if (columnMapping.amount) {
+              let amountStr = row[columnMapping.amount];
+              // Clean the amount string - remove commas, spaces, and currency symbols
+              amountStr = amountStr.toString().replace(/[,\s]/g, '').replace(/[^\d.-]/g, '');
+              amount = parseFloat(amountStr);
+              console.log(`Amount parsing: "${row[columnMapping.amount]}" -> "${amountStr}" -> ${amount}`);
+            } else {
+              // Fallback: look for any numeric field that could be amount
+              for (const [key, value] of Object.entries(row)) {
+                let cleanValue = value.toString().replace(/[,\s]/g, '').replace(/[^\d.-]/g, '');
+                const numValue = parseFloat(cleanValue);
+                if (!isNaN(numValue) && numValue > 0) {
+                  amount = numValue;
+                  console.log(`Fallback amount parsing: "${value}" -> "${cleanValue}" -> ${numValue}`);
+                  break;
+                }
+              }
+            }
+            
+            // Try to find date
+            if (columnMapping.date) {
+              date = new Date(row[columnMapping.date]);
+            } else {
+              // Fallback: look for any field that looks like a date
+              const possibleDates = Object.keys(row).filter(key => 
+                key.toLowerCase().includes('date') || 
+                key.toLowerCase().includes('time')
+              );
+              if (possibleDates.length > 0) {
+                date = new Date(row[possibleDates[0]]);
+              }
+            }
+            
+            // Description is optional
+            if (columnMapping.description) {
+              description = row[columnMapping.description] || '';
+            }
+            
+            // Clean and validate reference
+            reference = String(reference || '').trim();
+            
+            // If no clear reference found, try to extract from description
+            if (!reference && description) {
+              // Look for patterns like "Grade X", "Gr X", student names, etc.
+              const descLower = description.toLowerCase();
+              
+              // Try to extract student number patterns
+              const studentNumMatch = description.match(/\b\d{6,7}\b/); // 6-7 digit student numbers
+              if (studentNumMatch) {
+                reference = studentNumMatch[0];
+              }
+              // Try to extract grade references that might map to student numbers
+              else if (descLower.includes('grade') || descLower.includes('gr')) {
+                // Extract names before "Grade" or "Gr"
+                const nameMatch = description.match(/([A-Za-z\s]+)\s+(Grade?|Gr\.?)/i);
+                if (nameMatch) {
+                  reference = nameMatch[1].trim();
+                }
+              }
+              // Last resort: use the full description as reference for manual review
+              else {
+                reference = description.trim();
+              }
+            }
+            
+            // Validate transaction data
+            if (!reference) {
+              errors.push(`Missing reference in row: ${JSON.stringify(row)}`);
+              return;
+            }
+            
+            if (isNaN(amount) || amount <= 0) {
+              errors.push(`Invalid amount in row: ${JSON.stringify(row)}`);
+              return;
+            }
+            
+            if (!date || isNaN(date.getTime())) {
+              // Try current date as fallback
+              date = new Date();
+              console.log('Using current date as fallback for row:', row);
+            }
 
-    const { transactions, errors } = csvResult;
+            const transaction = {
+              reference,
+              amount,
+              date,
+              description: String(description || '').trim()
+            };
+            
+            console.log('Parsed transaction:', transaction);
+            transactions.push(transaction);
+            
+          } catch (error) {
+            console.error('Error parsing row:', error);
+            errors.push(`Error parsing row: ${JSON.stringify(row)} - ${error.message}`);
+          }
+        })
+        .on('end', resolve)
+        .on('error', reject);
+    });
 
     console.log(`Parsed ${transactions.length} transactions from CSV`);
     console.log('Sample transactions:', transactions.slice(0, 3));
-    
-    if (errors.length > 0) {
-      console.log('Parsing errors:', errors);
-    }
+    console.log('Parsing errors:', errors);
 
     if (transactions.length === 0) {
       return res.status(400).json({
@@ -373,16 +536,7 @@ router.post('/process-bank-statement', [
       });
     }
 
-    // Process transactions with existing invoice matching logic
-    const results = {
-      matched: [],
-      partial: [],
-      overpaid: [],
-      unmatched: [],
-      duplicates: [],
-      errors: []
-    };
-
+    // Process each transaction with better error handling
     console.log('Starting transaction processing...');
     
     for (const transaction of transactions) {
@@ -446,37 +600,23 @@ router.post('/process-bank-statement', [
           `, [trimmedRef]);
         }
 
-        // Try fuzzy matching on student names if reference looks like a name
-        if (invoiceResult.rows.length === 0 && transaction.reference.match(/[A-Za-z\s]{3,}/)) {
-          console.log(`Trying fuzzy name matching for: "${transaction.reference}"`);
-          
-          // Look for student with similar name
-          const nameSearch = await client.query(`
-            SELECT i.*, s.first_name, s.last_name 
-            FROM invoices i
-            JOIN students s ON i.student_id = s.id
-            WHERE (
-              LOWER(s.first_name || ' ' || s.last_name) LIKE LOWER($1) 
-              OR LOWER(s.last_name || ' ' || s.first_name) LIKE LOWER($1)
-              OR LOWER(s.first_name) LIKE LOWER($2)
-              OR LOWER(s.last_name) LIKE LOWER($2)
-            )
-            AND i.status IN ('Unpaid', 'Partial')
-            ORDER BY i.due_date ASC
-            LIMIT 1
-          `, [`%${transaction.reference}%`, `%${transaction.reference}%`]);
-          
-          if (nameSearch.rows.length > 0) {
-            invoiceResult = nameSearch;
-            console.log(`Found invoice by name matching: ${nameSearch.rows[0].first_name} ${nameSearch.rows[0].last_name}`);
-          }
+        // Debug: Show available references if no match found
+        if (invoiceResult.rows.length === 0) {
+          const availableRefs = await client.query(`
+            SELECT reference_number, status FROM invoices 
+            WHERE status IN ('Unpaid', 'Partial') 
+            LIMIT 10
+          `);
+          console.log('Available invoice references:', availableRefs.rows.map(r => r.reference_number));
         }
 
         if (invoiceResult.rows.length === 0) {
+          // For unmatched transactions, just count them (don't insert to DB due to NOT NULL constraints)
           console.log(`UNMATCHED: Transaction ${transaction.reference} - ${transaction.description}`);
           
           await client.query('COMMIT');
           
+          // Add to results AFTER successful commit
           results.unmatched.push({
             ...transaction,
             reason: 'No matching invoice found'
@@ -514,8 +654,9 @@ router.post('/process-bank-statement', [
             newStatus = 'Overpaid';
             amountPaid = currentAmountPaid + transactionAmount;
             newOutstanding = 0;
-            overpaidAmount = transactionAmount - outstandingAmountNum;
-            console.log(`OVERPAID: Payment of ${transactionAmount} exceeds outstanding ${outstandingAmountNum} by ${overpaidAmount} for invoice ${invoice.reference_number}`);
+            // FIXED: Calculate overpaid amount based on total amount paid vs total amount due
+            overpaidAmount = amountPaid - parseFloat(invoice.amount_due);
+            console.log(`OVERPAID: Total payment of ${amountPaid} exceeds amount due ${invoice.amount_due} by ${overpaidAmount} for invoice ${invoice.reference_number}`);
             resultCategory = 'overpaid';
           }
         } else {
