@@ -37,6 +37,7 @@ const calendarRoutes = require('./routes/calendar');
 const analyticsRoutes = require('./routes/analytics');
 const s3HealthRoutes = require('./routes/s3-health');
 const invoiceRoutes = require('./routes/invoices');
+const enhancedInvoiceRoutes = require('./routes/enhanced-invoices');
 const fixOwnershipRoutes = require('./routes/fix-ownership-api');
 
 // Import database
@@ -425,6 +426,7 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/s3-health', s3HealthRoutes);
 app.use('/api/invoices', invoiceRoutes);
+app.use('/api/enhanced-invoices', enhancedInvoiceRoutes);
 app.use('/api/fix-ownership', fixOwnershipRoutes);
 app.use('/api/downloads', require('./routes/downloads'));
 app.use('/api', s3HealthRoutes);
@@ -721,6 +723,14 @@ const startServer = async () => {
       console.log('✅ Invoice system initialized');
     } catch (invoiceError) {
       console.warn('⚠️ Invoice system initialization failed:', invoiceError.message);
+    }
+    
+    try {
+      const { initializeEnhancedPaymentSystem } = require('./init-enhanced-payment-system');
+      await initializeEnhancedPaymentSystem();
+      console.log('✅ Enhanced Payment System initialized');
+    } catch (enhancedPaymentError) {
+      console.warn('⚠️ Enhanced Payment System initialization failed:', enhancedPaymentError.message);
     }
     
     try {

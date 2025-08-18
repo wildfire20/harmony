@@ -19,6 +19,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
 import toast from 'react-hot-toast';
+import EnhancedPaymentUploader from './EnhancedPaymentUploader';
 
 const PaymentDashboard = () => {
   const { user, token } = useAuth();
@@ -666,118 +667,34 @@ const PaymentDashboard = () => {
         </div>
       )}
 
-      {/* Upload Modal */}
+      {/* Enhanced Upload Modal */}
       {showUploadModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-medium text-gray-900">Upload Bank Statement</h3>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b">
+              <h3 className="text-lg font-medium text-gray-900">Enhanced Bank Statement Upload</h3>
               <button
                 onClick={() => {
                   setShowUploadModal(false);
                   setSelectedFile(null);
                   setUploadResults(null);
                 }}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-gray-400 hover:text-gray-600 text-2xl"
               >
                 ×
               </button>
             </div>
-
-            {!uploadResults ? (
-              <div className="space-y-4">
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6">
-                  <div className="text-center">
-                    <Upload className="mx-auto h-12 w-12 text-gray-400" />
-                    <div className="mt-4">
-                      <label htmlFor="file-upload" className="cursor-pointer">
-                        <span className="mt-2 block text-sm font-medium text-gray-900">
-                          {selectedFile ? selectedFile.name : 'Choose CSV file or drag and drop'}
-                        </span>
-                        <input
-                          id="file-upload"
-                          type="file"
-                          accept=".csv"
-                          onChange={(e) => setSelectedFile(e.target.files[0])}
-                          className="sr-only"
-                        />
-                      </label>
-                      <p className="mt-2 text-xs text-gray-500">
-                        CSV file with columns: reference, amount, date
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-end space-x-3">
-                  <button
-                    onClick={() => {
-                      setShowUploadModal(false);
-                      setSelectedFile(null);
-                    }}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleFileUpload}
-                    disabled={!selectedFile || uploadLoading}
-                    className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50"
-                  >
-                    {uploadLoading ? 'Processing...' : 'Process Statement'}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                  <h4 className="text-lg font-medium text-green-900 mb-2">Processing Complete</h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="font-medium">Total Processed:</span> {uploadResults.summary.totalProcessed}
-                    </div>
-                    <div>
-                      <span className="font-medium text-green-600">Matched:</span> {uploadResults.summary.matched}
-                    </div>
-                    <div>
-                      <span className="font-medium text-yellow-600">Partial:</span> {uploadResults.summary.partial}
-                    </div>
-                    <div>
-                      <span className="font-medium text-blue-600">Overpaid:</span> {uploadResults.summary.overpaid}
-                    </div>
-                    <div>
-                      <span className="font-medium text-red-600">Unmatched:</span> {uploadResults.summary.unmatched}
-                    </div>
-                    <div>
-                      <span className="font-medium text-gray-600">Duplicates:</span> {uploadResults.summary.duplicates}
-                    </div>
-                  </div>
-                </div>
-
-                {uploadResults.summary.unmatched > 0 && (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                    <h5 className="font-medium text-yellow-900 mb-2">⚠️ Unmatched Transactions</h5>
-                    <p className="text-sm text-yellow-700">
-                      {uploadResults.summary.unmatched} transactions could not be matched to invoices. 
-                      Please review these manually in the transactions section.
-                    </p>
-                  </div>
-                )}
-
-                <div className="flex justify-end">
-                  <button
-                    onClick={() => {
-                      setShowUploadModal(false);
-                      setSelectedFile(null);
-                      setUploadResults(null);
-                    }}
-                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            )}
+            
+            <div className="p-6">
+              <EnhancedPaymentUploader 
+                token={token}
+                onUploadComplete={(results) => {
+                  console.log('Upload completed:', results);
+                  setUploadResults(results);
+                  fetchInvoices(); // Refresh invoices list
+                }}
+              />
+            </div>
           </div>
         </div>
       )}
