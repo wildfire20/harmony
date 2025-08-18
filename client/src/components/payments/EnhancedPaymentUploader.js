@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { toast } from 'react-toastify';
+import toast from 'react-hot-toast';
 
 const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
   const [step, setStep] = useState('upload'); // 'upload', 'mapping', 'processing', 'complete'
