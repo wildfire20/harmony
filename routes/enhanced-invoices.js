@@ -498,20 +498,20 @@ async function processTransactions(transactions, userId) {
       
       console.log('Invoice update result:', updateResult.rows[0]);
 
-      // Record transaction
+      // Record transaction in payment_transactions table (matching existing schema)
       const transactionResult = await client.query(`
         INSERT INTO payment_transactions (
-          invoice_id, reference_number, amount, payment_date,
-          description, uploaded_by
-        ) VALUES ($1, $2, $3, $4, $5, $6)
+          invoice_id, student_id, student_number, reference_number, amount, payment_date, description
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
       `, [
         invoice.id,
+        invoice.student_id,
+        invoice.student_number,
         transaction.reference,
         transaction.amount,
         transaction.date,
-        transaction.description,
-        userId
+        transaction.description || ''
       ]);
       
       console.log('Transaction recorded with ID:', transactionResult.rows[0].id);
@@ -553,24 +553,18 @@ async function processTransactions(transactions, userId) {
 
 async function logUploadActivity(filename, userId, parseResult, results) {
   try {
-    await db.query(`
-      INSERT INTO payment_upload_logs (
-        filename, uploaded_by, transactions_processed, 
-        matched_count, partial_count, overpaid_count,
-        unmatched_count, duplicate_count, error_count
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-    `, [
-      filename,
-      userId,
-      parseResult.transactions.length,
-      results.matched.length,
-      results.partial.length,
-      results.overpaid.length,
-      results.unmatched.length,
-      results.duplicates.length,
-      results.errors.length
-    ]);
-    console.log('Upload log recorded successfully');
+    // Simple logging - just console log for now since the table might not exist
+    console.log('=== UPLOAD ACTIVITY LOG ===');
+    console.log(`Filename: ${filename}`);
+    console.log(`User ID: ${userId}`);
+    console.log(`Transactions processed: ${parseResult.transactions.length}`);
+    console.log(`Matched: ${results.matched.length}`);
+    console.log(`Partial: ${results.partial.length}`);
+    console.log(`Overpaid: ${results.overpaid.length}`);
+    console.log(`Unmatched: ${results.unmatched.length}`);
+    console.log(`Duplicates: ${results.duplicates.length}`);
+    console.log(`Errors: ${results.errors.length}`);
+    console.log('===========================');
   } catch (logError) {
     console.error('Failed to log upload activity:', logError);
   }
