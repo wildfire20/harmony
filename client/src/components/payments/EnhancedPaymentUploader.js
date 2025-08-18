@@ -54,7 +54,10 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
         } else {
           // Initialize with auto-detected mapping for manual adjustment
           setColumnMapping(data.analysis.autoDetectedMapping);
-          toast.warning(`Auto-detection confidence: ${data.analysis.confidence}%. Please verify column mapping.`);
+          toast(`Auto-detection confidence: ${data.analysis.confidence}%. Please verify column mapping.`, {
+            icon: '⚠️',
+            duration: 4000,
+          });
         }
         
         setStep('mapping');
