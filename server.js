@@ -5,6 +5,9 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 require('dotenv').config();
 
+// Optimize logging for production/Railway
+require('./utils/productionLogging');
+
 // Updated with clickable links functionality - v1.0.1
 // Validate environment in production
 if (process.env.NODE_ENV === 'production') {
