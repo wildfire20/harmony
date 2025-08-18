@@ -362,41 +362,75 @@ async function processTransactions(transactions, userId) {
         continue;
       }
 
-      // Find matching invoice with improved reference matching
+      // Find matching invoice with enhanced reference matching
       console.log(`Looking for invoice with reference: "${transaction.reference}"`);
       
-      // Try exact match first
-      let invoiceResult = await client.query(`
+      let invoiceResult = null;
+      
+      // Strategy 1: Exact match
+      invoiceResult = await client.query(`
         SELECT * FROM invoices 
-        WHERE reference_number = $1 AND status IN ('Unpaid', 'Partial')
+        WHERE UPPER(reference_number) = UPPER($1) AND status IN ('Unpaid', 'Partial')
         ORDER BY due_date ASC
         LIMIT 1
       `, [transaction.reference]);
 
-      // If no exact match, try normalized matching
-      if (invoiceResult.rows.length === 0) {
-        const normalizedRef = transaction.reference.toString().padStart(3, '0');
-        console.log(`Trying normalized reference: "${normalizedRef}"`);
+      // Strategy 2: Try with padded zeros (HAR20 -> HAR020)
+      if (invoiceResult.rows.length === 0 && transaction.reference) {
+        const paddedRef = transaction.reference.toString().replace(/(\D+)(\d+)/, (match, letters, numbers) => 
+          letters + numbers.padStart(3, '0'));
+        console.log(`Trying padded reference: "${paddedRef}"`);
         
         invoiceResult = await client.query(`
           SELECT * FROM invoices 
-          WHERE reference_number = $1 AND status IN ('Unpaid', 'Partial')
+          WHERE UPPER(reference_number) = UPPER($1) AND status IN ('Unpaid', 'Partial')
           ORDER BY due_date ASC
           LIMIT 1
-        `, [normalizedRef]);
+        `, [paddedRef]);
       }
 
-      // If still no match, try removing leading zeros
-      if (invoiceResult.rows.length === 0) {
-        const trimmedRef = transaction.reference.toString().replace(/^0+/, '') || '0';
-        console.log(`Trying trimmed reference: "${trimmedRef}"`);
+      // Strategy 3: Try removing leading zeros (HAR020 -> HAR20)
+      if (invoiceResult.rows.length === 0 && transaction.reference) {
+        const trimmedRef = transaction.reference.toString().replace(/(\D+)0+(\d+)/, '$1$2');
+        if (trimmedRef !== transaction.reference) {
+          console.log(`Trying trimmed reference: "${trimmedRef}"`);
+          
+          invoiceResult = await client.query(`
+            SELECT * FROM invoices 
+            WHERE UPPER(reference_number) = UPPER($1) AND status IN ('Unpaid', 'Partial')
+            ORDER BY due_date ASC
+            LIMIT 1
+          `, [trimmedRef]);
+        }
+      }
+
+      // Strategy 4: Try partial matching with LIKE
+      if (invoiceResult.rows.length === 0 && transaction.reference && transaction.reference.length >= 3) {
+        console.log(`Trying partial match for: "${transaction.reference}"`);
         
         invoiceResult = await client.query(`
           SELECT * FROM invoices 
-          WHERE reference_number = $1 AND status IN ('Unpaid', 'Partial')
+          WHERE UPPER(reference_number) LIKE UPPER($1) AND status IN ('Unpaid', 'Partial')
           ORDER BY due_date ASC
           LIMIT 1
-        `, [trimmedRef]);
+        `, [`%${transaction.reference}%`]);
+      }
+
+      // Strategy 5: Try matching by student name if reference looks like a name
+      if (invoiceResult.rows.length === 0 && transaction.reference && 
+          /^[A-Za-z\s]+$/.test(transaction.reference) && transaction.reference.length > 3) {
+        console.log(`Trying student name match for: "${transaction.reference}"`);
+        
+        invoiceResult = await client.query(`
+          SELECT i.*, u.first_name, u.last_name FROM invoices i
+          JOIN users u ON i.student_id = u.id
+          WHERE (UPPER(u.first_name) LIKE UPPER($1) OR 
+                 UPPER(u.last_name) LIKE UPPER($1) OR
+                 UPPER(CONCAT(u.first_name, ' ', u.last_name)) LIKE UPPER($1))
+          AND i.status IN ('Unpaid', 'Partial')
+          ORDER BY i.due_date ASC
+          LIMIT 1
+        `, [`%${transaction.reference}%`]);
       }
 
       if (invoiceResult.rows.length === 0) {

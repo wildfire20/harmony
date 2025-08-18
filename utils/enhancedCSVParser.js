@@ -166,6 +166,7 @@ class EnhancedCSVParser {
 
   /**
    * Extract reference number from text using various patterns
+   * Enhanced for Harmony Learning Institute student reference patterns
    */
   extractReference(text, description = '') {
     if (!text && !description) {
@@ -174,28 +175,55 @@ class EnhancedCSVParser {
 
     const combined = `${text || ''} ${description || ''}`.trim();
     
-    // Try to find student number patterns (6-8 digits)
-    let match = combined.match(/\b\d{6,8}\b/);
+    // Priority 1: Look for HAR### pattern (Harmony Learning format)
+    let match = combined.match(/\bHAR\d{2,4}\b/i);
     if (match) {
-      return match[0];
+      return match[0].toUpperCase();
     }
 
-    // Try to find reference patterns like "HAR123", "SUT456"
+    // Priority 2: Look for other common school patterns
     match = combined.match(/\b[A-Z]{2,4}\d{2,6}\b/i);
     if (match) {
+      return match[0].toUpperCase();
+    }
+
+    // Priority 3: Extract student numbers (6-8 digits)
+    match = combined.match(/\b\d{6,8}\b/);
+    if (match) {
       return match[0];
     }
 
-    // Try to find patterns with specific keywords
-    match = combined.match(/(?:ref|student|id|number)[\s:]*([a-z0-9]+)/i);
+    // Priority 4: Look for patterns after specific keywords
+    match = combined.match(/(?:ref|student|id|number|from)[\s:]*([a-z0-9]{3,})/i);
     if (match) {
-      return match[1];
+      return match[1].toUpperCase();
     }
 
-    // Extract names before "Grade" or similar
+    // Priority 5: Extract names before "Grade" or similar
     match = combined.match(/([A-Za-z\s]{2,})\s+(?:grade?|gr\.?|class)/i);
     if (match) {
       return match[1].trim();
+    }
+
+    // Priority 6: Look for any alphanumeric pattern (3+ chars) that might be a reference
+    match = combined.match(/\b[A-Z0-9]{3,8}\b/i);
+    if (match) {
+      return match[0].toUpperCase();
+    }
+
+    // Priority 7: Try to extract meaningful text from description
+    if (description) {
+      // Look for words that might be student names or identifiers
+      const words = description.split(/\s+/).filter(word => 
+        word.length >= 3 && 
+        /^[A-Za-z0-9]+$/.test(word) &&
+        !['THE', 'AND', 'FOR', 'FROM', 'CASH', 'PAYMENT', 'DEPOSIT', 'TRANSFER'].includes(word.toUpperCase())
+      );
+      
+      if (words.length > 0) {
+        // Return the first meaningful word
+        return words[0].toUpperCase();
+      }
     }
 
     // Return original text if no patterns found (for manual review)
