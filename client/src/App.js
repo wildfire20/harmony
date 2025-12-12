@@ -31,6 +31,8 @@ import UserManagement from './components/users/UserManagement';
 import Analytics from './components/analytics/Analytics';
 import DebugPage from './components/debug/DebugPage';
 import PaymentDashboard from './components/payments/PaymentDashboard';
+import LandingPage from './components/public/LandingPage';
+import EnrollmentManagement from './components/admin/EnrollmentManagement';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -76,25 +78,38 @@ const PublicRoute = ({ children }) => {
   return children;
 };
 
+// Landing Route - Shows landing for non-authenticated, dashboard redirect for authenticated
+const LandingRoute = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (user) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <LandingPage />;
+};
+
 // Main App Component
 const AppContent = () => {
-  const { user } = useAuth();
-
   return (
     <Routes>
+      <Route path="/" element={<LandingRoute />} />
+      
       <Route path="/login" element={
         <PublicRoute>
           <Login />
         </PublicRoute>
       } />
       
-      <Route path="/" element={
+      <Route element={
         <ProtectedRoute>
           <Layout />
         </ProtectedRoute>
       }>
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        
         <Route path="dashboard" element={<Dashboard />} />
         
         <Route path="tasks" element={<Tasks />} />
@@ -140,6 +155,12 @@ const AppContent = () => {
           </ProtectedRoute>
         } />
         
+        <Route path="enrollments" element={
+          <ProtectedRoute roles={['admin', 'super_admin']}>
+            <EnrollmentManagement />
+          </ProtectedRoute>
+        } />
+        
         <Route path="debug" element={
           <ProtectedRoute roles={['teacher', 'admin', 'super_admin']}>
             <DebugPage />
@@ -147,7 +168,7 @@ const AppContent = () => {
         } />
       </Route>
       
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 };
