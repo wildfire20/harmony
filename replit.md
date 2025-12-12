@@ -57,11 +57,11 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - **Login Page** (`/login`) - Portal login for existing users
 
 ## Design & Branding
-- **Color Scheme**: Orange/Yellow/Blue matching school buildings and signage
-  - Primary: #e67700 (Sunburst Orange)
-  - Secondary: #233a78 (Signage Blue)
-  - Accent: #c62828 (Uniform Red)
-  - Gold: #ffd166 (Golden Yellow)
+- **Color Scheme**: Red/Pink/Blue/White from official school logo
+  - Primary: #dc2626 (Red from logo book)
+  - Secondary: #1e40af (Blue from logo head and text)
+  - Accent: White
+  - Light pink accents for gradients
 - **School Images**: 14 photos in `/client/public/images/school/` featuring:
   - School entrance and buildings
   - Students in uniform (red tartan/plaid)

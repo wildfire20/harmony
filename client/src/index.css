@@ -11,18 +11,18 @@
 
 /* Harmony Learning Institute - Official Brand Colors */
 :root {
-  /* Primary Brand Colors - Matching School Buildings & Signage */
-  --harmony-primary: #e67700;      /* Sunburst Orange (from school gate/buildings) */
-  --harmony-secondary: #233a78;    /* Signage Blue (from blue signage) */
-  --harmony-accent: #c62828;       /* Uniform Red (from student uniforms) */
-  --harmony-gold: #ffd166;         /* Golden Yellow (from gate accents) */
+  /* Primary Brand Colors - From Official Logo */
+  --harmony-primary: #dc2626;      /* Red/Pink from logo book */
+  --harmony-secondary: #1e40af;    /* Blue from logo head and text */
+  --harmony-accent: #ffffff;       /* White */
+  --harmony-pink: #f87171;         /* Light pink accent */
   
   /* Supporting Colors */
-  --harmony-orange-light: #fff3e0; /* Light orange for subtle backgrounds */
-  --harmony-cream: #fdf0d5;        /* Warm cream background */
-  --harmony-tartan-brown: #4f372d; /* Brown from tartan patterns */
-  --harmony-blue-dark: #1a2a5c;    /* Darker blue for depth */
-  --harmony-navy: #233a78;         /* Navy blue for icons and accents */
+  --harmony-pink-light: #fef2f2;   /* Light pink for subtle backgrounds */
+  --harmony-cream: #ffffff;        /* White background */
+  --harmony-red-dark: #b91c1c;     /* Darker red for depth */
+  --harmony-blue-dark: #1e3a8a;    /* Darker blue for depth */
+  --harmony-navy: #1e40af;         /* Navy blue for icons and accents */
   
   /* Neutral Colors */
   --harmony-gray-50: #fafafa;
@@ -42,18 +42,18 @@
   --harmony-error: #f44336;
   --harmony-info: #2196f3;
   
-  /* Professional Gradients - Matching School Colors */
-  --harmony-gradient-primary: linear-gradient(135deg, #e67700 0%, #ff9800 100%);
-  --harmony-gradient-secondary: linear-gradient(135deg, #233a78 0%, #3f51b5 100%);
-  --harmony-gradient-hero: linear-gradient(135deg, #e67700 0%, #ff9800 50%, #ffd166 100%);
-  --harmony-gradient-accent: linear-gradient(135deg, #c62828 0%, #ef5350 100%);
+  /* Professional Gradients - Matching Logo Colors */
+  --harmony-gradient-primary: linear-gradient(135deg, #dc2626 0%, #f87171 100%);
+  --harmony-gradient-secondary: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+  --harmony-gradient-hero: linear-gradient(135deg, #dc2626 0%, #f87171 50%, #fecaca 100%);
+  --harmony-gradient-accent: linear-gradient(135deg, #1e40af 0%, #60a5fa 100%);
   
   /* Professional Shadows */
-  --harmony-shadow-sm: 0 1px 3px 0 rgba(230, 119, 0, 0.1), 0 1px 2px 0 rgba(230, 119, 0, 0.06);
-  --harmony-shadow-md: 0 4px 6px -1px rgba(230, 119, 0, 0.1), 0 2px 4px -1px rgba(230, 119, 0, 0.06);
-  --harmony-shadow-lg: 0 10px 15px -3px rgba(230, 119, 0, 0.1), 0 4px 6px -2px rgba(230, 119, 0, 0.05);
-  --harmony-shadow-brand: 0 10px 25px -3px rgba(230, 119, 0, 0.25);
-  --harmony-shadow-red: 0 10px 25px -3px rgba(198, 40, 40, 0.25);
+  --harmony-shadow-sm: 0 1px 3px 0 rgba(220, 38, 38, 0.1), 0 1px 2px 0 rgba(220, 38, 38, 0.06);
+  --harmony-shadow-md: 0 4px 6px -1px rgba(220, 38, 38, 0.1), 0 2px 4px -1px rgba(220, 38, 38, 0.06);
+  --harmony-shadow-lg: 0 10px 15px -3px rgba(220, 38, 38, 0.1), 0 4px 6px -2px rgba(220, 38, 38, 0.05);
+  --harmony-shadow-brand: 0 10px 25px -3px rgba(220, 38, 38, 0.25);
+  --harmony-shadow-red: 0 10px 25px -3px rgba(220, 38, 38, 0.25);
 }
 
 /* Dark Theme Variables - Enhanced Professional */

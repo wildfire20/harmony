@@ -67,7 +67,7 @@ const Login = () => {
                     : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border-gray-200'
                 }`}
                 style={{
-                  backgroundColor: userType === 'student' ? '#f97316' : '#f9fafb',
+                  backgroundColor: userType === 'student' ? '#dc2626' : '#f9fafb',
                   color: userType === 'student' ? 'white' : '#374151'
                 }}
               >
@@ -115,7 +115,7 @@ const Login = () => {
                     : 'border-gray-300'
                 } rounded-md shadow-sm placeholder-gray-400 focus:outline-none ${
                   userType === 'student' 
-                    ? 'focus:ring-orange-500 focus:border-orange-500' 
+                    ? 'focus:ring-red-500 focus:border-red-500' 
                     : 'focus:ring-blue-500 focus:border-blue-500'
                 }`}
                 placeholder={userType === 'student' ? 'Enter your student number' : 'Enter your email address'}
@@ -150,7 +150,7 @@ const Login = () => {
                     errors.password ? 'border-red-300' : 'border-gray-300'
                   } rounded-md shadow-sm placeholder-gray-400 focus:outline-none ${
                     userType === 'student' 
-                      ? 'focus:ring-orange-500 focus:border-orange-500' 
+                      ? 'focus:ring-red-500 focus:border-red-500' 
                       : 'focus:ring-blue-500 focus:border-blue-500'
                   }`}
                   placeholder="Enter your password"
@@ -179,7 +179,7 @@ const Login = () => {
                 disabled={loading}
                 className={`w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
                   userType === 'student' 
-                    ? 'bg-orange-500 hover:bg-orange-600 focus:ring-orange-500' 
+                    ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500' 
                     : 'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500'
                 } focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed`}
               >
