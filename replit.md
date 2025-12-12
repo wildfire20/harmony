@@ -43,3 +43,21 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - Announcements
 - Payment/invoice system
 - Analytics dashboard
+- **Public Landing Page** - Beautiful homepage for non-authenticated visitors
+- **Online Enrollment** - Parents can submit enrollment applications through the public form
+- **Enrollment Management** - Admins can review, approve, or reject enrollment applications
+
+## Public Pages
+- **Landing Page** (`/`) - Displays for non-authenticated users with:
+  - Hero section with school information
+  - About section
+  - Programs overview (Preschool, Primary, Boarding)
+  - Enrollment form for parents to submit applications
+  - Footer with contact information
+- **Login Page** (`/login`) - Portal login for existing users
+
+## Recent Changes (December 2025)
+- Added public-facing enrollment system
+- Created landing page with enrollment form
+- Added admin enrollment management interface
+- Fixed enrollment API to accept unauthenticated submissions
