@@ -56,7 +56,27 @@ A school management system for Harmony Learning Institute. This is a full-stack 
   - Footer with contact information
 - **Login Page** (`/login`) - Portal login for existing users
 
+## Design & Branding
+- **Color Scheme**: Orange/Yellow/Blue matching school buildings and signage
+  - Primary: #e67700 (Sunburst Orange)
+  - Secondary: #233a78 (Signage Blue)
+  - Accent: #c62828 (Uniform Red)
+  - Gold: #ffd166 (Golden Yellow)
+- **School Images**: 14 photos in `/client/public/images/school/` featuring:
+  - School entrance and buildings
+  - Students in uniform (red tartan/plaid)
+  - Heritage Day celebrations
+  - Field trips and activities
+  - Computer lab and learning
+  - Staff team photos
+  - Graduation and concerts
+
 ## Recent Changes (December 2025)
+- Complete design overhaul to match actual school branding
+- Added hero carousel with school entrance and activity photos
+- Created photo gallery section featuring 9 school images
+- Updated color scheme from pink/navy to orange/yellow/red/blue
+- Updated all components (logo, login, portal) with new branding
 - Added public-facing enrollment system
 - Created landing page with enrollment form
 - Added admin enrollment management interface

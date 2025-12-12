@@ -3,22 +3,22 @@ import React from 'react';
 const HarmonyLogo = ({ size = 40, className = "", showText = true, theme = "primary" }) => {
   const themes = {
     primary: {
-      primary: "#1a237e",    // Deep navy blue from logo
-      secondary: "#e91e63",  // Bright pink from logo
+      primary: "#e67700",    // Sunburst orange from school buildings
+      secondary: "#233a78",  // Signage blue from school
       accent: "#ffffff",     // White
-      gold: "#ffc107"        // Golden yellow from stars
+      gold: "#ffd166"        // Golden yellow from gate
     },
     white: {
       primary: "#ffffff",
-      secondary: "#f8bbd9",  // Light pink
+      secondary: "#fff3e0",  // Light orange
       accent: "#f5f5f5",     // Off-white
-      gold: "#ffca28"        // Lighter gold
+      gold: "#ffd166"        // Golden yellow
     },
     dark: {
-      primary: "#3949ab",    // Lighter blue for dark mode
-      secondary: "#f06292",  // Lighter pink for dark mode
+      primary: "#ff9800",    // Brighter orange for dark mode
+      secondary: "#3f51b5",  // Brighter blue for dark mode
       accent: "#263238",     // Dark background
-      gold: "#ffca28"        // Bright gold
+      gold: "#ffd166"        // Bright gold
     }
   };
   
@@ -62,10 +62,10 @@ const HarmonyLogo = ({ size = 40, className = "", showText = true, theme = "prim
             strokeWidth="1"
           />
           
-          {/* Open Book - Pink/Magenta matching logo */}
+          {/* Open Book - Orange matching school */}
           <path
             d="M25 45 L95 45 L95 75 L25 75 Z"
-            fill={colors.secondary}
+            fill={colors.primary}
             rx="3"
           />
           
@@ -73,60 +73,60 @@ const HarmonyLogo = ({ size = 40, className = "", showText = true, theme = "prim
           <path
             d="M25 45 L60 45 L60 75 L25 75 Z"
             fill="#ffffff"
-            stroke={colors.secondary}
+            stroke={colors.primary}
             strokeWidth="2"
           />
           
           <path
             d="M60 45 L95 45 L95 75 L60 75 Z"
             fill="#ffffff"
-            stroke={colors.secondary}
+            stroke={colors.primary}
             strokeWidth="2"
           />
           
-          {/* Book Spine/Binding - Pink */}
+          {/* Book Spine/Binding - Orange */}
           <line
             x1="60"
             y1="45"
             x2="60"
             y2="75"
-            stroke={colors.secondary}
+            stroke={colors.primary}
             strokeWidth="3"
           />
           
-          {/* Open Book Curve - Pink */}
+          {/* Open Book Curve - Orange */}
           <path
             d="M25 45 Q42.5 35 60 45"
             fill="none"
-            stroke={colors.secondary}
+            stroke={colors.primary}
             strokeWidth="2"
           />
           
           <path
             d="M60 45 Q77.5 35 95 45"
             fill="none"
-            stroke={colors.secondary}
+            stroke={colors.primary}
             strokeWidth="2"
           />
           
-          {/* Graduate Figure Head - Navy Blue */}
+          {/* Graduate Figure Head - Blue */}
           <circle
             cx="60"
             cy="25"
             r="8"
-            fill={colors.primary}
+            fill={colors.secondary}
           />
           
-          {/* Graduate Body - Navy Blue */}
+          {/* Graduate Body - Blue */}
           <path
             d="M52 33 Q60 40 68 33 L68 42 L52 42 Z"
-            fill={colors.primary}
+            fill={colors.secondary}
           />
           
-          {/* Ribbon Banner - Pink */}
+          {/* Ribbon Banner - Orange */}
           <path
             d="M30 80 L90 80 L85 88 L35 88 Z"
-            fill={colors.secondary}
+            fill={colors.primary}
           />
           
           {/* Stars - Golden Yellow matching logo */}
@@ -146,13 +146,13 @@ const HarmonyLogo = ({ size = 40, className = "", showText = true, theme = "prim
       {/* School Name and Motto */}
       {showText && (
         <div className="flex flex-col">
-          <h1 className="font-brand text-lg font-bold text-harmony-navy leading-tight uppercase tracking-wide">
+          <h1 className="font-brand text-lg font-bold text-orange-600 leading-tight uppercase tracking-wide">
             Harmony
           </h1>
-          <p className="font-display text-sm text-harmony-navy font-semibold tracking-widest uppercase">
+          <p className="font-display text-sm text-gray-800 font-semibold tracking-widest uppercase">
             Learning Institute
           </p>
-          <p className="font-display text-xs text-harmony-secondary italic leading-tight mt-1">
+          <p className="font-display text-xs text-blue-800 italic leading-tight mt-1">
             "Excellence in Education"
           </p>
         </div>
