@@ -3,21 +3,23 @@ import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { Link } from 'react-router-dom';
 import { BookOpen, Clock, CheckCircle, AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../common/ThemeProvider';
 import { tasksAPI, classesAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 import toast from 'react-hot-toast';
 
 const Tasks = () => {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const [selectedGrade, setSelectedGrade] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
   const queryClient = useQueryClient();
 
-  console.log('=== TASKS COMPONENT DEBUG ===');
-  console.log('User:', user);
-  console.log('User grade_id:', user?.grade_id);
-  console.log('User class_id:', user?.class_id);
-  console.log('User role:', user?.role);
+  const isDark = theme === 'dark';
+  const cardBg = isDark ? 'bg-gray-900' : 'bg-white';
+  const cardBorder = isDark ? 'border-gray-800' : 'border-gray-100';
+  const textPrimary = isDark ? 'text-white' : 'text-gray-900';
+  const textSecondary = isDark ? 'text-gray-400' : 'text-gray-600';
 
   // Fetch grades and classes for admin/teacher selection
   const { data: gradesData } = useQuery('grades', () => classesAPI.getGrades(), {
@@ -45,11 +47,9 @@ const Tasks = () => {
   let gradeToFetch, classToFetch;
   
   if (user?.role === 'student') {
-    // Students use their assigned grade/class
     gradeToFetch = user.grade_id;
     classToFetch = user.class_id;
   } else if (user?.role === 'teacher') {
-    // Teachers: use selected grade/class if available, otherwise use first assignment
     if (selectedGrade && selectedClass) {
       gradeToFetch = selectedGrade;
       classToFetch = selectedClass;
@@ -58,7 +58,6 @@ const Tasks = () => {
       classToFetch = teacherAssignments.assignments[0].class_id;
     }
   } else if (user?.role === 'admin' || user?.role === 'super_admin') {
-    // Admins: use selected grade/class or default to first available
     if (selectedGrade && selectedClass) {
       gradeToFetch = selectedGrade;
       classToFetch = selectedClass;
@@ -81,23 +80,16 @@ const Tasks = () => {
         }
       }
       
-      console.log('Fetching tasks for grade:', gradeToFetch, 'class:', classToFetch);
-      
       try {
         const response = await tasksAPI.getTasks(gradeToFetch, classToFetch);
-        console.log('Tasks API response:', response);
         return response;
       } catch (apiError) {
-        console.error('Tasks API error:', apiError);
-        console.error('Error response:', apiError.response?.data);
         throw apiError;
       }
     },
     { 
       enabled: !!(gradeToFetch && classToFetch),
       retry: (failureCount, error) => {
-        console.log('Task fetch retry attempt:', failureCount, 'Error:', error.message);
-        // Don't retry for auth/permission errors
         if (error.message.includes('403') || error.message.includes('401')) {
           return false;
         }
@@ -106,7 +98,6 @@ const Tasks = () => {
     }
   );
 
-  // Add delete mutation
   const deleteTaskMutation = useMutation(
     (taskId) => tasksAPI.deleteTask(taskId),
     {
@@ -120,14 +111,12 @@ const Tasks = () => {
     }
   );
 
-  // Delete confirmation handler
   const handleDeleteTask = (taskId, taskTitle) => {
     if (window.confirm(`Are you sure you want to delete the task "${taskTitle}"? This action cannot be undone.`)) {
       deleteTaskMutation.mutate(taskId);
     }
   };
 
-  // Filter available grades/classes for teachers
   let availableGrades = grades;
   let availableClasses = classes;
 
@@ -139,38 +128,33 @@ const Tasks = () => {
     availableClasses = classes.filter(cls => assignedClassIds.includes(cls.id));
   }
 
-  // Filter classes based on selected grade
   const filteredClasses = availableClasses.filter(cls => 
     selectedGrade ? cls.grade_id == selectedGrade : true
   );
 
   const tasks = tasksData?.data?.tasks || [];
 
-  console.log('Final tasks data:', tasks);
-  console.log('Tasks count:', tasks.length);
-
   if (isLoading) {
     return <LoadingSpinner />;
   }
 
   if (error) {
-    console.error('Tasks component error:', error);
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl font-bold text-gray-900">Tasks & Assignments</h1>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <div className="flex items-center">
-            <AlertTriangle className="h-5 w-5 text-red-600 mr-2" />
-            <h3 className="text-lg font-medium text-red-800">Error Loading Tasks</h3>
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg shadow-blue-500/25">
+            <BookOpen className="h-6 w-6 text-white" />
           </div>
-          <p className="mt-2 text-red-700">
+          <h1 className={`text-2xl font-bold ${textPrimary}`}>Tasks & Assignments</h1>
+        </div>
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-6">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle className="h-5 w-5 text-red-600" />
+            <h3 className="text-lg font-semibold text-red-800">Error Loading Tasks</h3>
+          </div>
+          <p className="text-red-700">
             {error.message || 'Failed to load tasks. Please try again or contact support.'}
           </p>
-          {user?.role === 'student' && (!user?.grade_id || !user?.class_id) && (
-            <p className="mt-2 text-red-700 text-sm">
-              Your account appears to be missing grade or class assignment. Please contact the administrator.
-            </p>
-          )}
         </div>
       </div>
     );
@@ -178,36 +162,41 @@ const Tasks = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Tasks & Assignments</h1>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg shadow-blue-500/25">
+            <BookOpen className="h-6 w-6 text-white" />
+          </div>
+          <h1 className={`text-2xl font-bold ${textPrimary}`}>Tasks & Assignments</h1>
+        </div>
         {(user?.role === 'teacher' || user?.role === 'admin' || user?.role === 'super_admin') && (
           <Link
             to="/tasks/create"
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-medium shadow-lg shadow-emerald-500/25 hover:shadow-xl transition-all"
           >
-            <Plus className="h-4 w-4 mr-2" />
+            <Plus className="h-4 w-4" />
             Create Task
           </Link>
         )}
       </div>
 
-      {/* Grade/Class Selection for Admins and Teachers */}
+      {/* Grade/Class Selection */}
       {(user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'teacher') && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Select Grade & Class</h3>
+        <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-5`}>
+          <h3 className={`text-base font-semibold ${textPrimary} mb-4`}>Select Grade & Class</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="grade-select" className="block text-sm font-medium text-gray-700 mb-2">
+              <label className={`block text-sm font-medium ${textSecondary} mb-2`}>
                 Grade {user?.role === 'teacher' && "(Only your assigned grades)"}
               </label>
               <select
-                id="grade-select"
                 value={selectedGrade}
                 onChange={(e) => {
                   setSelectedGrade(e.target.value);
-                  setSelectedClass(''); // Reset class when grade changes
+                  setSelectedClass('');
                 }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className={`w-full px-4 py-2.5 rounded-xl border ${cardBorder} ${cardBg} ${textPrimary} focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all`}
               >
                 <option value="">Select Grade</option>
                 {availableGrades.map((grade) => (
@@ -218,15 +207,14 @@ const Tasks = () => {
               </select>
             </div>
             <div>
-              <label htmlFor="class-select" className="block text-sm font-medium text-gray-700 mb-2">
+              <label className={`block text-sm font-medium ${textSecondary} mb-2`}>
                 Class {user?.role === 'teacher' && "(Only your assigned classes)"}
               </label>
               <select
-                id="class-select"
                 value={selectedClass}
                 onChange={(e) => setSelectedClass(e.target.value)}
                 disabled={!selectedGrade}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
+                className={`w-full px-4 py-2.5 rounded-xl border ${cardBorder} ${cardBg} ${textPrimary} focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all disabled:opacity-50`}
               >
                 <option value="">Select Class</option>
                 {filteredClasses.map((cls) => (
@@ -240,74 +228,79 @@ const Tasks = () => {
         </div>
       )}
 
+      {/* Current Selection Info */}
       {user && gradeToFetch && classToFetch && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="text-sm text-blue-700">
+        <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+          <div className="text-sm text-blue-700 dark:text-blue-300">
             <span className="font-medium">Viewing tasks for: </span>
             {grades.find(g => g.id == gradeToFetch)?.name || `Grade ${gradeToFetch}`} - {classes.find(c => c.id == classToFetch)?.name || `Class ${classToFetch}`}
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6">
+      {/* Tasks List */}
+      <div className="space-y-4">
         {tasks.length > 0 ? (
           tasks.map((task) => (
-            <div key={task.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <div className="flex items-start justify-between">
+            <div key={task.id} className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-5 hover:shadow-lg transition-all duration-200`}>
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                 <div className="flex-1">
-                  <div className="flex items-center space-x-3">
-                    <BookOpen className="h-5 w-5 text-blue-600" />
-                    <h2 className="text-xl font-semibold text-gray-900">{task.title}</h2>
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      task.task_type === 'quiz' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                  <div className="flex flex-wrap items-center gap-3 mb-2">
+                    <h2 className={`text-lg font-semibold ${textPrimary}`}>{task.title}</h2>
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                      task.task_type === 'quiz' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
                     }`}>
                       {task.task_type === 'quiz' ? 'Quiz' : 'Assignment'}
                     </span>
                     {task.attachment_s3_url && (
-                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800" title="Has attachment">
+                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
                         📎 Attachment
                       </span>
                     )}
                   </div>
-                  <p className="mt-2 text-gray-600">{task.description}</p>
-                  <div className="mt-4 flex items-center space-x-4 text-sm text-gray-500">
-                    <div className="flex items-center">
-                      <Clock className="h-4 w-4 mr-1" />
+                  <p className={`${textSecondary} text-sm mb-4`}>{task.description}</p>
+                  <div className={`flex flex-wrap items-center gap-4 text-sm ${textSecondary}`}>
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="h-4 w-4" />
                       Due: {new Date(task.due_date).toLocaleDateString()}
                     </div>
-                    <div>Max Points: {task.max_points}</div>
-                    <div>Teacher: {task.teacher_first_name} {task.teacher_last_name}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium">Max Points:</span> {task.max_points}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium">Teacher:</span> {task.teacher_first_name} {task.teacher_last_name}
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center space-x-3">
+                <div className="flex flex-wrap items-center gap-3">
                   {task.submission_id ? (
-                    <span className="flex items-center text-green-600">
-                      <CheckCircle className="h-5 w-5 mr-1" />
+                    <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-700 text-sm font-medium">
+                      <CheckCircle className="h-4 w-4" />
                       Submitted
                     </span>
                   ) : new Date(task.due_date) <= new Date() ? (
-                    <span className="flex items-center text-red-600">
-                      <AlertTriangle className="h-5 w-5 mr-1" />
+                    <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-100 text-red-700 text-sm font-medium">
+                      <AlertTriangle className="h-4 w-4" />
                       Overdue
                     </span>
                   ) : (
-                    <span className="flex items-center text-yellow-600">
-                      <Clock className="h-5 w-5 mr-1" />
+                    <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-100 text-amber-700 text-sm font-medium">
+                      <Clock className="h-4 w-4" />
                       Pending
                     </span>
                   )}
                   <Link
                     to={`/tasks/${task.id}`}
-                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    className="px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl text-sm font-medium shadow-sm hover:shadow-md transition-all"
                   >
                     View Details
                   </Link>
                   {(user?.role === 'teacher' || user?.role === 'admin' || user?.role === 'super_admin') && (
                     <button
                       onClick={() => handleDeleteTask(task.id, task.title)}
-                      className="inline-flex items-center p-2 border border-transparent text-sm font-medium rounded-md text-red-600 bg-red-100 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                      className={`flex items-center gap-1.5 px-3 py-2.5 rounded-xl border ${cardBorder} text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-medium transition-colors`}
                     >
-                      <Trash2 className="h-5 w-5 mr-1" />
+                      <Trash2 className="h-4 w-4" />
                       Delete
                     </button>
                   )}
@@ -316,14 +309,16 @@ const Tasks = () => {
             </div>
           ))
         ) : (
-          <div className="text-center py-12">
-            <BookOpen className="mx-auto h-12 w-12 text-gray-400" />
-            <h3 className="mt-2 text-sm font-medium text-gray-900">No tasks found</h3>
-            <p className="mt-1 text-sm text-gray-500">
+          <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} py-16 text-center`}>
+            <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-full w-fit mx-auto mb-4">
+              <BookOpen className="h-12 w-12 text-gray-400" />
+            </div>
+            <h3 className={`text-lg font-semibold ${textPrimary} mb-2`}>No tasks found</h3>
+            <p className={textSecondary}>
               There are no tasks assigned to your class yet.
             </p>
             {user?.role === 'student' && (
-              <p className="mt-2 text-xs text-gray-400">
+              <p className={`mt-2 text-xs ${textSecondary}`}>
                 Your grade: {user.grade_name || user.grade_id} | Your class: {user.class_name || user.class_id}
               </p>
             )}

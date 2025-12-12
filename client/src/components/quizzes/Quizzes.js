@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Award, Plus, Filter, Play, Clock, Users, BarChart3, Edit, Trash2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../common/ThemeProvider';
 import QuizCreator from './QuizCreator';
 import QuizTaker from './QuizTaker';
 import QuizResults from './QuizResults';
@@ -8,12 +9,19 @@ import LoadingSpinner from '../common/LoadingSpinner';
 
 const Quizzes = () => {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const [quizzes, setQuizzes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [activeView, setActiveView] = useState('list'); // list, create, take, results
+  const [activeView, setActiveView] = useState('list');
   const [selectedQuiz, setSelectedQuiz] = useState(null);
-  const [filter, setFilter] = useState('all'); // all, active, overdue
+  const [filter, setFilter] = useState('all');
+
+  const isDark = theme === 'dark';
+  const cardBg = isDark ? 'bg-gray-900' : 'bg-white';
+  const cardBorder = isDark ? 'border-gray-800' : 'border-gray-100';
+  const textPrimary = isDark ? 'text-white' : 'text-gray-900';
+  const textSecondary = isDark ? 'text-gray-400' : 'text-gray-600';
 
   useEffect(() => {
     fetchQuizzes();
@@ -84,10 +92,10 @@ const Quizzes = () => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'active': return 'bg-green-100 text-green-800';
-      case 'overdue': return 'bg-red-100 text-red-800';
-      case 'due_today': return 'bg-yellow-100 text-yellow-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'active': return 'bg-emerald-100 text-emerald-700';
+      case 'overdue': return 'bg-red-100 text-red-700';
+      case 'due_today': return 'bg-amber-100 text-amber-700';
+      default: return 'bg-gray-100 text-gray-700';
     }
   };
 
@@ -136,17 +144,20 @@ const Quizzes = () => {
   }
 
   return (
-    <div className="quizzes-header space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <Award className="h-8 w-8 text-harmony-gold" />
-          <h1 className="mobile-heading-1 text-3xl font-bold text-gray-900">Quizzes</h1>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-gradient-to-br from-amber-400 to-amber-500 rounded-xl shadow-lg shadow-amber-500/25">
+            <Award className="h-6 w-6 text-white" />
+          </div>
+          <h1 className={`text-2xl font-bold ${textPrimary}`}>Quizzes</h1>
         </div>
-        <div className="quizzes-filter-row flex space-x-3">
+        <div className="flex items-center gap-3">
           <select 
             value={filter} 
             onChange={(e) => setFilter(e.target.value)}
-            className="quizzes-filter-select bg-white border border-gray-300 rounded-md px-3 py-2"
+            className={`px-4 py-2.5 rounded-xl border ${cardBorder} ${cardBg} ${textPrimary} text-sm font-medium focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all`}
           >
             <option value="all">All Quizzes</option>
             <option value="active">Active</option>
@@ -155,7 +166,7 @@ const Quizzes = () => {
           {(user?.role === 'teacher' || user?.role === 'admin' || user?.role === 'super_admin') && (
             <button 
               onClick={handleCreateQuiz}
-              className="mobile-btn-gold bg-harmony-gold text-white px-4 py-2 rounded-md hover:bg-opacity-90 flex items-center space-x-2 sm:w-auto"
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-medium shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/30 transition-all"
             >
               <Plus className="h-4 w-4" />
               <span>Create Quiz</span>
@@ -165,11 +176,11 @@ const Quizzes = () => {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <p className="text-red-800">Error: {error}</p>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <p className="text-red-700">Error: {error}</p>
           <button 
             onClick={() => setError(null)} 
-            className="text-red-600 underline mt-2"
+            className="text-red-600 underline mt-2 text-sm font-medium"
           >
             Dismiss
           </button>
@@ -179,11 +190,13 @@ const Quizzes = () => {
       {loading ? (
         <LoadingSpinner />
       ) : quizzes.length === 0 ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="text-center py-12">
-            <Award className="mx-auto h-16 w-16 text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No Quizzes Found</h3>
-            <p className="text-gray-600">
+        <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} overflow-hidden`}>
+          <div className="text-center py-16">
+            <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-full w-fit mx-auto mb-4">
+              <Award className="h-12 w-12 text-gray-400" />
+            </div>
+            <h3 className={`text-lg font-semibold ${textPrimary} mb-2`}>No Quizzes Found</h3>
+            <p className={textSecondary}>
               {filter === 'all' 
                 ? 'No quizzes have been created yet.' 
                 : `No ${filter} quizzes found.`
@@ -193,7 +206,7 @@ const Quizzes = () => {
               <div className="mt-6">
                 <button 
                   onClick={handleCreateQuiz}
-                  className="mobile-btn-gold bg-harmony-gold text-white px-6 py-2 rounded-md hover:bg-opacity-90 flex items-center space-x-2 mx-auto sm:w-auto"
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-medium shadow-lg shadow-emerald-500/25 hover:shadow-xl transition-all"
                 >
                   <Plus className="h-4 w-4" />
                   <span>Create Your First Quiz</span>
@@ -203,65 +216,61 @@ const Quizzes = () => {
           </div>
         </div>
       ) : (
-        <div className="quiz-grid grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
           {quizzes.map((quiz) => (
-            <div key={quiz.task_id} className="quiz-card bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <div className="quiz-card-header flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <h3 className="quiz-title text-lg font-semibold text-gray-900 mb-2">{quiz.title}</h3>
-                  <p className="quiz-description text-gray-600 text-sm mb-3 line-clamp-2">{quiz.description}</p>
-                  
-                  <div className="quiz-meta-row flex items-center space-x-4 text-sm text-gray-500 mb-3">
-                    <div className="quiz-due-date flex items-center space-x-1">
-                      <Clock className="h-4 w-4" />
-                      <span>Due: {formatDate(quiz.due_date)}</span>
-                    </div>
-                  </div>
+            <div key={quiz.task_id} className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-5 hover:shadow-lg transition-all duration-200`}>
+              <div className="mb-4">
+                <h3 className={`text-lg font-semibold ${textPrimary} mb-2 line-clamp-1`}>{quiz.title}</h3>
+                <p className={`${textSecondary} text-sm mb-4 line-clamp-2`}>{quiz.description}</p>
+                
+                <div className={`flex items-center gap-2 text-sm ${textSecondary} mb-3`}>
+                  <Clock className="h-4 w-4" />
+                  <span>Due: {formatDate(quiz.due_date)}</span>
+                </div>
 
-                  <div className="quiz-status-row flex items-center justify-between mb-4">
-                    <span className={`quiz-status-badge px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(quiz.quiz_status)}`}>
-                      {quiz.quiz_status.replace('_', ' ').toUpperCase()}
-                    </span>
-                    <span className="quiz-points text-sm text-gray-500">
-                      {quiz.max_points} points
-                    </span>
-                  </div>
+                <div className="flex items-center justify-between mb-4">
+                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(quiz.quiz_status)}`}>
+                    {quiz.quiz_status.replace('_', ' ').toUpperCase()}
+                  </span>
+                  <span className={`text-sm font-medium ${textSecondary}`}>
+                    {quiz.max_points} pts
+                  </span>
+                </div>
 
-                  <div className="quiz-class-info text-xs text-gray-500 mb-4">
-                    {quiz.grade_name} - {quiz.class_name}
-                    {quiz.time_limit && (
-                      <span className="ml-2">• {quiz.time_limit} min limit</span>
-                    )}
-                  </div>
-
-                  {user?.role === 'student' && quiz.student_status && (
-                    <div className="quiz-student-status mb-4 p-3 bg-gray-50 rounded-md">
-                      <div className="text-sm">
-                        <div className="quiz-student-status-row flex justify-between">
-                          <span>Attempts:</span>
-                          <span>{quiz.student_status.attempts}/{quiz.attempts_allowed}</span>
-                        </div>
-                        {quiz.student_status.best_score !== null && (
-                          <div className="quiz-student-status-row flex justify-between">
-                            <span>Best Score:</span>
-                            <span>{quiz.student_status.best_score}/{quiz.max_points}</span>
-                          </div>
-                        )}
-                        <div className="quiz-student-status-row flex justify-between">
-                          <span>Status:</span>
-                          <span className="capitalize">{quiz.student_status.status.replace('_', ' ')}</span>
-                        </div>
-                      </div>
-                    </div>
+                <div className={`text-xs ${textSecondary} mb-4 px-3 py-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>
+                  {quiz.grade_name} - {quiz.class_name}
+                  {quiz.time_limit && (
+                    <span className="ml-2">• {quiz.time_limit} min</span>
                   )}
                 </div>
+
+                {user?.role === 'student' && quiz.student_status && (
+                  <div className={`mb-4 p-3 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>
+                    <div className="text-sm space-y-1">
+                      <div className="flex justify-between">
+                        <span className={textSecondary}>Attempts:</span>
+                        <span className={`font-medium ${textPrimary}`}>{quiz.student_status.attempts}/{quiz.attempts_allowed}</span>
+                      </div>
+                      {quiz.student_status.best_score !== null && (
+                        <div className="flex justify-between">
+                          <span className={textSecondary}>Best Score:</span>
+                          <span className={`font-medium ${textPrimary}`}>{quiz.student_status.best_score}/{quiz.max_points}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between">
+                        <span className={textSecondary}>Status:</span>
+                        <span className={`capitalize font-medium ${textPrimary}`}>{quiz.student_status.status.replace('_', ' ')}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="mobile-btn-group flex space-x-2">
+              <div className="flex gap-2">
                 {user?.role === 'student' && quiz.student_status?.can_attempt && (
                   <button 
                     onClick={() => handleTakeQuiz(quiz)}
-                    className="mobile-btn-success flex-1 bg-harmony-secondary text-white px-3 py-2 rounded-md hover:bg-opacity-90 flex items-center justify-center space-x-1 text-sm sm:flex-initial"
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl text-sm font-medium shadow-sm hover:shadow-md transition-all"
                   >
                     <Play className="h-4 w-4" />
                     <span>Take Quiz</span>
@@ -272,14 +281,14 @@ const Quizzes = () => {
                   <>
                     <button 
                       onClick={() => handleViewResults(quiz)}
-                      className="mobile-btn-compact mobile-btn-secondary flex-1 bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 flex items-center justify-center space-x-1 text-sm sm:flex-initial"
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl text-sm font-medium shadow-sm hover:shadow-md transition-all"
                     >
                       <BarChart3 className="h-4 w-4" />
                       <span>Results</span>
                     </button>
                     <button 
                       onClick={() => handleDeleteQuiz(quiz.task_id)}
-                      className="mobile-btn-icon danger px-3 py-2 text-red-600 hover:bg-red-50 rounded-md"
+                      className={`p-2.5 rounded-xl border ${cardBorder} text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors`}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>

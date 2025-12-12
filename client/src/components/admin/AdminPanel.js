@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { Settings, Users, BarChart3, Plus, UserPlus, GraduationCap } from 'lucide-react';
+import { useTheme } from '../common/ThemeProvider';
+import { Settings, Users, BarChart3, GraduationCap } from 'lucide-react';
 import StudentManagement from './StudentManagement';
 import TeacherManagement from './TeacherManagement';
 import SystemSettings from './SystemSettings';
@@ -8,7 +9,14 @@ import AdminReports from './AdminReports';
 
 const AdminPanel = () => {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const [activeTab, setActiveTab] = useState('overview');
+
+  const isDark = theme === 'dark';
+  const cardBg = isDark ? 'bg-gray-900' : 'bg-white';
+  const cardBorder = isDark ? 'border-gray-800' : 'border-gray-100';
+  const textPrimary = isDark ? 'text-white' : 'text-gray-900';
+  const textSecondary = isDark ? 'text-gray-400' : 'text-gray-600';
 
   const tabs = [
     { id: 'overview', name: 'Overview', icon: BarChart3 },
@@ -30,50 +38,56 @@ const AdminPanel = () => {
         return <AdminReports />;
       default:
         return (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center space-x-3 mb-4">
-                <GraduationCap className="h-8 w-8 text-blue-600" />
-                <h2 className="text-xl font-semibold text-gray-900">Student Management</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-6 hover:shadow-lg transition-all duration-200`}>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2.5 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl">
+                  <GraduationCap className="h-6 w-6 text-white" />
+                </div>
+                <h2 className={`text-lg font-semibold ${textPrimary}`}>Student Management</h2>
               </div>
-              <p className="text-gray-600 mb-4">
+              <p className={`${textSecondary} text-sm mb-5`}>
                 Add, edit, and manage student accounts and class assignments.
               </p>
               <button 
                 onClick={() => setActiveTab('students')}
-                className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors"
+                className="w-full py-2.5 px-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium shadow-lg shadow-blue-500/25 hover:shadow-xl transition-all"
               >
                 Manage Students
               </button>
             </div>
 
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center space-x-3 mb-4">
-                <Settings className="h-8 w-8 text-green-600" />
-                <h2 className="text-xl font-semibold text-gray-900">System Settings</h2>
+            <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-6 hover:shadow-lg transition-all duration-200`}>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2.5 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl">
+                  <Settings className="h-6 w-6 text-white" />
+                </div>
+                <h2 className={`text-lg font-semibold ${textPrimary}`}>System Settings</h2>
               </div>
-              <p className="text-gray-600 mb-4">
+              <p className={`${textSecondary} text-sm mb-5`}>
                 Configure system settings, grades, and class structures.
               </p>
               <button 
                 onClick={() => setActiveTab('settings')}
-                className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors"
+                className="w-full py-2.5 px-4 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-medium shadow-lg shadow-emerald-500/25 hover:shadow-xl transition-all"
               >
                 System Settings
               </button>
             </div>
 
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center space-x-3 mb-4">
-                <BarChart3 className="h-8 w-8 text-purple-600" />
-                <h2 className="text-xl font-semibold text-gray-900">Reports</h2>
+            <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-6 hover:shadow-lg transition-all duration-200`}>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2.5 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl">
+                  <BarChart3 className="h-6 w-6 text-white" />
+                </div>
+                <h2 className={`text-lg font-semibold ${textPrimary}`}>Reports</h2>
               </div>
-              <p className="text-gray-600 mb-4">
+              <p className={`${textSecondary} text-sm mb-5`}>
                 View system statistics and generate reports.
               </p>
               <button 
                 onClick={() => setActiveTab('reports')}
-                className="w-full bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700 transition-colors"
+                className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl font-medium shadow-lg shadow-purple-500/25 hover:shadow-xl transition-all"
               >
                 View Reports
               </button>
@@ -85,28 +99,34 @@ const AdminPanel = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Admin Panel</h1>
-        <p className="text-gray-600">Welcome, {user?.first_name}</p>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-gradient-to-br from-red-500 to-red-600 rounded-xl shadow-lg shadow-red-500/25">
+            <Settings className="h-6 w-6 text-white" />
+          </div>
+          <h1 className={`text-2xl font-bold ${textPrimary}`}>Admin Panel</h1>
+        </div>
+        <p className={textSecondary}>Welcome, {user?.first_name}</p>
       </div>
 
       {/* Tab Navigation */}
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
+      <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-1.5`}>
+        <nav className="flex flex-wrap gap-1">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`${
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
                   activeTab === tab.id
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm flex items-center space-x-2`}
+                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/25'
+                    : `${textSecondary} hover:bg-gray-100 dark:hover:bg-gray-800`
+                }`}
               >
                 <Icon className="h-4 w-4" />
-                <span>{tab.name}</span>
+                <span className="hidden sm:inline">{tab.name}</span>
               </button>
             );
           })}
@@ -114,7 +134,7 @@ const AdminPanel = () => {
       </div>
 
       {/* Tab Content */}
-      <div className="mt-6">
+      <div>
         {renderTabContent()}
       </div>
     </div>
