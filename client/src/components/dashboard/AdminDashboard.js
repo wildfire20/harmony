@@ -117,7 +117,7 @@ const AdminDashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Announcements */}
         <div className={`${cardBg} rounded-xl border ${cardBorder}`}>
-          <div className={`flex items-center justify-between p-6 border-b ${cardBorder}`}>
+          <div className="flex items-center justify-between p-6 border-b ${cardBorder}">
             <div>
               <h2 className={`text-lg font-semibold ${textPrimary}`}>Recent Announcements</h2>
               <p className={`text-sm ${textMuted}`}>Stay updated with school news</p>
@@ -163,7 +163,7 @@ const AdminDashboard = () => {
 
         {/* Upcoming Assignments */}
         <div className={`${cardBg} rounded-xl border ${cardBorder}`}>
-          <div className={`flex items-center justify-between p-6 border-b ${cardBorder}`}>
+          <div className="flex items-center justify-between p-6 border-b ${cardBorder}">
             <div>
               <h2 className={`text-lg font-semibold ${textPrimary}`}>Upcoming Assignments</h2>
               <p className={`text-sm ${textMuted}`}>Don't miss your deadlines</p>
