@@ -59,18 +59,19 @@ const Layout = () => {
         navigate(item.href);
         if (onClick) onClick();
       }}
-      className={`group flex items-center px-3 py-3 text-base font-medium rounded-lg w-full text-left transition-all duration-300 touch-manipulation
-        ${isMobile ? 'min-h-14 text-lg' : 'min-h-12'}
-        ${isTouch ? 'min-h-12 min-w-12' : ''}
+      className={`group flex items-center px-4 py-3 text-sm font-medium rounded-xl w-full text-left transition-all duration-200
+        ${isMobile ? 'min-h-14' : 'min-h-11'}
+        ${isTouch ? 'min-h-12' : ''}
         ${theme === 'dark' 
-          ? 'text-gray-300 hover:bg-gray-700 hover:text-white' 
-          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+          ? 'text-gray-300 hover:bg-white/10 hover:text-white' 
+          : 'text-gray-600 hover:bg-gradient-to-r hover:from-red-50 hover:to-transparent hover:text-red-700'
         }
-        hover:scale-105 hover:shadow-md
       `}
     >
-      <item.icon className={`mr-4 h-6 w-6 flex-shrink-0 text-${item.color}`} />
-      <span className="truncate">{item.name}</span>
+      <item.icon className={`mr-3 h-5 w-5 flex-shrink-0 ${
+        theme === 'dark' ? 'text-gray-400 group-hover:text-white' : 'text-gray-400 group-hover:text-red-600'
+      }`} />
+      <span className="font-medium">{item.name}</span>
     </button>
   );
 
@@ -101,123 +102,111 @@ const Layout = () => {
         {/* Mobile menu */}
         <div className={`fixed inset-0 flex z-[1100] md:hidden ${sidebarOpen ? '' : 'hidden'}`}>
           <div 
-            className="fixed inset-0 bg-gray-600 bg-opacity-75 mobile-sidebar-overlay" 
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm" 
             onClick={() => setSidebarOpen(false)}
-            onTouchStart={() => setSidebarOpen(false)}
           />
-          <div className={`relative flex-1 flex flex-col max-w-xs w-full mobile-sidebar-container ${
-            theme === 'dark' ? 'bg-gray-800' : 'bg-white'
+          <div className={`relative flex-1 flex flex-col max-w-xs w-full shadow-2xl ${
+            theme === 'dark' ? 'bg-gray-900' : 'bg-white'
           }`}>
-            <div className="absolute top-0 right-0 -mr-12 pt-2">
+            <div className="absolute top-4 right-4">
               <button
-                className="ml-1 flex items-center justify-center h-12 w-12 rounded-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white hover:bg-gray-600 hover:bg-opacity-50 transition-colors duration-200 touch-manipulation"
+                className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
                 onClick={() => setSidebarOpen(false)}
-                aria-label="Close navigation menu"
-                style={{ minHeight: '48px', minWidth: '48px' }}
               >
-                <X className="h-6 w-6 text-white" />
+                <X className="h-5 w-5 text-gray-600" />
               </button>
             </div>
-            <div className="mobile-sidebar-content pt-5 pb-4">
-              <div className="flex-shrink-0 flex items-center px-4 mb-4">
-                <HarmonyLogo size={40} showText={true} theme={theme} />
+            <div className="pt-6 pb-4 px-4">
+              <div className="flex items-center gap-3 mb-8">
+                <img 
+                  src="/images/harmony-logo.png" 
+                  alt="Harmony Learning" 
+                  className="h-12 w-12 object-contain"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+                <div>
+                  <h1 className="text-lg font-bold text-red-600">HARMONY LEARNING</h1>
+                  <p className="text-xs text-gray-500">INSTITUTE</p>
+                </div>
               </div>
-              <nav className="mt-5 px-2 space-y-1 mobile-nav-padding">
+              <nav className="space-y-1">
                 {navigation.map((item) => (
                   <NavItem key={item.name} item={item} onClick={() => setSidebarOpen(false)} />
                 ))}
               </nav>
             </div>
-            <div className={`mobile-sidebar-user flex border-t p-4 ${
-              theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+            <div className={`mt-auto border-t p-4 ${
+              theme === 'dark' ? 'border-gray-800' : 'border-gray-100'
             }`}>
-              <div className="flex items-center w-full">
-                <div className="h-12 w-12 bg-gradient-primary rounded-full flex items-center justify-center">
-                  <User className="h-6 w-6 text-white" />
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 bg-gradient-to-br from-red-500 to-red-600 rounded-full flex items-center justify-center shadow-lg">
+                  <User className="h-5 w-5 text-white" />
                 </div>
-                <div className="ml-3 flex-1">
-                  <p className={`text-base font-medium ${
-                    theme === 'dark' ? 'text-gray-200' : 'text-gray-700'
-                  }`}>
+                <div className="flex-1">
+                  <p className={`text-sm font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-800'}`}>
                     {user?.first_name} {user?.last_name}
                   </p>
-                  <p className={`text-sm ${
-                    theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
-                  }`}>
-                    {getUserStatus()}
-                  </p>
-                  <div className="mt-1">
-                    {getUserBadge()}
-                  </div>
+                  <p className="text-xs text-gray-500">{getUserStatus()}</p>
                 </div>
+                <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-600 transition-colors">
+                  <LogOut className="h-5 w-5" />
+                </button>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Static sidebar for desktop */}
+        {/* Desktop sidebar */}
         <div className="hidden md:flex md:flex-shrink-0">
           <div className="flex flex-col w-64">
-            <div className={`flex flex-col h-0 flex-1 border-r ${
-              theme === 'dark' 
-                ? 'border-gray-700 bg-gray-800' 
-                : 'border-gray-200 bg-white'
+            <div className={`flex flex-col h-full border-r ${
+              theme === 'dark' ? 'border-gray-800 bg-gray-900' : 'border-gray-100 bg-white'
             }`}>
-              <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
-                <div className="flex items-center flex-shrink-0 px-4 mb-6">
-                  <HarmonyLogo size={40} showText={true} theme={theme} />
-                </div>
-                <nav className="mt-5 flex-1 px-2 space-y-1">
-                  {navigation.map((item) => (
-                    <NavItem key={item.name} item={item} />
-                  ))}
-                </nav>
-                
-                {/* Theme Toggle */}
-                <div className="px-4 py-3">
-                  <div className="flex items-center justify-between">
-                    <span className={`text-sm font-medium ${
-                      theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
-                    }`}>
-                      Theme
-                    </span>
-                    <ThemeToggle />
+              <div className="p-5">
+                <div className="flex items-center gap-3">
+                  <img 
+                    src="/images/harmony-logo.png" 
+                    alt="Harmony Learning" 
+                    className="h-12 w-12 object-contain"
+                    onError={(e) => { e.target.style.display = 'none'; }}
+                  />
+                  <div>
+                    <h1 className="text-base font-bold text-red-600 leading-tight">HARMONY<br/>LEARNING</h1>
+                    <p className="text-[10px] text-gray-400 tracking-wider">INSTITUTE</p>
                   </div>
                 </div>
               </div>
               
-              <div className={`flex-shrink-0 flex border-t p-4 ${
-                theme === 'dark' ? 'border-gray-700' : 'border-gray-200'
-              }`}>
-                <div className="flex items-center w-full">
-                  <div className="h-12 w-12 bg-gradient-primary rounded-full flex items-center justify-center">
-                    <User className="h-6 w-6 text-white" />
+              <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+                {navigation.map((item) => (
+                  <NavItem key={item.name} item={item} />
+                ))}
+              </nav>
+              
+              <div className={`px-4 py-3 border-t ${theme === 'dark' ? 'border-gray-800' : 'border-gray-100'}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <span className={`text-xs font-medium ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Theme</span>
+                  <ThemeToggle />
+                </div>
+              </div>
+              
+              <div className={`p-4 border-t ${theme === 'dark' ? 'border-gray-800' : 'border-gray-100'}`}>
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 bg-gradient-to-br from-red-500 to-red-600 rounded-full flex items-center justify-center shadow-lg">
+                    <User className="h-5 w-5 text-white" />
                   </div>
-                  <div className="ml-3 flex-1">
-                    <p className={`text-sm font-medium ${
-                      theme === 'dark' ? 'text-gray-200' : 'text-gray-700'
-                    }`}>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-semibold truncate ${theme === 'dark' ? 'text-white' : 'text-gray-800'}`}>
                       {user?.first_name} {user?.last_name}
                     </p>
-                    <p className={`text-xs ${
-                      theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
-                    }`}>
-                      {getUserStatus()}
-                    </p>
-                    <div className="mt-1">
-                      {getUserBadge()}
-                    </div>
+                    <p className="text-xs text-gray-500">{getUserStatus()}</p>
                   </div>
                   <button
                     onClick={handleLogout}
-                    className={`ml-2 p-1 rounded-lg transition-colors duration-200 ${
-                      theme === 'dark' 
-                        ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700' 
-                        : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                    }`}
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                     title="Logout"
                   >
-                    <LogOut className="h-5 w-5" />
+                    <LogOut className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -227,70 +216,50 @@ const Layout = () => {
 
         {/* Main content */}
         <div className="flex flex-col w-0 flex-1 overflow-hidden">
-          <div className="md:hidden pl-2 pt-2 sm:pl-4 sm:pt-4">
-            <div className="flex items-center justify-between">
-              <button
-                className={`h-12 w-12 inline-flex items-center justify-center rounded-lg transition-colors duration-200 touch-manipulation ${
-                  theme === 'dark'
-                    ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700'
-                    : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
-                } focus:outline-none focus:ring-2 focus:ring-inset focus:ring-harmony-primary`}
-                onClick={() => setSidebarOpen(true)}
-                aria-label="Open navigation menu"
-                style={{ minHeight: '48px', minWidth: '48px' }}
-              >
-                <Menu className="h-6 w-6" />
-              </button>
-              <div className="flex items-center space-x-2">
-                <HarmonyLogo size={32} showText={true} theme={theme} />
-              </div>
-              <ThemeToggle />
+          <div className="md:hidden px-4 py-3 flex items-center justify-between border-b border-gray-100">
+            <button
+              className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu className="h-6 w-6" />
+            </button>
+            <div className="flex items-center gap-2">
+              <img src="/images/harmony-logo.png" alt="" className="h-8 w-8" onError={(e) => { e.target.style.display = 'none'; }} />
+              <span className="font-bold text-red-600 text-sm">HARMONY LEARNING</span>
             </div>
+            <ThemeToggle />
           </div>
           
-          <main className={`flex-1 relative overflow-y-auto focus:outline-none ${
-            theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
-          }`} style={{ paddingBottom: isMobile ? '100px' : '0' }}>
-            <div className={`${isMobile ? 'py-2 px-3 pb-6' : 'py-4 px-2'} sm:py-6 sm:px-4`}>
+          <main className={`flex-1 relative overflow-y-auto ${
+            theme === 'dark' ? 'bg-gray-950' : 'bg-gray-50'
+          }`} style={{ paddingBottom: isMobile ? '80px' : '0' }}>
+            <div className="py-6 px-4 sm:px-6 lg:px-8">
               <div className="max-w-7xl mx-auto">
                 <Outlet />
               </div>
             </div>
           </main>
           
-          {/* Enhanced Footer - Fixed on mobile */}
-          <div className={`bg-gradient-primary px-4 py-3 relative overflow-hidden ${
+          {/* Footer */}
+          <div className={`bg-gradient-to-r from-red-600 to-red-700 px-4 py-3 ${
             isMobile ? 'fixed bottom-0 left-0 right-0 z-40' : ''
           }`}>
-            <div className="absolute inset-0 bg-black bg-opacity-10"></div>
-            <div className="relative flex items-center justify-center">
-              <div className={`flex items-center ${isMobile ? 'space-x-3' : 'space-x-6'}`}>
-                <div className="flex items-center space-x-2">
-                  <HarmonyLogo size={isMobile ? 24 : 32} showText={false} theme="white" />
-                  <div className="text-white">
-                    <div className={`font-brand font-bold ${isMobile ? 'text-sm' : 'text-lg'}`}>Harmony Learning</div>
-                    <div className={`opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>Excellence in Education</div>
-                  </div>
+            <div className="flex items-center justify-center gap-8">
+              <div className="flex items-center gap-2">
+                <img src="/images/harmony-logo.png" alt="" className="h-7 w-7 brightness-0 invert" onError={(e) => { e.target.style.display = 'none'; }} />
+                <div className="text-white">
+                  <div className="font-bold text-sm">Harmony Learning</div>
+                  <div className="text-[10px] opacity-80">Excellence in Education</div>
                 </div>
-                
-                <div className={`${isMobile ? 'hidden' : 'hidden sm:block'} w-px h-8 bg-white bg-opacity-30`}></div>
-                
-                <div className="flex items-center space-x-2">
-                  <div className={`border-2 border-white rounded-lg flex items-center justify-center ${isMobile ? 'h-6 w-6' : 'h-8 w-8'}`}>
-                    <div className="flex flex-col items-center">
-                      <div className={`bg-white rounded-full mb-0.5 ${isMobile ? 'h-0.5 w-0.5' : 'h-1 w-1'}`}></div>
-                      <div className="flex space-x-0.5">
-                        <div className={`bg-white rounded-full ${isMobile ? 'h-0.5 w-0.5' : 'h-1 w-1'}`}></div>
-                        <div className={`bg-white rounded-full ${isMobile ? 'h-0.5 w-0.5' : 'h-1 w-1'}`}></div>
-                        <div className={`bg-white rounded-full ${isMobile ? 'h-0.5 w-0.5' : 'h-1 w-1'}`}></div>
-                      </div>
-                      <div className={`bg-white mt-0.5 ${isMobile ? 'h-px w-2' : 'h-px w-3'}`}></div>
-                    </div>
-                  </div>
-                  <div className="text-white">
-                    <div className={`font-bold ${isMobile ? 'text-sm' : 'text-lg'}`}>AutoM8</div>
-                    <div className={`opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>Streamlining Innovation</div>
-                  </div>
+              </div>
+              <div className="w-px h-6 bg-white/20" />
+              <div className="flex items-center gap-2">
+                <div className="h-7 w-7 border border-white/50 rounded flex items-center justify-center">
+                  <div className="text-white text-[8px] font-bold">A8</div>
+                </div>
+                <div className="text-white">
+                  <div className="font-bold text-sm">AutoM8</div>
+                  <div className="text-[10px] opacity-80">Streamlining Innovation</div>
                 </div>
               </div>
             </div>
