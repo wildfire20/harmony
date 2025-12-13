@@ -1,17 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Plus, Trash2, Save, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Save, Eye, EyeOff, HelpCircle, Clock, BookOpen, Target, Sparkles, CheckCircle, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../common/ThemeProvider';
 import LoadingSpinner from '../common/LoadingSpinner';
 import MathRenderer from '../common/MathRenderer';
 
 const QuizCreator = ({ onBack, onSuccess }) => {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [grades, setGrades] = useState([]);
   const [classes, setClasses] = useState([]);
   const [showPreview, setShowPreview] = useState({});
+  const [showMathHelp, setShowMathHelp] = useState(false);
+
+  const isDark = theme === 'dark';
+  const cardBg = isDark ? 'bg-gray-900' : 'bg-white';
+  const cardBorder = isDark ? 'border-gray-800' : 'border-gray-100';
+  const textPrimary = isDark ? 'text-white' : 'text-gray-900';
+  const textSecondary = isDark ? 'text-gray-400' : 'text-gray-600';
+  const inputBg = isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
+  const inputFocus = 'focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500';
 
   const [quizData, setQuizData] = useState({
     title: '',
@@ -45,14 +56,12 @@ const QuizCreator = ({ onBack, onSuccess }) => {
       const token = localStorage.getItem('token');
       
       if (user.role === 'teacher') {
-        // Teachers: fetch only their assigned grades and classes
         const assignmentsResponse = await fetch(`/api/admin/teachers/${user.id}/assignments`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const assignmentsData = await assignmentsResponse.json();
         
         if (assignmentsData.success && assignmentsData.assignments) {
-          // Extract unique grades and classes from assignments
           const uniqueGrades = {};
           const uniqueClasses = {};
           
@@ -72,7 +81,6 @@ const QuizCreator = ({ onBack, onSuccess }) => {
           setClasses(Object.values(uniqueClasses));
         }
       } else {
-        // Admins: fetch all grades and classes
         const [gradesResponse, classesResponse] = await Promise.all([
           fetch('/api/admin/grades', {
             headers: { 'Authorization': `Bearer ${token}` }
@@ -170,13 +178,11 @@ const QuizCreator = ({ onBack, onSuccess }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    // Validation
     if (!quizData.title || !quizData.due_date || !quizData.grade_id || !quizData.class_id) {
       setError('Please fill in all required fields');
       return;
     }
 
-    // Validate questions
     for (let i = 0; i < quizData.questions.length; i++) {
       const q = quizData.questions[i];
       if (!q.question) {
@@ -204,7 +210,6 @@ const QuizCreator = ({ onBack, onSuccess }) => {
       setSaving(true);
       const token = localStorage.getItem('token');
       
-      // Clean up questions data
       const cleanedQuestions = quizData.questions.map(q => ({
         ...q,
         options: q.type === 'multiple_choice' ? q.options.filter(opt => opt.trim()) : []
@@ -242,24 +247,47 @@ const QuizCreator = ({ onBack, onSuccess }) => {
     return <LoadingSpinner />;
   }
 
+  const totalPoints = quizData.questions.reduce((sum, q) => sum + (parseInt(q.points) || 0), 0);
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center space-x-3">
-        <button 
-          onClick={onBack}
-          className="p-2 hover:bg-gray-100 rounded-md"
-        >
-          <ArrowLeft className="h-6 w-6" />
-        </button>
-        <h1 className="text-3xl font-bold text-gray-900">Create New Quiz</h1>
+    <div className="space-y-6 max-w-5xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={onBack}
+            className={`p-2.5 rounded-xl ${isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-100'} transition-colors`}
+          >
+            <ArrowLeft className={`h-5 w-5 ${textSecondary}`} />
+          </button>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl shadow-lg shadow-amber-500/25">
+              <BookOpen className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h1 className={`text-2xl font-bold ${textPrimary}`}>Create New Quiz</h1>
+              <p className={`text-sm ${textSecondary}`}>Build an interactive assessment for your students</p>
+            </div>
+          </div>
+        </div>
+        <div className={`flex items-center gap-2 px-4 py-2 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>
+          <Target className="h-4 w-4 text-emerald-500" />
+          <span className={`text-sm font-medium ${textSecondary}`}>Total: {totalPoints} points</span>
+        </div>
       </div>
 
+      {/* Error Alert */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <p className="text-red-800">{error}</p>
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl p-4 flex items-start gap-3">
+          <div className="p-1 bg-red-100 dark:bg-red-900/50 rounded-lg">
+            <X className="h-4 w-4 text-red-600" />
+          </div>
+          <div className="flex-1">
+            <p className="text-red-800 dark:text-red-200 font-medium">{error}</p>
+          </div>
           <button 
             onClick={() => setError(null)} 
-            className="text-red-600 underline mt-2"
+            className="text-red-600 hover:text-red-800 text-sm font-medium"
           >
             Dismiss
           </button>
@@ -267,448 +295,421 @@ const QuizCreator = ({ onBack, onSuccess }) => {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* LaTeX Help Guide */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-lg font-semibold text-blue-900">Math Formula Support</h3>
-            <div className="text-sm text-blue-700">LaTeX Enabled ✨</div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div>
-              <h4 className="font-medium text-blue-800 mb-2">Common Math Symbols:</h4>
-              <div className="space-y-1 text-blue-700 font-mono">
-                <div>{'$x^2$ → x²'}</div>
-                <div>{'$x_1$ → x₁'}</div>
-                <div>{'$\\frac{a}{b}$ → fractions'}</div>
-                <div>{'$\\sqrt{x}$ → square root'}</div>
+        {/* Math Formula Help - Collapsible */}
+        <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} overflow-hidden`}>
+          <button
+            type="button"
+            onClick={() => setShowMathHelp(!showMathHelp)}
+            className={`w-full flex items-center justify-between p-4 ${isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-50'} transition-colors`}
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-gradient-to-br from-violet-500 to-purple-500 rounded-lg">
+                <Sparkles className="h-4 w-4 text-white" />
+              </div>
+              <div className="text-left">
+                <span className={`font-semibold ${textPrimary}`}>Math Formula Support</span>
+                <span className={`text-sm ${textSecondary} ml-2`}>LaTeX enabled for mathematical expressions</span>
               </div>
             </div>
-            <div>
-              <h4 className="font-medium text-blue-800 mb-2">Examples:</h4>
-              <div className="space-y-1 text-blue-700 font-mono">
-                <div>{'$ax^2 + bx + c = 0$'}</div>
-                <div>{'$$x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$$'}</div>
-                <div>{'$\\sin(x) + \\cos(x) = 1$'}</div>
-                <div>{'$\\int_a^b f(x)dx$'}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Basic Quiz Information */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-xl font-semibold mb-4">Quiz Information</h2>
+            <HelpCircle className={`h-5 w-5 ${textSecondary}`} />
+          </button>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Quiz Title *
-              </label>
-              <input
-                type="text"
-                value={quizData.title}
-                onChange={(e) => setQuizData(prev => ({ ...prev, title: e.target.value }))}
-                className="w-full border border-gray-300 rounded-md px-3 py-2"
-                placeholder="Enter quiz title"
-                required
-              />
+          {showMathHelp && (
+            <div className={`px-4 pb-4 border-t ${cardBorder}`}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+                <div>
+                  <h4 className={`font-medium ${textPrimary} mb-3 text-sm`}>Common Math Symbols</h4>
+                  <div className={`space-y-2 ${textSecondary} text-sm font-mono`}>
+                    <div className={`p-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>{'$x^2$ → x²'}</div>
+                    <div className={`p-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>{'$x_1$ → x₁'}</div>
+                    <div className={`p-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>{'$\\frac{a}{b}$ → fractions'}</div>
+                    <div className={`p-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>{'$\\sqrt{x}$ → square root'}</div>
+                  </div>
+                </div>
+                <div>
+                  <h4 className={`font-medium ${textPrimary} mb-3 text-sm`}>Example Expressions</h4>
+                  <div className={`space-y-2 ${textSecondary} text-sm font-mono`}>
+                    <div className={`p-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>{'$ax^2 + bx + c = 0$'}</div>
+                    <div className={`p-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>{'$$x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$$'}</div>
+                    <div className={`p-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>{'$\\sin(x) + \\cos(x) = 1$'}</div>
+                    <div className={`p-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>{'$\\int_a^b f(x)dx$'}</div>
+                  </div>
+                </div>
+              </div>
             </div>
+          )}
+        </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Due Date *
-              </label>
-              <input
-                type="datetime-local"
-                value={quizData.due_date}
-                onChange={(e) => setQuizData(prev => ({ ...prev, due_date: e.target.value }))}
-                className="w-full border border-gray-300 rounded-md px-3 py-2"
-                required
-              />
+        {/* Quiz Information */}
+        <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} overflow-hidden`}>
+          <div className={`px-6 py-4 border-b ${cardBorder} flex items-center gap-3`}>
+            <div className="p-2 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg">
+              <BookOpen className="h-4 w-4 text-white" />
             </div>
+            <h2 className={`text-lg font-semibold ${textPrimary}`}>Quiz Information</h2>
+          </div>
+          
+          <div className="p-6 space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
+                <label className={`block text-sm font-medium ${textSecondary} mb-2`}>
+                  Quiz Title <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={quizData.title}
+                  onChange={(e) => setQuizData(prev => ({ ...prev, title: e.target.value }))}
+                  className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${inputFocus} ${textPrimary} transition-all`}
+                  placeholder="e.g., Chapter 5 Math Quiz"
+                  required
+                />
+              </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Grade *
-              </label>
-              <select
-                value={quizData.grade_id}
-                onChange={(e) => setQuizData(prev => ({ 
-                  ...prev, 
-                  grade_id: e.target.value,
-                  class_id: '' // Reset class when grade changes
-                }))}
-                className="w-full border border-gray-300 rounded-md px-3 py-2"
-                required
-              >
-                <option value="">Select Grade</option>
-                {grades.map(grade => (
-                  <option key={grade.id} value={grade.id}>{grade.name}</option>
-                ))}
-              </select>
-            </div>
+              <div>
+                <label className={`block text-sm font-medium ${textSecondary} mb-2`}>
+                  Due Date <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="datetime-local"
+                  value={quizData.due_date}
+                  onChange={(e) => setQuizData(prev => ({ ...prev, due_date: e.target.value }))}
+                  className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${inputFocus} ${textPrimary} transition-all`}
+                  required
+                />
+              </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Class *
-              </label>
-              <select
-                value={quizData.class_id}
-                onChange={(e) => setQuizData(prev => ({ ...prev, class_id: e.target.value }))}
-                className="w-full border border-gray-300 rounded-md px-3 py-2"
-                required
-                disabled={!quizData.grade_id}
-              >
-                <option value="">Select Class</option>
-                {classes
-                  .filter(cls => !quizData.grade_id || cls.grade_id == quizData.grade_id)
-                  .map(cls => (
-                    <option key={cls.id} value={cls.id}>{cls.name}</option>
+              <div>
+                <label className={`block text-sm font-medium ${textSecondary} mb-2`}>
+                  Grade <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={quizData.grade_id}
+                  onChange={(e) => setQuizData(prev => ({ 
+                    ...prev, 
+                    grade_id: e.target.value,
+                    class_id: ''
+                  }))}
+                  className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${inputFocus} ${textPrimary} transition-all`}
+                  required
+                >
+                  <option value="">Select Grade</option>
+                  {grades.map(grade => (
+                    <option key={grade.id} value={grade.id}>{grade.name}</option>
                   ))}
-              </select>
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-sm font-medium ${textSecondary} mb-2`}>
+                  Class <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={quizData.class_id}
+                  onChange={(e) => setQuizData(prev => ({ ...prev, class_id: e.target.value }))}
+                  className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${inputFocus} ${textPrimary} transition-all`}
+                  required
+                  disabled={!quizData.grade_id}
+                >
+                  <option value="">Select Class</option>
+                  {classes
+                    .filter(cls => !quizData.grade_id || cls.grade_id == quizData.grade_id)
+                    .map(cls => (
+                      <option key={cls.id} value={cls.id}>{cls.name}</option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-sm font-medium ${textSecondary} mb-2`}>
+                  <Clock className="h-4 w-4 inline mr-1" />
+                  Time Limit (minutes)
+                </label>
+                <input
+                  type="number"
+                  value={quizData.time_limit}
+                  onChange={(e) => setQuizData(prev => ({ ...prev, time_limit: e.target.value }))}
+                  className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${inputFocus} ${textPrimary} transition-all`}
+                  placeholder="No limit"
+                  min="1"
+                />
+              </div>
+
+              <div>
+                <label className={`block text-sm font-medium ${textSecondary} mb-2`}>
+                  Attempts Allowed
+                </label>
+                <input
+                  type="number"
+                  value={quizData.attempts_allowed}
+                  onChange={(e) => setQuizData(prev => ({ ...prev, attempts_allowed: parseInt(e.target.value) }))}
+                  className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${inputFocus} ${textPrimary} transition-all`}
+                  min="1"
+                  required
+                />
+              </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Time Limit (minutes)
+              <label className={`block text-sm font-medium ${textSecondary} mb-2`}>
+                Description (optional)
               </label>
-              <input
-                type="number"
-                value={quizData.time_limit}
-                onChange={(e) => setQuizData(prev => ({ ...prev, time_limit: e.target.value }))}
-                className="w-full border border-gray-300 rounded-md px-3 py-2"
-                placeholder="No limit"
-                min="1"
+              <textarea
+                value={quizData.description}
+                onChange={(e) => setQuizData(prev => ({ ...prev, description: e.target.value }))}
+                className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${inputFocus} ${textPrimary} transition-all resize-none`}
+                rows="3"
+                placeholder="Add instructions or details about this quiz..."
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Attempts Allowed
+            {/* Quiz Options */}
+            <div className={`flex flex-wrap gap-6 p-4 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>
+              <label className="flex items-center gap-3 cursor-pointer">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    id="show_results"
+                    checked={quizData.show_results}
+                    onChange={(e) => setQuizData(prev => ({ ...prev, show_results: e.target.checked }))}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-300 peer-focus:ring-2 peer-focus:ring-emerald-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                </div>
+                <span className={`text-sm ${textSecondary}`}>Show results after submission</span>
               </label>
-              <input
-                type="number"
-                value={quizData.attempts_allowed}
-                onChange={(e) => setQuizData(prev => ({ ...prev, attempts_allowed: parseInt(e.target.value) }))}
-                className="w-full border border-gray-300 rounded-md px-3 py-2"
-                min="1"
-                required
-              />
-            </div>
-          </div>
 
-          <div className="mt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Description
-            </label>
-            <textarea
-              value={quizData.description}
-              onChange={(e) => setQuizData(prev => ({ ...prev, description: e.target.value }))}
-              className="w-full border border-gray-300 rounded-md px-3 py-2"
-              rows="3"
-              placeholder="Enter quiz description"
-            />
-          </div>
-
-          <div className="mt-4 space-y-2">
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="show_results"
-                checked={quizData.show_results}
-                onChange={(e) => setQuizData(prev => ({ ...prev, show_results: e.target.checked }))}
-                className="mr-2"
-              />
-              <label htmlFor="show_results" className="text-sm text-gray-700">
-                Show results to students after submission
-              </label>
-            </div>
-
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="randomize_questions"
-                checked={quizData.randomize_questions}
-                onChange={(e) => setQuizData(prev => ({ ...prev, randomize_questions: e.target.checked }))}
-                className="mr-2"
-              />
-              <label htmlFor="randomize_questions" className="text-sm text-gray-700">
-                Randomize question order for each student
+              <label className="flex items-center gap-3 cursor-pointer">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    id="randomize_questions"
+                    checked={quizData.randomize_questions}
+                    onChange={(e) => setQuizData(prev => ({ ...prev, randomize_questions: e.target.checked }))}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-300 peer-focus:ring-2 peer-focus:ring-emerald-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                </div>
+                <span className={`text-sm ${textSecondary}`}>Randomize question order</span>
               </label>
             </div>
           </div>
         </div>
 
-        {/* Questions */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Questions</h2>
+        {/* Questions Section */}
+        <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} overflow-hidden`}>
+          <div className={`px-6 py-4 border-b ${cardBorder} flex items-center justify-between`}>
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-lg">
+                <HelpCircle className="h-4 w-4 text-white" />
+              </div>
+              <div>
+                <h2 className={`text-lg font-semibold ${textPrimary}`}>Questions</h2>
+                <span className={`text-sm ${textSecondary}`}>{quizData.questions.length} question{quizData.questions.length !== 1 ? 's' : ''}</span>
+              </div>
+            </div>
             <button
               type="button"
               onClick={addQuestion}
-              className="bg-harmony-gold text-white px-4 py-2 rounded-md hover:bg-opacity-90 flex items-center space-x-2"
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-emerald-500/25 transition-all"
             >
               <Plus className="h-4 w-4" />
-              <span>Add Question</span>
+              Add Question
             </button>
           </div>
 
-          {quizData.questions.map((question, qIndex) => (
-            <div key={qIndex} className="border border-gray-200 rounded-md p-4 mb-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-lg font-medium">Question {qIndex + 1}</h3>
-                {quizData.questions.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => removeQuestion(qIndex)}
-                    className="text-red-600 hover:bg-red-50 p-1 rounded"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-medium text-gray-700">
-                      Question Text *
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setShowPreview(prev => ({ ...prev, [`q${qIndex}`]: !prev[`q${qIndex}`] }))}
-                      className="text-sm text-harmony-gold hover:underline flex items-center space-x-1"
-                    >
-                      {showPreview[`q${qIndex}`] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      <span>{showPreview[`q${qIndex}`] ? 'Hide Preview' : 'Show Preview'}</span>
-                    </button>
-                  </div>
-                  <textarea
-                    value={question.question}
-                    onChange={(e) => updateQuestion(qIndex, 'question', e.target.value)}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 font-mono text-sm"
-                    rows="3"
-                    placeholder="Enter your question (LaTeX supported: $x^2 + y^2 = z^2$, $$\\frac{a}{b} = c$$)"
-                    required
-                  />
-                  <div className="text-xs text-gray-500 mt-1">
-                    💡 Use LaTeX for math: $inline math$ or $$display math$$
-                  </div>
-                  {showPreview[`q${qIndex}`] && question.question && (
-                    <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                      <div className="text-sm font-medium text-blue-800 mb-2">Preview:</div>
-                      <div className="text-gray-900">
-                        <MathRenderer math={question.question} />
-                      </div>
+          <div className="p-6 space-y-6">
+            {quizData.questions.map((question, qIndex) => (
+              <div 
+                key={qIndex} 
+                className={`rounded-2xl border-2 ${cardBorder} overflow-hidden ${isDark ? 'bg-gray-800/50' : 'bg-gray-50/50'}`}
+              >
+                {/* Question Header */}
+                <div className={`px-5 py-4 ${isDark ? 'bg-gray-800' : 'bg-white'} flex items-center justify-between`}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
+                      <span className="text-white font-bold text-sm">{qIndex + 1}</span>
                     </div>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Question Type
-                    </label>
                     <select
                       value={question.type}
                       onChange={(e) => updateQuestion(qIndex, 'type', e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2"
+                      className={`${inputBg} border rounded-lg px-3 py-1.5 text-sm ${textPrimary}`}
                     >
                       <option value="multiple_choice">Multiple Choice</option>
                       <option value="true_false">True/False</option>
                       <option value="short_answer">Short Answer</option>
                     </select>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={question.points}
+                        onChange={(e) => updateQuestion(qIndex, 'points', parseInt(e.target.value) || 1)}
+                        className={`w-16 ${inputBg} border rounded-lg px-2 py-1.5 text-sm text-center ${textPrimary}`}
+                        min="1"
+                      />
+                      <span className={`text-sm ${textSecondary}`}>pts</span>
+                    </div>
                   </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Points
-                    </label>
-                    <input
-                      type="number"
-                      value={question.points}
-                      onChange={(e) => updateQuestion(qIndex, 'points', parseInt(e.target.value))}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2"
-                      min="1"
-                      required
-                    />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowPreview(prev => ({ ...prev, [qIndex]: !prev[qIndex] }))}
+                      className={`p-2 rounded-lg ${isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'} transition-colors`}
+                    >
+                      {showPreview[qIndex] ? <EyeOff className="h-4 w-4 text-gray-500" /> : <Eye className="h-4 w-4 text-gray-500" />}
+                    </button>
+                    {quizData.questions.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeQuestion(qIndex)}
+                        className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* Options for Multiple Choice */}
-                {question.type === 'multiple_choice' && (
+                {/* Question Content */}
+                <div className="p-5 space-y-4">
                   <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Answer Options *
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => addOption(qIndex)}
-                        className="text-sm text-harmony-gold hover:underline"
-                      >
-                        Add Option
-                      </button>
-                    </div>
-                    {question.options.map((option, oIndex) => (
-                      <div key={oIndex} className="space-y-2">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-sm font-medium text-gray-500 min-w-[24px]">
-                            {String.fromCharCode(65 + oIndex)}:
-                          </span>
+                    <label className={`block text-sm font-medium ${textSecondary} mb-2`}>Question Text</label>
+                    <textarea
+                      value={question.question}
+                      onChange={(e) => updateQuestion(qIndex, 'question', e.target.value)}
+                      className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${inputFocus} ${textPrimary} transition-all resize-none`}
+                      rows="2"
+                      placeholder="Enter your question here... (supports LaTeX math)"
+                      required
+                    />
+                    {showPreview[qIndex] && question.question && (
+                      <div className={`mt-2 p-3 rounded-lg ${isDark ? 'bg-gray-900' : 'bg-white'} border ${cardBorder}`}>
+                        <span className={`text-xs ${textSecondary} block mb-1`}>Preview:</span>
+                        <MathRenderer content={question.question} />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Multiple Choice Options */}
+                  {question.type === 'multiple_choice' && (
+                    <div className="space-y-3">
+                      <label className={`block text-sm font-medium ${textSecondary}`}>Answer Options</label>
+                      {question.options.map((option, oIndex) => (
+                        <div key={oIndex} className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => updateQuestion(qIndex, 'correct_answer', option)}
+                            className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${
+                              option && question.correct_answer === option 
+                                ? 'bg-emerald-500 border-emerald-500 text-white' 
+                                : `${isDark ? 'border-gray-600 hover:border-emerald-500' : 'border-gray-300 hover:border-emerald-500'}`
+                            }`}
+                          >
+                            {option && question.correct_answer === option && <CheckCircle className="h-4 w-4" />}
+                          </button>
                           <input
                             type="text"
                             value={option}
                             onChange={(e) => updateOption(qIndex, oIndex, e.target.value)}
-                            className="flex-1 border border-gray-300 rounded-md px-3 py-2 font-mono text-sm"
-                            placeholder={`Option ${oIndex + 1} (LaTeX supported: $x^2$)`}
+                            className={`flex-1 ${inputBg} border rounded-xl px-4 py-2.5 ${inputFocus} ${textPrimary} transition-all`}
+                            placeholder={`Option ${String.fromCharCode(65 + oIndex)}`}
                           />
                           {question.options.length > 2 && (
                             <button
                               type="button"
                               onClick={() => removeOption(qIndex, oIndex)}
-                              className="text-red-600 hover:bg-red-50 p-1 rounded"
+                              className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <X className="h-4 w-4" />
                             </button>
                           )}
                         </div>
-                        {option && showPreview[`q${qIndex}o${oIndex}`] && (
-                          <div className="ml-8 p-2 bg-gray-50 border border-gray-200 rounded-md">
-                            <div className="text-xs text-gray-600 mb-1">Preview:</div>
-                            <MathRenderer math={option} inline={true} />
-                          </div>
-                        )}
-                        {option && (
-                          <button
-                            type="button"
-                            onClick={() => setShowPreview(prev => ({ ...prev, [`q${qIndex}o${oIndex}`]: !prev[`q${qIndex}o${oIndex}`] }))}
-                            className="ml-8 text-xs text-harmony-gold hover:underline"
-                          >
-                            {showPreview[`q${qIndex}o${oIndex}`] ? 'Hide Preview' : 'Preview'}
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Correct Answer */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Correct Answer *
-                  </label>
-                  {question.type === 'multiple_choice' ? (
-                    <select
-                      value={question.correct_answer}
-                      onChange={(e) => updateQuestion(qIndex, 'correct_answer', e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2"
-                      required
-                    >
-                      <option value="">Select correct answer</option>
-                      {question.options.filter(opt => opt.trim()).map((option, oIndex) => (
-                        <option key={oIndex} value={option}>{option}</option>
                       ))}
-                    </select>
-                  ) : question.type === 'true_false' ? (
-                    <select
-                      value={question.correct_answer}
-                      onChange={(e) => updateQuestion(qIndex, 'correct_answer', e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2"
-                      required
-                    >
-                      <option value="">Select correct answer</option>
-                      <option value="true">True</option>
-                      <option value="false">False</option>
-                    </select>
-                  ) : (
-                    <div className="space-y-3">
-                      <textarea
-                        value={question.correct_answer}
-                        onChange={(e) => updateQuestion(qIndex, 'correct_answer', e.target.value)}
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 font-mono text-sm"
-                        rows="2"
-                        placeholder="Enter the correct answer (LaTeX supported: $x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$)"
-                        required
-                      />
-                      {question.correct_answer && showPreview[`q${qIndex}ans`] && (
-                        <div className="p-3 bg-green-50 border border-green-200 rounded-md">
-                          <div className="text-sm font-medium text-green-800 mb-2">Answer Preview:</div>
-                          <MathRenderer math={question.correct_answer} />
-                        </div>
-                      )}
-                      {question.correct_answer && (
-                        <button
-                          type="button"
-                          onClick={() => setShowPreview(prev => ({ ...prev, [`q${qIndex}ans`]: !prev[`q${qIndex}ans`] }))}
-                          className="text-sm text-harmony-gold hover:underline"
-                        >
-                          {showPreview[`q${qIndex}ans`] ? 'Hide Preview' : 'Preview Answer'}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Explanation */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-medium text-gray-700">
-                      Explanation (Optional)
-                    </label>
-                    {question.explanation && (
                       <button
                         type="button"
-                        onClick={() => setShowPreview(prev => ({ ...prev, [`q${qIndex}exp`]: !prev[`q${qIndex}exp`] }))}
-                        className="text-sm text-harmony-gold hover:underline"
+                        onClick={() => addOption(qIndex)}
+                        className={`flex items-center gap-2 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-xl transition-colors`}
                       >
-                        {showPreview[`q${qIndex}exp`] ? 'Hide Preview' : 'Preview Explanation'}
+                        <Plus className="h-4 w-4" />
+                        Add Option
                       </button>
-                    )}
-                  </div>
-                  <textarea
-                    value={question.explanation}
-                    onChange={(e) => updateQuestion(qIndex, 'explanation', e.target.value)}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 font-mono text-sm"
-                    rows="2"
-                    placeholder="Explain why this is the correct answer (LaTeX supported)"
-                  />
-                  {question.explanation && showPreview[`q${qIndex}exp`] && (
-                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                      <div className="text-sm font-medium text-yellow-800 mb-2">Explanation Preview:</div>
-                      <MathRenderer math={question.explanation} />
                     </div>
                   )}
+
+                  {/* True/False */}
+                  {question.type === 'true_false' && (
+                    <div className="flex gap-4">
+                      {['True', 'False'].map(val => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => updateQuestion(qIndex, 'correct_answer', val)}
+                          className={`flex-1 py-3 px-6 rounded-xl font-medium transition-all ${
+                            question.correct_answer === val
+                              ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25'
+                              : `${isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-white hover:bg-gray-50'} border ${cardBorder} ${textPrimary}`
+                          }`}
+                        >
+                          {val}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Short Answer */}
+                  {question.type === 'short_answer' && (
+                    <div>
+                      <label className={`block text-sm font-medium ${textSecondary} mb-2`}>Correct Answer</label>
+                      <input
+                        type="text"
+                        value={question.correct_answer}
+                        onChange={(e) => updateQuestion(qIndex, 'correct_answer', e.target.value)}
+                        className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${inputFocus} ${textPrimary} transition-all`}
+                        placeholder="Enter the correct answer"
+                        required
+                      />
+                    </div>
+                  )}
+
+                  {/* Explanation */}
+                  <div>
+                    <label className={`block text-sm font-medium ${textSecondary} mb-2`}>Explanation (shown after submission)</label>
+                    <textarea
+                      value={question.explanation}
+                      onChange={(e) => updateQuestion(qIndex, 'explanation', e.target.value)}
+                      className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${inputFocus} ${textPrimary} transition-all resize-none`}
+                      rows="2"
+                      placeholder="Explain why this answer is correct..."
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
         {/* Submit Button */}
-        <div className="flex justify-end space-x-3">
+        <div className="flex justify-end gap-4">
           <button
             type="button"
             onClick={onBack}
-            className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-            disabled={saving}
+            className={`px-6 py-3 rounded-xl font-medium ${isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-100 hover:bg-gray-200'} ${textPrimary} transition-all`}
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={saving}
-            className="bg-harmony-gold text-white px-6 py-2 rounded-md hover:bg-opacity-90 flex items-center space-x-2 disabled:opacity-50"
+            className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-emerald-500/25 transition-all disabled:opacity-50"
           >
             {saving ? (
               <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                <span>Creating...</span>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Creating Quiz...
               </>
             ) : (
               <>
                 <Save className="h-4 w-4" />
-                <span>Create Quiz</span>
+                Create Quiz
               </>
             )}
           </button>
