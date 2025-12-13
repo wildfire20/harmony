@@ -71,6 +71,12 @@ A school management system for Harmony Learning Institute. This is a full-stack 
   - Staff team photos
   - Graduation and concerts
 
+## Contact Information
+- **Address**: 2 Skilferdoring Street, Onverwacht, Lephalale
+- **WhatsApp**: 071 167 9620
+- **Phone**: 014 763 1358
+- **Email**: harmonylearninginstitute@gmail.com
+
 ## Recent Changes (December 2025)
 - Complete design overhaul to match actual school branding
 - Added hero carousel with school entrance and activity photos
@@ -81,3 +87,6 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - Created landing page with enrollment form
 - Added admin enrollment management interface
 - Fixed enrollment API to accept unauthenticated submissions
+- Added floating WhatsApp button on landing page
+- Updated footer contact information with new address, phone numbers, and email
+- Added Enrollments tab to Admin Panel for managing applications
