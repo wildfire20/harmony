@@ -793,9 +793,33 @@ const Footer = () => {
 
       <div className="border-t border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <p className="text-center text-gray-500 text-sm">
-            &copy; {new Date().getFullYear()} Harmony Learning Institute. All rights reserved.
-          </p>
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+            <p className="text-gray-500 text-sm">
+              &copy; {new Date().getFullYear()} Harmony Learning Institute. All rights reserved.
+            </p>
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <img 
+                  src="/images/harmony-logo.png" 
+                  alt="Harmony Learning Institute" 
+                  className="h-8 w-8 object-contain bg-white rounded-full p-0.5"
+                />
+                <span className="text-gray-400 text-xs">Harmony Learning</span>
+              </div>
+              <div className="w-px h-6 bg-gray-700" />
+              <div className="flex items-center gap-2">
+                <img 
+                  src="/images/autom8-logo.png" 
+                  alt="AutoM8" 
+                  className="h-8 w-8 object-contain"
+                />
+                <div className="text-gray-400 text-xs">
+                  <span className="block">Powered by</span>
+                  <span className="text-blue-400 font-medium">AutoM8</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </footer>

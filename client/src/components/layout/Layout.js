@@ -246,7 +246,12 @@ const Layout = () => {
           }`}>
             <div className="flex items-center justify-center gap-8">
               <div className="flex items-center gap-2">
-                <img src="/images/harmony-logo.png" alt="" className="h-7 w-7 brightness-0 invert" onError={(e) => { e.target.style.display = 'none'; }} />
+                <img 
+                  src="/images/harmony-logo.png" 
+                  alt="Harmony Learning Institute" 
+                  className="h-8 w-8 object-contain bg-white rounded-full p-0.5" 
+                  onError={(e) => { e.target.style.display = 'none'; }} 
+                />
                 <div className="text-white">
                   <div className="font-bold text-sm">Harmony Learning</div>
                   <div className="text-[10px] opacity-80">Excellence in Education</div>
@@ -254,9 +259,12 @@ const Layout = () => {
               </div>
               <div className="w-px h-6 bg-white/20" />
               <div className="flex items-center gap-2">
-                <div className="h-7 w-7 border border-white/50 rounded flex items-center justify-center">
-                  <div className="text-white text-[8px] font-bold">A8</div>
-                </div>
+                <img 
+                  src="/images/autom8-logo.png" 
+                  alt="AutoM8" 
+                  className="h-8 w-8 object-contain" 
+                  onError={(e) => { e.target.style.display = 'none'; }} 
+                />
                 <div className="text-white">
                   <div className="font-bold text-sm">AutoM8</div>
                   <div className="text-[10px] opacity-80">Streamlining Innovation</div>
