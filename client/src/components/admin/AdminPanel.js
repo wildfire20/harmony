@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../common/ThemeProvider';
-import { Settings, Users, BarChart3, GraduationCap } from 'lucide-react';
+import { Settings, Users, BarChart3, GraduationCap, ClipboardList } from 'lucide-react';
 import StudentManagement from './StudentManagement';
 import TeacherManagement from './TeacherManagement';
 import SystemSettings from './SystemSettings';
 import AdminReports from './AdminReports';
+import EnrollmentManagement from './EnrollmentManagement';
 
 const AdminPanel = () => {
   const { user } = useAuth();
@@ -20,6 +21,7 @@ const AdminPanel = () => {
 
   const tabs = [
     { id: 'overview', name: 'Overview', icon: BarChart3 },
+    { id: 'enrollments', name: 'Enrollments', icon: ClipboardList },
     { id: 'students', name: 'Student Management', icon: GraduationCap },
     { id: 'teachers', name: 'Teacher Management', icon: Users },
     { id: 'settings', name: 'System Settings', icon: Settings },
@@ -28,6 +30,8 @@ const AdminPanel = () => {
 
   const renderTabContent = () => {
     switch (activeTab) {
+      case 'enrollments':
+        return <EnrollmentManagement />;
       case 'students':
         return <StudentManagement />;
       case 'teachers':
