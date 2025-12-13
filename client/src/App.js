@@ -33,6 +33,7 @@ import DebugPage from './components/debug/DebugPage';
 import PaymentDashboard from './components/payments/PaymentDashboard';
 import LandingPage from './components/public/LandingPage';
 import EnrollmentManagement from './components/admin/EnrollmentManagement';
+import AttendancePage from './components/attendance/AttendancePage';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -124,6 +125,12 @@ const AppContent = () => {
         
         <Route path="quizzes" element={<Quizzes />} />
         <Route path="calendar" element={<Calendar />} />
+        
+        <Route path="attendance" element={
+          <ProtectedRoute roles={['teacher', 'admin', 'super_admin']}>
+            <AttendancePage />
+          </ProtectedRoute>
+        } />
         
         <Route path="announcements" element={<Announcements />} />
         

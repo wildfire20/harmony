@@ -77,7 +77,18 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - **Phone**: 014 763 1358
 - **Email**: harmonylearninginstitute@gmail.com
 
+## Digital Attendance System
+- **Attendance Register** - Teachers can take daily class attendance with one-tap workflow
+- **Default Present** - All students default to "Present" status, teachers only mark exceptions
+- **Status Options**: Present, Absent, Late, Excused (with optional notes)
+- **Real-Time Dashboard** - Admins see who is in school right now (auto-refreshes every 30s)
+- **Late Tracking Report** - Identifies students habitually late (configurable thresholds)
+- **Attendance Statistics** - Daily stats, missing class alerts, grade-by-grade breakdown
+- **Timestamp Recording** - Records when and who took attendance
+- **Access Control**: Teachers see only assigned classes, admins see school-wide reports
+
 ## Recent Changes (December 2025)
+- **Digital Attendance System** - Complete attendance tracking for teachers and admins
 - Complete design overhaul to match actual school branding
 - Added hero carousel with school entrance and activity photos
 - Created photo gallery section featuring 9 school images

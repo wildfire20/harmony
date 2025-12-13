@@ -200,6 +200,24 @@ const createTables = async () => {
       )
     `);
 
+    // Attendance table for daily class attendance tracking
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS attendance (
+        id SERIAL PRIMARY KEY,
+        student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        grade_id INTEGER NOT NULL REFERENCES grades(id) ON DELETE CASCADE,
+        date DATE NOT NULL,
+        status VARCHAR(20) DEFAULT 'present' CHECK (status IN ('present', 'absent', 'late', 'excused')),
+        time_in TIMESTAMP,
+        notes TEXT,
+        recorded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(student_id, date)
+      )
+    `);
+
     // Add foreign key constraints if they don't exist
     await client.query(`
       DO $$ BEGIN
@@ -233,6 +251,10 @@ const createTables = async () => {
       CREATE INDEX IF NOT EXISTS idx_announcements_grade_class ON announcements(grade_id, class_id);
       CREATE INDEX IF NOT EXISTS idx_documents_grade_class ON documents(grade_id, class_id);
       CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(document_type);
+      CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date);
+      CREATE INDEX IF NOT EXISTS idx_attendance_student ON attendance(student_id);
+      CREATE INDEX IF NOT EXISTS idx_attendance_class_date ON attendance(class_id, date);
+      CREATE INDEX IF NOT EXISTS idx_attendance_grade_date ON attendance(grade_id, date);
     `);
 
     await client.query('COMMIT');

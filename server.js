@@ -43,6 +43,7 @@ const invoiceRoutes = require('./routes/invoices');
 const enhancedInvoiceRoutes = require('./routes/enhanced-invoices');
 const fixOwnershipRoutes = require('./routes/fix-ownership-api');
 const enrollmentRoutes = require('./routes/enrollments');
+const attendanceRoutes = require('./routes/attendance');
 
 // Import database
 const db = require('./config/database');
@@ -434,6 +435,7 @@ app.use('/api/enhanced-invoices', enhancedInvoiceRoutes);
 app.use('/api/fix-ownership', fixOwnershipRoutes);
 app.use('/api/downloads', require('./routes/downloads'));
 app.use('/api/enrollments', enrollmentRoutes);
+app.use('/api/attendance', attendanceRoutes);
 app.use('/api', s3HealthRoutes);
 
 // Add migration endpoint for database setup

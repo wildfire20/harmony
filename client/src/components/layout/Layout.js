@@ -16,7 +16,8 @@ import {
   Award,
   Calendar,
   Bell,
-  CreditCard
+  CreditCard,
+  ClipboardCheck
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import HarmonyLogo from '../common/HarmonyLogo';
@@ -37,6 +38,8 @@ const Layout = () => {
     navigate('/login');
   };
 
+  const isTeacherOrAdmin = user?.role === 'teacher' || user?.role === 'admin' || user?.role === 'super_admin';
+  
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: Home, color: 'harmony-navy' },
     { name: 'Tasks', href: '/tasks', icon: BookOpen, color: 'harmony-secondary' },
@@ -44,6 +47,9 @@ const Layout = () => {
     { name: 'Announcements', href: '/announcements', icon: MessageSquare, color: 'harmony-navy' },
     { name: 'Documents', href: '/documents', icon: FileText, color: 'harmony-secondary' },
     { name: 'Calendar', href: '/calendar', icon: Calendar, color: 'harmony-navy' },
+    ...(isTeacherOrAdmin ? [
+      { name: 'Attendance', href: '/attendance', icon: ClipboardCheck, color: 'harmony-gold' }
+    ] : []),
     { name: 'Profile', href: '/profile', icon: User, color: 'harmony-secondary' },
     ...(isAdmin ? [
       { name: 'Admin Panel', href: '/admin', icon: Settings, color: 'harmony-navy' },

@@ -173,6 +173,16 @@ export const adminAPI = {
   getStatistics: () => api.get('/admin/statistics'),
 };
 
+// Attendance API
+export const attendanceAPI = {
+  submitAttendance: (data) => api.post('/attendance/submit', data),
+  getClassAttendance: (classId, date) => api.get(`/attendance/class/${classId}/${date}`),
+  getStudentAttendance: (studentId, params) => api.get(`/attendance/student/${studentId}`, { params }),
+  getStats: (params) => api.get('/attendance/stats', { params }),
+  getLateReport: (params) => api.get('/attendance/late-report', { params }),
+  getTodayAttendance: () => api.get('/attendance/today'),
+};
+
 // Documents API
 export const documentsAPI = {
   getDocuments: (gradeId, classId) => api.get(`/documents/grade/${gradeId}/class/${classId}`),
