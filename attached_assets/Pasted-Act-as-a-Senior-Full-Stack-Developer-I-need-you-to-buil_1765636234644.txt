@@ -1,0 +1,40 @@
+Act as a Senior Full Stack Developer. I need you to build a "Bank Statement Reconciliation & Payment Module" for my School Management System called AutoM8.
+
+**Tech Stack:**
+- Environment: Replit
+- Backend: Node.js (Express)
+- Database: MongoDB (Mongoose)
+- Frontend: React (Vite)
+
+**Context:**
+The system is for a single institution: Harmony School (Preschool & Primary with Boarding).
+All Student IDs start with the prefix "HAR" (e.g., HAR001, HAR205).
+
+**Feature Requirements:**
+I need a feature where an Admin can upload a Bank CSV file. The system must parse this file to find student payments and update their ledger automatically.
+
+**Step 1: Backend (API & Logic)**
+1.  **Dependencies:** Install `multer` (file upload), `csv-parser` (reading CSVs), and `string-similarity` (for fuzzy matching).
+2.  **Mongoose Schemas:**
+    -   `Student`: { studentId (string, unique), name, grade, balance (number), ... }
+    -   `Transaction`: { date, reference, amount, status ['Verified', 'Unmatched', 'Manual'], studentId (ref), originalRawData }
+3.  **The API Endpoint (`POST /api/payments/upload-csv`):**
+    -   Accept a CSV file.
+    -   Loop through every row.
+    -   **Cleaning Logic:** Convert the 'Reference' column to uppercase and remove all spaces/special characters.
+    -   **Matching Logic:**
+        -   **Exact Match:** If the cleaned reference contains a valid ID starting with "HAR" that exists in the DB -> Create a 'Verified' Transaction and deduct the amount from the Student's `balance`.
+        -   **Fuzzy/Typo Match:** If the reference looks like "HAR..." (e.g., "HAR 001", "HARO01") but isn't exact -> Flag it as 'Unmatched' but suggest the closest match in the UI.
+        -   **No Match (Suspense Account):** If no "HAR" ID is found -> Create a Transaction with status 'Unmatched' and `studentId` as null.
+4.  **Audit Trail:** Save every row as a Transaction document.
+
+**Step 2: Frontend (React UI)**
+1.  **Upload Component:** A clean UI to drag and drop the CSV file.
+2.  **Reconciliation Dashboard:**
+    -   **Summary Cards:** Total Processed, Total Matched, Total Unmatched.
+    -   **The "Suspense Account" Table:** A table showing only transactions with status 'Unmatched'.
+    -   **Action:** Add a "Resolve" button next to unmatched items to manually assign them to a student.
+
+**Specific Instructions:**
+-   Ensure the code specifically looks for the "HAR" pattern in the reference strings.
+-   Provide the backend controller code and the React frontend component.
