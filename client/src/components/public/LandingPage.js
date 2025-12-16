@@ -664,16 +664,18 @@ const EnrollmentSection = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg">
-                <input
-                  type="checkbox"
-                  {...register('boardingOption')}
-                  className="w-5 h-5 text-red-600 border-gray-300 rounded focus:ring-red-600"
-                />
-                <label className="text-sm text-gray-700">
-                  <span className="font-medium">Interested in Boarding?</span>
-                  <br />
-                  <span className="text-gray-500">Check if you'd like to explore our boarding facilities</span>
+              <div className="p-4 bg-blue-50 rounded-lg">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    {...register('boardingOption')}
+                    className="mt-1 w-6 h-6 min-w-[24px] min-h-[24px] text-red-600 border-2 border-gray-400 rounded focus:ring-red-600 accent-red-600"
+                    style={{ WebkitAppearance: 'checkbox', appearance: 'checkbox' }}
+                  />
+                  <span className="text-sm text-gray-700">
+                    <span className="font-medium block">Interested in Boarding?</span>
+                    <span className="text-gray-500">Check if you'd like to explore our boarding facilities</span>
+                  </span>
                 </label>
               </div>
 
