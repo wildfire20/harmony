@@ -676,7 +676,7 @@ router.get('/student-payment-history/:studentNumber', [
     
     // Find the student
     const studentResult = await db.query(`
-      SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade
+      SELECT u.id, u.first_name, u.last_name, u.student_number
       FROM users u
       WHERE u.student_number ILIKE $1 OR u.student_number ILIKE $2
       LIMIT 1
@@ -932,7 +932,7 @@ router.get('/search-students', [
     }
     
     const result = await db.query(`
-      SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade
+      SELECT u.id, u.first_name, u.last_name, u.student_number
       FROM users u
       WHERE u.role = 'student' 
         AND (
@@ -952,8 +952,7 @@ router.get('/search-students', [
         studentNumber: s.student_number,
         firstName: s.first_name,
         lastName: s.last_name,
-        fullName: `${s.first_name} ${s.last_name}`,
-        grade: s.grade
+        fullName: `${s.first_name} ${s.last_name}`
       }))
     });
     
