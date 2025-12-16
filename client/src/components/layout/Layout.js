@@ -122,26 +122,28 @@ const Layout = () => {
                 <X className="h-5 w-5 text-gray-600" />
               </button>
             </div>
-            <div className="pt-6 pb-4 px-4">
-              <div className="flex items-center gap-3 mb-8">
-                <img 
-                  src="/images/harmony-logo.png" 
-                  alt="Harmony Learning" 
-                  className="h-12 w-12 object-contain"
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
-                <div>
-                  <h1 className="text-lg font-bold text-red-600">HARMONY LEARNING</h1>
-                  <p className="text-xs text-gray-500">INSTITUTE</p>
+            <div className="flex flex-col h-full">
+              <div className="flex-shrink-0 pt-6 pb-4 px-4">
+                <div className="flex items-center gap-3 mb-4">
+                  <img 
+                    src="/images/harmony-logo.png" 
+                    alt="Harmony Learning" 
+                    className="h-12 w-12 object-contain"
+                    onError={(e) => { e.target.style.display = 'none'; }}
+                  />
+                  <div>
+                    <h1 className="text-lg font-bold text-red-600">HARMONY LEARNING</h1>
+                    <p className="text-xs text-gray-500">INSTITUTE</p>
+                  </div>
                 </div>
               </div>
-              <nav className="space-y-1">
+              <nav className="flex-1 overflow-y-auto px-4 space-y-1 pb-4">
                 {navigation.map((item) => (
                   <NavItem key={item.name} item={item} onClick={() => setSidebarOpen(false)} />
                 ))}
               </nav>
             </div>
-            <div className={`mt-auto border-t p-4 ${
+            <div className={`flex-shrink-0 border-t p-4 ${
               theme === 'dark' ? 'border-gray-800' : 'border-gray-100'
             }`}>
               <div className="flex items-center gap-3">
