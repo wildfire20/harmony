@@ -20,6 +20,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
 import toast from 'react-hot-toast';
 import EnhancedPaymentUploader from './EnhancedPaymentUploader';
+import StudentPaymentExport from './StudentPaymentExport';
 
 const PaymentDashboard = () => {
   const { user, token } = useAuth();
@@ -386,6 +387,9 @@ const PaymentDashboard = () => {
             </div>
           </div>
         </div>
+
+        {/* Student Payment Export */}
+        <StudentPaymentExport />
 
         {/* Filters */}
         <div className="bg-white rounded-lg shadow mb-6 p-6">

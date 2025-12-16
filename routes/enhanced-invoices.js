@@ -663,6 +663,310 @@ async function processTransactions(transactions, userId) {
   return results;
 }
 
+/**
+ * Get student payment history and export to Excel
+ */
+router.get('/student-payment-history/:studentNumber', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { studentNumber } = req.params;
+    const { format } = req.query; // 'json' or 'excel'
+    
+    // Find the student
+    const studentResult = await db.query(`
+      SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade
+      FROM users u
+      WHERE u.student_number ILIKE $1 OR u.student_number ILIKE $2
+      LIMIT 1
+    `, [studentNumber, `HAR${studentNumber.replace(/^HAR/i, '')}`]);
+    
+    if (studentResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found with that student number'
+      });
+    }
+    
+    const student = studentResult.rows[0];
+    
+    // Get all invoices for this student (match by student_id OR student_number for compatibility)
+    const invoicesResult = await db.query(`
+      SELECT 
+        i.id,
+        i.reference_number,
+        i.amount_due,
+        i.amount_paid,
+        i.outstanding_balance,
+        i.overpaid_amount,
+        i.due_date,
+        i.status,
+        i.created_at,
+        i.updated_at
+      FROM invoices i
+      WHERE i.student_id = $1 OR i.student_number = $2
+      ORDER BY i.due_date ASC
+    `, [student.id, student.student_number]);
+    
+    const invoices = invoicesResult.rows;
+    
+    // Build monthly payment history from actual invoices only
+    const monthlyHistory = [];
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+    
+    // Process only invoices that exist (no artificial months)
+    invoices.forEach(inv => {
+      if (!inv.due_date) return;
+      
+      const date = new Date(inv.due_date);
+      const year = date.getFullYear();
+      const monthIndex = date.getMonth();
+      
+      monthlyHistory.push({
+        year: year,
+        month: months[monthIndex],
+        monthNumber: monthIndex + 1,
+        amountDue: parseFloat(inv.amount_due) || 0,
+        amountPaid: parseFloat(inv.amount_paid) || 0,
+        outstanding: parseFloat(inv.outstanding_balance) || 0,
+        status: inv.status,
+        paymentStatus: 
+          inv.status === 'paid' ? 'Paid' :
+          inv.status === 'overpaid' ? 'Overpaid' :
+          parseFloat(inv.amount_paid) > 0 ? 'Partial Payment' : 'Missed Payment',
+        reference: inv.reference_number || '-'
+      });
+    });
+    
+    // Sort by year and month
+    monthlyHistory.sort((a, b) => {
+      if (a.year !== b.year) return a.year - b.year;
+      return a.monthNumber - b.monthNumber;
+    });
+    
+    // Calculate summary
+    const totalDue = monthlyHistory.reduce((sum, m) => sum + m.amountDue, 0);
+    const totalPaid = monthlyHistory.reduce((sum, m) => sum + m.amountPaid, 0);
+    const totalOutstanding = monthlyHistory.reduce((sum, m) => sum + m.outstanding, 0);
+    const missedCount = monthlyHistory.filter(m => m.paymentStatus === 'Missed Payment').length;
+    const paidCount = monthlyHistory.filter(m => m.paymentStatus === 'Paid' || m.paymentStatus === 'Overpaid').length;
+    
+    const responseData = {
+      success: true,
+      student: {
+        id: student.id,
+        studentNumber: student.student_number,
+        firstName: student.first_name,
+        lastName: student.last_name,
+        fullName: `${student.first_name} ${student.last_name}`,
+        grade: student.grade
+      },
+      summary: {
+        totalDue,
+        totalPaid,
+        totalOutstanding,
+        missedPayments: missedCount,
+        completedPayments: paidCount,
+        totalMonths: monthlyHistory.filter(m => m.amountDue > 0).length
+      },
+      monthlyHistory
+    };
+    
+    if (format === 'excel') {
+      // Generate Excel file
+      const ExcelJS = require('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'Harmony Learning Institute';
+      workbook.created = new Date();
+      
+      const worksheet = workbook.addWorksheet('Payment History');
+      
+      // Title row
+      worksheet.mergeCells('A1:G1');
+      worksheet.getCell('A1').value = 'HARMONY LEARNING INSTITUTE - STUDENT PAYMENT HISTORY';
+      worksheet.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFDC2626' } };
+      worksheet.getCell('A1').alignment = { horizontal: 'center' };
+      
+      // Student info
+      worksheet.mergeCells('A3:G3');
+      worksheet.getCell('A3').value = `Student: ${student.first_name} ${student.last_name} (${student.student_number})`;
+      worksheet.getCell('A3').font = { bold: true, size: 12 };
+      
+      worksheet.mergeCells('A4:G4');
+      worksheet.getCell('A4').value = `Grade: ${student.grade || 'N/A'}`;
+      
+      worksheet.mergeCells('A5:G5');
+      worksheet.getCell('A5').value = `Report Generated: ${new Date().toLocaleDateString('en-ZA')}`;
+      
+      // Summary section
+      worksheet.getCell('A7').value = 'SUMMARY';
+      worksheet.getCell('A7').font = { bold: true, size: 12 };
+      
+      worksheet.getCell('A8').value = 'Total Amount Due:';
+      worksheet.getCell('B8').value = totalDue;
+      worksheet.getCell('B8').numFmt = 'R #,##0.00';
+      
+      worksheet.getCell('A9').value = 'Total Paid:';
+      worksheet.getCell('B9').value = totalPaid;
+      worksheet.getCell('B9').numFmt = 'R #,##0.00';
+      
+      worksheet.getCell('A10').value = 'Outstanding Balance:';
+      worksheet.getCell('B10').value = totalOutstanding;
+      worksheet.getCell('B10').numFmt = 'R #,##0.00';
+      worksheet.getCell('B10').font = { bold: true, color: totalOutstanding > 0 ? { argb: 'FFDC2626' } : { argb: 'FF16A34A' } };
+      
+      worksheet.getCell('A11').value = 'Missed Payments:';
+      worksheet.getCell('B11').value = missedCount;
+      
+      worksheet.getCell('A12').value = 'Completed Payments:';
+      worksheet.getCell('B12').value = paidCount;
+      
+      // Payment history table
+      worksheet.getCell('A14').value = 'MONTHLY PAYMENT HISTORY';
+      worksheet.getCell('A14').font = { bold: true, size: 12 };
+      
+      // Table headers
+      const headerRow = worksheet.getRow(15);
+      headerRow.values = ['Year', 'Month', 'Amount Due', 'Amount Paid', 'Outstanding', 'Status', 'Reference'];
+      headerRow.font = { bold: true };
+      headerRow.eachCell((cell) => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.border = { 
+          top: { style: 'thin' }, 
+          left: { style: 'thin' }, 
+          bottom: { style: 'thin' }, 
+          right: { style: 'thin' } 
+        };
+      });
+      
+      // Add data rows
+      let rowNum = 16;
+      monthlyHistory.filter(m => m.amountDue > 0 || m.paymentStatus !== 'No Invoice').forEach(month => {
+        const row = worksheet.getRow(rowNum);
+        row.values = [
+          month.year,
+          month.month,
+          month.amountDue,
+          month.amountPaid,
+          month.outstanding,
+          month.paymentStatus,
+          month.reference
+        ];
+        
+        // Format currency columns
+        row.getCell(3).numFmt = 'R #,##0.00';
+        row.getCell(4).numFmt = 'R #,##0.00';
+        row.getCell(5).numFmt = 'R #,##0.00';
+        
+        // Color status
+        const statusCell = row.getCell(6);
+        if (month.paymentStatus === 'Paid' || month.paymentStatus === 'Overpaid') {
+          statusCell.font = { color: { argb: 'FF16A34A' } };
+        } else if (month.paymentStatus === 'Missed Payment') {
+          statusCell.font = { bold: true, color: { argb: 'FFDC2626' } };
+          row.getCell(5).font = { bold: true, color: { argb: 'FFDC2626' } };
+        } else if (month.paymentStatus === 'Partial Payment') {
+          statusCell.font = { color: { argb: 'FFEA580C' } };
+        }
+        
+        // Add borders
+        row.eachCell((cell) => {
+          cell.border = { 
+            top: { style: 'thin' }, 
+            left: { style: 'thin' }, 
+            bottom: { style: 'thin' }, 
+            right: { style: 'thin' } 
+          };
+        });
+        
+        rowNum++;
+      });
+      
+      // Set column widths
+      worksheet.columns = [
+        { width: 10 },
+        { width: 12 },
+        { width: 15 },
+        { width: 15 },
+        { width: 15 },
+        { width: 18 },
+        { width: 20 }
+      ];
+      
+      // Generate buffer
+      const buffer = await workbook.xlsx.writeBuffer();
+      
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=Payment_History_${student.student_number}_${new Date().toISOString().split('T')[0]}.xlsx`);
+      res.send(buffer);
+      
+    } else {
+      res.json(responseData);
+    }
+    
+  } catch (error) {
+    console.error('Student payment history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get student payment history',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Search students for payment export
+ */
+router.get('/search-students', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { q } = req.query;
+    
+    if (!q || q.length < 2) {
+      return res.json({ success: true, students: [] });
+    }
+    
+    const result = await db.query(`
+      SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade
+      FROM users u
+      WHERE u.role = 'student' 
+        AND (
+          u.student_number ILIKE $1 
+          OR u.first_name ILIKE $1 
+          OR u.last_name ILIKE $1
+          OR CONCAT(u.first_name, ' ', u.last_name) ILIKE $1
+        )
+      ORDER BY u.student_number
+      LIMIT 10
+    `, [`%${q}%`]);
+    
+    res.json({
+      success: true,
+      students: result.rows.map(s => ({
+        id: s.id,
+        studentNumber: s.student_number,
+        firstName: s.first_name,
+        lastName: s.last_name,
+        fullName: `${s.first_name} ${s.last_name}`,
+        grade: s.grade
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Search students error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to search students',
+      error: error.message
+    });
+  }
+});
+
 async function logUploadActivity(filename, userId, parseResult, results) {
   try {
     // Simple logging - just console log for now since the table might not exist

@@ -87,7 +87,20 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - **Timestamp Recording** - Records when and who took attendance
 - **Access Control**: Teachers see only assigned classes, admins see school-wide reports
 
+## Payment System
+- **Invoice Generation** - Generate monthly invoices for all students
+- **CSV Bank Statement Upload** - Upload bank statements with auto-column detection
+- **Payment Reconciliation** - Match payments using HAR-prefixed student IDs
+- **Student Payment History Export** - Search for students and download Excel reports showing:
+  - Monthly payment breakdown
+  - Amount due, paid, and outstanding per month
+  - Payment status (Paid, Partial, Missed)
+  - Summary totals and statistics
+
 ## Recent Changes (December 2025)
+- **Student Payment Excel Export** - Added feature to search students and download individual payment history as Excel
+- **Preschool Age Range Updated** - Preschool now accepts ages 0-6 (was 3-5)
+- **Enrollment Message Updated** - Now accepting applications for 2026
 - **Digital Attendance System** - Complete attendance tracking for teachers and admins
 - Complete design overhaul to match actual school branding
 - Added hero carousel with school entrance and activity photos
@@ -101,3 +114,4 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - Added floating WhatsApp button on landing page
 - Updated footer contact information with new address, phone numbers, and email
 - Added Enrollments tab to Admin Panel for managing applications
+- Logout now redirects to homepage instead of login page
