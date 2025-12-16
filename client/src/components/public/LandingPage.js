@@ -461,6 +461,10 @@ const EnrollmentSection = () => {
       const result = await response.json();
       
       if (!response.ok) {
+        if (result.errors && result.errors.length > 0) {
+          const errorMessages = result.errors.map(e => e.msg).join('. ');
+          throw new Error(errorMessages);
+        }
         throw new Error(result.message || 'Failed to submit application');
       }
       
