@@ -122,7 +122,7 @@ const Layout = () => {
                 <X className="h-5 w-5 text-gray-600" />
               </button>
             </div>
-            <div className="flex flex-col h-full">
+            <div className="flex flex-col h-full overflow-hidden">
               <div className="flex-shrink-0 pt-6 pb-4 px-4">
                 <div className="flex items-center gap-3 mb-4">
                   <img 
@@ -142,22 +142,26 @@ const Layout = () => {
                   <NavItem key={item.name} item={item} onClick={() => setSidebarOpen(false)} />
                 ))}
               </nav>
-            </div>
-            <div className={`flex-shrink-0 border-t p-4 ${
-              theme === 'dark' ? 'border-gray-800' : 'border-gray-100'
-            }`}>
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 bg-gradient-to-br from-red-500 to-red-600 rounded-full flex items-center justify-center shadow-lg">
-                  <User className="h-5 w-5 text-white" />
+              <div className={`flex-shrink-0 border-t p-4 ${
+                theme === 'dark' ? 'border-gray-800 bg-gray-900' : 'border-gray-100 bg-white'
+              }`}>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="h-10 w-10 bg-gradient-to-br from-red-500 to-red-600 rounded-full flex items-center justify-center shadow-lg">
+                    <User className="h-5 w-5 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <p className={`text-sm font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-800'}`}>
+                      {user?.first_name} {user?.last_name}
+                    </p>
+                    <p className="text-xs text-gray-500">{getUserStatus()}</p>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <p className={`text-sm font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-800'}`}>
-                    {user?.first_name} {user?.last_name}
-                  </p>
-                  <p className="text-xs text-gray-500">{getUserStatus()}</p>
-                </div>
-                <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-600 transition-colors">
+                <button 
+                  onClick={handleLogout} 
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors"
+                >
                   <LogOut className="h-5 w-5" />
+                  <span>Sign Out</span>
                 </button>
               </div>
             </div>
