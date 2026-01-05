@@ -6,10 +6,11 @@ const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const EnhancedCSVParser = require('../utils/enhancedCSVParser');
+const FNBPDFParser = require('../utils/fnbPDFParser');
 
 const router = express.Router();
 
-// Configure multer for CSV uploads
+// Configure multer for CSV and PDF uploads
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
@@ -25,17 +26,21 @@ const upload = multer({
     }
   }),
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'text/csv' || path.extname(file.originalname).toLowerCase() === '.csv') {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const isCSV = file.mimetype === 'text/csv' || ext === '.csv';
+    const isPDF = file.mimetype === 'application/pdf' || ext === '.pdf';
+    
+    if (isCSV || isPDF) {
       cb(null, true);
     } else {
-      cb(new Error('Only CSV files are allowed'), false);
+      cb(new Error('Only CSV and PDF files are allowed'), false);
     }
   },
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+  limits: { fileSize: 20 * 1024 * 1024 } // 20MB limit for PDFs
 });
 
 /**
- * Step 1: Upload CSV file and analyze columns
+ * Step 1: Upload CSV or PDF file and analyze columns
  */
 router.post('/upload-and-analyze', [
   authenticate,
@@ -46,51 +51,85 @@ router.post('/upload-and-analyze', [
     if (!req.file) {
       return res.status(400).json({ 
         success: false,
-        message: 'No CSV file uploaded' 
+        message: 'No file uploaded. Please upload a CSV or PDF bank statement.' 
       });
     }
 
-    console.log('Analyzing CSV file:', req.file.filename);
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const isPDF = ext === '.pdf' || req.file.mimetype === 'application/pdf';
+    
+    console.log(`Analyzing ${isPDF ? 'PDF' : 'CSV'} file:`, req.file.filename);
 
-    const parser = new EnhancedCSVParser();
-    
-    // Read just the first few rows to get headers and sample data
-    const sampleData = await readCSVSample(req.file.path, 5);
-    
-    // Auto-detect column mapping
-    const autoMapping = parser.autoDetectColumns(sampleData.headers);
-    const confidence = parser.getMappingConfidence(autoMapping, sampleData.headers);
-    
-    // Get saved column mappings for user to choose from
-    const savedMappings = await db.query(`
-      SELECT id, mapping_name, bank_name, reference_column, amount_column, 
-             date_column, description_column, debit_column, credit_column,
-             use_count, last_used_at
-      FROM csv_column_mappings 
-      ORDER BY use_count DESC, last_used_at DESC
-    `);
+    if (isPDF) {
+      // Handle PDF file (FNB format)
+      const pdfParser = new FNBPDFParser();
+      const analysis = await pdfParser.analyzeFile(req.file.path);
+      
+      res.json({
+        success: true,
+        file: {
+          filename: req.file.filename,
+          originalName: req.file.originalname,
+          size: req.file.size,
+          path: req.file.path,
+          fileType: 'PDF'
+        },
+        analysis: {
+          headers: analysis.headers,
+          sampleRows: analysis.sampleData,
+          totalRows: analysis.totalTransactions,
+          transactionsWithStudentIds: analysis.transactionsWithStudentIds,
+          autoDetectedMapping: analysis.suggestedMapping,
+          confidence: 100,
+          needsManualMapping: false,
+          fileType: 'PDF'
+        },
+        savedMappings: []
+      });
+    } else {
+      // Handle CSV file
+      const parser = new EnhancedCSVParser();
+      
+      // Read just the first few rows to get headers and sample data
+      const sampleData = await readCSVSample(req.file.path, 5);
+      
+      // Auto-detect column mapping
+      const autoMapping = parser.autoDetectColumns(sampleData.headers);
+      const confidence = parser.getMappingConfidence(autoMapping, sampleData.headers);
+      
+      // Get saved column mappings for user to choose from
+      const savedMappings = await db.query(`
+        SELECT id, mapping_name, bank_name, reference_column, amount_column, 
+               date_column, description_column, debit_column, credit_column,
+               use_count, last_used_at
+        FROM csv_column_mappings 
+        ORDER BY use_count DESC, last_used_at DESC
+      `);
 
-    res.json({
-      success: true,
-      file: {
-        filename: req.file.filename,
-        originalName: req.file.originalname,
-        size: req.file.size,
-        path: req.file.path
-      },
-      analysis: {
-        headers: sampleData.headers,
-        sampleRows: sampleData.rows,
-        totalRows: sampleData.totalRows,
-        autoDetectedMapping: autoMapping,
-        confidence: confidence,
-        needsManualMapping: confidence < 80
-      },
-      savedMappings: savedMappings.rows
-    });
+      res.json({
+        success: true,
+        file: {
+          filename: req.file.filename,
+          originalName: req.file.originalname,
+          size: req.file.size,
+          path: req.file.path,
+          fileType: 'CSV'
+        },
+        analysis: {
+          headers: sampleData.headers,
+          sampleRows: sampleData.rows,
+          totalRows: sampleData.totalRows,
+          autoDetectedMapping: autoMapping,
+          confidence: confidence,
+          needsManualMapping: confidence < 80,
+          fileType: 'CSV'
+        },
+        savedMappings: savedMappings.rows
+      });
+    }
 
   } catch (error) {
-    console.error('CSV analysis error:', error);
+    console.error('File analysis error:', error);
     
     // Clean up uploaded file if it exists
     if (req.file && fs.existsSync(req.file.path)) {
@@ -99,20 +138,20 @@ router.post('/upload-and-analyze', [
 
     res.status(500).json({
       success: false,
-      message: 'Failed to analyze CSV file',
+      message: 'Failed to analyze file',
       error: error.message
     });
   }
 });
 
 /**
- * Step 2: Process CSV with confirmed column mapping
+ * Step 2: Process CSV or PDF with confirmed column mapping
  */
 router.post('/process-with-mapping', [
   authenticate,
   authorize('admin', 'super_admin'),
   body('filename').notEmpty(),
-  body('mapping').isObject(),
+  body('mapping').optional().isObject(),
   body('saveMappingAs').optional().isString().isLength({ max: 100 })
 ], async (req, res) => {
   try {
@@ -121,7 +160,7 @@ router.post('/process-with-mapping', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { filename, mapping, saveMappingAs, bankName } = req.body;
+    const { filename, mapping, saveMappingAs, bankName, fileType } = req.body;
     
     // Find the uploaded file
     const filePath = path.join(__dirname, '..', 'uploads', 'bank-statements', filename);
@@ -132,30 +171,46 @@ router.post('/process-with-mapping', [
       });
     }
 
-    console.log('Processing CSV with mapping:', filename, mapping);
+    const ext = path.extname(filename).toLowerCase();
+    const isPDF = ext === '.pdf' || fileType === 'PDF';
+    
+    console.log(`Processing ${isPDF ? 'PDF' : 'CSV'} with mapping:`, filename);
 
-    // Save the column mapping if requested
-    if (saveMappingAs) {
-      await saveColumnMapping(saveMappingAs, mapping, bankName, req.user.id);
+    let parseResult;
+    
+    if (isPDF) {
+      // Process PDF file
+      const pdfParser = new FNBPDFParser();
+      const pdfResult = await pdfParser.parsePDF(filePath);
+      
+      parseResult = {
+        transactions: pdfResult.transactions,
+        errors: []
+      };
+    } else {
+      // Save the column mapping if requested (CSV only)
+      if (saveMappingAs) {
+        await saveColumnMapping(saveMappingAs, mapping, bankName, req.user.id);
+      }
+
+      // Parse CSV with the provided mapping
+      const parser = new EnhancedCSVParser();
+      parseResult = await parser.parseCSV(filePath, mapping);
     }
-
-    // Parse CSV with the provided mapping
-    const parser = new EnhancedCSVParser();
-    const parseResult = await parser.parseCSV(filePath, mapping);
 
     if (parseResult.transactions.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'No valid transactions found in CSV file',
-        errors: parseResult.errors
+        message: `No valid transactions found in ${isPDF ? 'PDF' : 'CSV'} file`,
+        errors: parseResult.errors || []
       });
     }
 
-    // Process transactions (same logic as before)
+    // Process transactions (same logic for both CSV and PDF)
     const results = await processTransactions(parseResult.transactions, req.user.id);
 
-    // Update mapping usage statistics
-    if (saveMappingAs) {
+    // Update mapping usage statistics (CSV only)
+    if (!isPDF && saveMappingAs) {
       await updateMappingUsage(saveMappingAs);
     }
 
@@ -166,6 +221,7 @@ router.post('/process-with-mapping', [
     fs.unlinkSync(filePath);
 
     console.log('\n=== PROCESSING RESULTS SUMMARY ===');
+    console.log(`File type: ${isPDF ? 'PDF' : 'CSV'}`);
     console.log(`Total transactions processed: ${parseResult.transactions.length}`);
     console.log(`Matched: ${results.matched.length}`);
     console.log(`Partial: ${results.partial.length}`);
@@ -177,7 +233,7 @@ router.post('/process-with-mapping', [
 
     res.json({
       success: true,
-      message: `Processed ${parseResult.transactions.length} transactions successfully`,
+      message: `Processed ${parseResult.transactions.length} transactions from ${isPDF ? 'PDF' : 'CSV'} successfully`,
       summary: {
         totalProcessed: parseResult.transactions.length,
         matched: results.matched.length,
@@ -185,16 +241,17 @@ router.post('/process-with-mapping', [
         overpaid: results.overpaid.length,
         unmatched: results.unmatched.length,
         duplicates: results.duplicates.length,
-        errors: results.errors.length
+        errors: results.errors.length,
+        fileType: isPDF ? 'PDF' : 'CSV'
       },
       results
     });
 
   } catch (error) {
-    console.error('CSV processing error:', error);
+    console.error('File processing error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to process CSV file',
+      message: 'Failed to process file',
       error: error.message
     });
   }
