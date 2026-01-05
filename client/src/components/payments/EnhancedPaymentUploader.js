@@ -14,17 +14,23 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
-    if (file && file.type === 'text/csv') {
-      setSelectedFile(file);
-      setStep('upload');
-    } else {
-      toast.error('Please select a CSV file');
+    if (file) {
+      const ext = file.name.toLowerCase().split('.').pop();
+      const isCSV = file.type === 'text/csv' || ext === 'csv';
+      const isPDF = file.type === 'application/pdf' || ext === 'pdf';
+      
+      if (isCSV || isPDF) {
+        setSelectedFile(file);
+        setStep('upload');
+      } else {
+        toast.error('Please select a CSV or PDF file');
+      }
     }
   };
 
   const handleUploadAndAnalyze = async () => {
     if (!selectedFile) {
-      toast.error('Please select a CSV file');
+      toast.error('Please select a CSV or PDF file');
       return;
     }
 
@@ -45,12 +51,18 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
 
       if (data.success) {
         setAnalysisData(data);
-        setSavedMappings(data.savedMappings);
+        setSavedMappings(data.savedMappings || []);
         
-        // If confidence is high, use auto-detected mapping
-        if (!data.analysis.needsManualMapping) {
+        const isPDF = data.analysis.fileType === 'PDF' || data.file.fileType === 'PDF';
+        
+        // If confidence is high or PDF (auto-parsed), use auto-detected mapping
+        if (!data.analysis.needsManualMapping || isPDF) {
           setColumnMapping(data.analysis.autoDetectedMapping);
-          toast.success(`Columns auto-detected with ${data.analysis.confidence}% confidence`);
+          if (isPDF) {
+            toast.success(`PDF parsed: Found ${data.analysis.totalRows} transactions (${data.analysis.transactionsWithStudentIds || 0} with student IDs)`);
+          } else {
+            toast.success(`Columns auto-detected with ${data.analysis.confidence}% confidence`);
+          }
         } else {
           // Initialize with auto-detected mapping for manual adjustment
           setColumnMapping(data.analysis.autoDetectedMapping);
@@ -66,7 +78,7 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
       }
     } catch (error) {
       console.error('Upload error:', error);
-      toast.error('Failed to analyze CSV file: ' + error.message);
+      toast.error('Failed to analyze file: ' + error.message);
     } finally {
       setProcessing(false);
     }
@@ -92,13 +104,17 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
       return;
     }
 
-    // Validate mapping
-    const requiredFields = ['reference', 'date'];
-    const hasAmountOrDebitCredit = columnMapping.amount || (columnMapping.debit && columnMapping.credit);
+    const isPDF = analysisData.analysis?.fileType === 'PDF' || analysisData.file?.fileType === 'PDF';
     
-    if (!hasAmountOrDebitCredit || !requiredFields.every(field => columnMapping[field])) {
-      toast.error('Please map at least Reference, Date, and Amount (or Debit/Credit) columns');
-      return;
+    // Validate mapping (skip for PDF as it's auto-parsed)
+    if (!isPDF) {
+      const requiredFields = ['reference', 'date'];
+      const hasAmountOrDebitCredit = columnMapping.amount || (columnMapping.debit && columnMapping.credit);
+      
+      if (!hasAmountOrDebitCredit || !requiredFields.every(field => columnMapping[field])) {
+        toast.error('Please map at least Reference, Date, and Amount (or Debit/Credit) columns');
+        return;
+      }
     }
 
     try {
@@ -114,8 +130,9 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
         body: JSON.stringify({
           filename: analysisData.file.filename,
           mapping: columnMapping,
-          saveMappingAs: saveMappingAs.trim() || undefined,
-          bankName: bankName.trim() || undefined
+          saveMappingAs: isPDF ? undefined : (saveMappingAs.trim() || undefined),
+          bankName: isPDF ? 'FNB' : (bankName.trim() || undefined),
+          fileType: isPDF ? 'PDF' : 'CSV'
         })
       });
 
@@ -124,7 +141,7 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
       if (data.success) {
         setUploadResults(data);
         setStep('complete');
-        toast.success(`Successfully processed ${data.summary.totalProcessed} transactions`);
+        toast.success(`Successfully processed ${data.summary.totalProcessed} transactions from ${isPDF ? 'PDF' : 'CSV'}`);
         
         if (onUploadComplete) {
           onUploadComplete(data);
@@ -134,7 +151,7 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
       }
     } catch (error) {
       console.error('Processing error:', error);
-      toast.error('Failed to process CSV file: ' + error.message);
+      toast.error('Failed to process file: ' + error.message);
       setStep('mapping'); // Go back to mapping step
     } finally {
       setProcessing(false);
@@ -166,23 +183,26 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
         <div className="text-center">
           <input
             type="file"
-            accept=".csv"
+            accept=".csv,.pdf"
             onChange={handleFileSelect}
             className="hidden"
-            id="csv-file"
+            id="bank-statement-file"
           />
           <label
-            htmlFor="csv-file"
+            htmlFor="bank-statement-file"
             className="cursor-pointer flex flex-col items-center"
           >
             <svg className="w-12 h-12 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
             <p className="text-lg font-medium text-gray-900">
-              {selectedFile ? selectedFile.name : 'Choose CSV file'}
+              {selectedFile ? selectedFile.name : 'Choose CSV or PDF file'}
             </p>
             <p className="text-sm text-gray-500">
-              Bank statement in CSV format (max 10MB)
+              Bank statement in CSV or PDF format (max 20MB)
+            </p>
+            <p className="text-xs text-gray-400 mt-1">
+              FNB PDF statements are auto-parsed
             </p>
           </label>
         </div>
@@ -206,12 +226,86 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
         disabled={!selectedFile || processing}
         className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {processing ? 'Analyzing...' : 'Analyze CSV Columns'}
+        {processing ? 'Analyzing...' : 'Analyze File'}
       </button>
     </div>
   );
 
-  const renderMappingStep = () => (
+  const renderMappingStep = () => {
+    const isPDF = analysisData.analysis?.fileType === 'PDF' || analysisData.file?.fileType === 'PDF';
+    
+    if (isPDF) {
+      return (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-medium">PDF Bank Statement Parsed</h3>
+            <span className="px-3 py-1 bg-green-100 text-green-800 text-sm rounded-full">
+              FNB Format
+            </span>
+          </div>
+
+          <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+            <div className="flex items-center">
+              <svg className="w-5 h-5 text-green-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              <p className="text-sm text-green-700">
+                PDF parsed successfully. Found {analysisData.analysis.totalRows} transactions
+                {analysisData.analysis.transactionsWithStudentIds > 0 && 
+                  ` (${analysisData.analysis.transactionsWithStudentIds} with student IDs)`}.
+              </p>
+            </div>
+          </div>
+
+          {/* Sample Transactions Preview */}
+          {analysisData.analysis.sampleRows && analysisData.analysis.sampleRows.length > 0 && (
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="text-sm font-medium text-gray-900 mb-3">Sample Transactions</h4>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="p-2 text-left font-medium">Date</th>
+                      <th className="p-2 text-left font-medium">Description</th>
+                      <th className="p-2 text-right font-medium">Amount</th>
+                      <th className="p-2 text-left font-medium">Reference</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analysisData.analysis.sampleRows.map((row, index) => (
+                      <tr key={index} className="border-b">
+                        <td className="p-2 text-gray-600">{row.date}</td>
+                        <td className="p-2 text-gray-600">{row.description}</td>
+                        <td className="p-2 text-gray-600 text-right">R {row.amount?.toFixed(2)}</td>
+                        <td className="p-2 text-gray-600">{row.reference}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-4">
+            <button
+              onClick={handleReset}
+              className="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50"
+            >
+              Upload Different File
+            </button>
+            <button
+              onClick={handleProcessWithMapping}
+              disabled={processing}
+              className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {processing ? 'Processing...' : 'Process Payments'}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    
+    return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-medium">Map CSV Columns</h3>
@@ -443,6 +537,7 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
       </div>
     </div>
   );
+  };
 
   const renderProcessingStep = () => (
     <div className="text-center py-8">
