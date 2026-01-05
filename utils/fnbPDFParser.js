@@ -45,9 +45,7 @@ class FNBPDFParser {
       const lines = this.groupContentByLine(page.content);
       
       lines.forEach((line, lineIndex) => {
-        const lineText = line.map(item => item.str.trim()).filter(s => s).join(' ');
-        
-        const transaction = this.parseTransactionLine(lineText, line);
+        const transaction = this.parseTransactionLineWithPositions(line);
         if (transaction) {
           transactions.push(transaction);
         }
@@ -94,20 +92,51 @@ class FNBPDFParser {
     return lines;
   }
 
-  parseTransactionLine(lineText, lineItems) {
+  parseTransactionLineWithPositions(lineItems) {
+    if (!lineItems || lineItems.length < 3) return null;
+    
+    const lineText = lineItems.map(item => item.str.trim()).filter(s => s).join(' ');
+    
     const dateMatch = this.findDate(lineText);
     if (!dateMatch) return null;
     
-    const amounts = this.findAmounts(lineText);
-    if (amounts.length === 0) return null;
+    const studentIds = lineText.match(this.studentIdPattern) || [];
     
-    const creditAmount = amounts.find(a => a > 0) || 0;
+    const amountsWithPositions = this.findAmountsWithPositions(lineItems);
+    if (amountsWithPositions.length === 0) return null;
+    
+    amountsWithPositions.sort((a, b) => a.x - b.x);
+    
+    let creditAmount = 0;
+    
+    if (amountsWithPositions.length >= 3) {
+      const creditCandidate = amountsWithPositions[amountsWithPositions.length - 2];
+      if (creditCandidate && creditCandidate.amount > 0) {
+        creditAmount = creditCandidate.amount;
+      }
+    } else if (amountsWithPositions.length === 2) {
+      if (studentIds.length > 0) {
+        const firstAmount = amountsWithPositions[0];
+        if (firstAmount && firstAmount.amount > 0) {
+          creditAmount = firstAmount.amount;
+        }
+      } else {
+        return null;
+      }
+    } else if (amountsWithPositions.length === 1) {
+      return null;
+    }
+    
     if (creditAmount <= 0) return null;
     
-    const description = this.extractDescription(lineText, dateMatch.matchedText, amounts);
+    const description = this.extractDescriptionFromItems(lineItems, dateMatch.matchedText, amountsWithPositions);
     
-    const studentIds = lineText.match(this.studentIdPattern) || [];
     const reference = studentIds.length > 0 ? studentIds[0].toUpperCase() : description;
+    
+    const isLikelyPayment = this.isLikelyPaymentTransaction(lineText, studentIds.length > 0);
+    if (!isLikelyPayment && amountsWithPositions.length < 3) {
+      return null;
+    }
     
     return {
       date: dateMatch.date,
@@ -117,6 +146,73 @@ class FNBPDFParser {
       rawLine: lineText,
       hasStudentId: studentIds.length > 0
     };
+  }
+  
+  isLikelyPaymentTransaction(lineText, hasStudentId) {
+    if (hasStudentId) return true;
+    
+    const paymentKeywords = [
+      /deposit/i,
+      /payment/i,
+      /transfer\s+in/i,
+      /eft\s+in/i,
+      /credit/i,
+      /school\s*fee/i,
+      /tuition/i,
+      /received/i,
+      /inward/i
+    ];
+    
+    for (const pattern of paymentKeywords) {
+      if (pattern.test(lineText)) {
+        return true;
+      }
+    }
+    
+    const debitKeywords = [
+      /debit\s+order/i,
+      /purchase/i,
+      /withdrawal/i,
+      /atm/i,
+      /transfer\s+out/i,
+      /eft\s+out/i,
+      /payment\s+to/i,
+      /card\s+transaction/i,
+      /service\s+fee/i,
+      /bank\s+charge/i
+    ];
+    
+    for (const pattern of debitKeywords) {
+      if (pattern.test(lineText)) {
+        return false;
+      }
+    }
+    
+    return false;
+  }
+
+  findAmountsWithPositions(lineItems) {
+    const amounts = [];
+    const amountRegex = /^-?R?\s*([\d,]+\.\d{2})$/;
+    
+    lineItems.forEach(item => {
+      const text = item.str.trim();
+      const match = text.match(amountRegex);
+      if (match) {
+        const cleanAmount = match[1].replace(/,/g, '');
+        const amount = parseFloat(cleanAmount);
+        if (!isNaN(amount) && amount > 0) {
+          const isNegative = text.startsWith('-');
+          amounts.push({
+            amount: isNegative ? -amount : amount,
+            x: item.x,
+            text: text
+          });
+        }
+      }
+    });
+    
+    return amounts;
   }
 
   findDate(text) {
@@ -181,35 +277,18 @@ class FNBPDFParser {
     return null;
   }
 
-  findAmounts(text) {
-    const amounts = [];
-    const amountRegex = /-?R?\s*([\d,]+\.\d{2})/g;
-    let match;
+  extractDescriptionFromItems(lineItems, dateText, amountsWithPositions) {
+    const amountXPositions = new Set(amountsWithPositions.map(a => a.x));
     
-    while ((match = amountRegex.exec(text)) !== null) {
-      const cleanAmount = match[1].replace(/,/g, '');
-      const amount = parseFloat(cleanAmount);
-      if (!isNaN(amount) && amount > 0) {
-        const isNegative = match[0].trim().startsWith('-');
-        amounts.push(isNegative ? -amount : amount);
+    let description = '';
+    lineItems.forEach(item => {
+      const text = item.str.trim();
+      if (!amountXPositions.has(item.x) && text && !text.match(/^-?R?\s*[\d,]+\.\d{2}$/)) {
+        description += text + ' ';
       }
-    }
-    
-    return amounts;
-  }
-
-  extractDescription(lineText, dateText, amounts) {
-    let description = lineText;
-    
-    description = description.replace(dateText, '');
-    
-    amounts.forEach(amount => {
-      const amountStr = amount.toFixed(2);
-      description = description.replace(new RegExp(`R?\\s*${amountStr.replace('.', '\\.')}`, 'g'), '');
-      const formattedAmount = amount.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      description = description.replace(new RegExp(`R?\\s*${formattedAmount.replace('.', '\\.')}`, 'g'), '');
     });
     
+    description = description.replace(dateText, '');
     description = description.replace(/\s+/g, ' ').trim();
     
     return description || 'Payment';

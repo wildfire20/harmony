@@ -90,6 +90,7 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 ## Payment System
 - **Invoice Generation** - Generate monthly invoices for all students
 - **CSV Bank Statement Upload** - Upload bank statements with auto-column detection
+- **PDF Bank Statement Upload** - Upload FNB PDF bank statements with automatic parsing
 - **Payment Reconciliation** - Match payments using HAR-prefixed student IDs
 - **Student Payment History Export** - Search for students and download Excel reports showing:
   - Monthly payment breakdown
