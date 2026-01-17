@@ -1,6 +1,7 @@
-modules = ["web", "bash", "nodejs-20", "postgresql-16"]
+modules = ["web", "bash", "nodejs-20", "postgresql-16", "python-3.11"]
 [agent]
 expertMode = true
+integrations = ["google-mail:1.0.0"]
 
 [nix]
 channel = "stable-25_05"
@@ -12,6 +13,7 @@ packages = ["unzip"]
 NODE_ENV = "production"
 PORT = "5000"
 JWT_SECRET = "harmony-learning-jwt-secret-key-2024"
+ADMIN_NOTIFICATION_EMAIL = "harmonylearninginstitute@gmail.com"
 
 [workflows]
 runButton = "Project"

@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const { body, validationResult } = require('express-validator');
 const { authenticate } = require('../middleware/auth');
+const { sendEnrollmentNotification } = require('../services/gmailService');
 
 const initializeEnrollmentsTable = async () => {
   try {
@@ -96,9 +97,35 @@ router.post('/', enrollmentValidation, async (req, res) => {
       additionalNotes || null
     ]);
 
+    const enrollment = result.rows[0];
+
+    try {
+      const emailResult = await sendEnrollmentNotification({
+        parent_first_name: parentFirstName,
+        parent_last_name: parentLastName,
+        parent_email: parentEmail,
+        parent_phone: parentPhone,
+        student_first_name: studentFirstName,
+        student_last_name: studentLastName,
+        student_date_of_birth: studentDateOfBirth,
+        grade_applying: gradeApplying,
+        boarding_option: boardingOption || false,
+        previous_school: previousSchool,
+        additional_notes: additionalNotes
+      });
+      
+      if (emailResult.success) {
+        console.log('✅ Enrollment notification email sent successfully');
+      } else {
+        console.log('⚠️ Enrollment saved but email notification failed:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('⚠️ Email notification error (enrollment still saved):', emailError.message);
+    }
+
     res.status(201).json({
       message: 'Enrollment application submitted successfully',
-      enrollment: result.rows[0]
+      enrollment: enrollment
     });
   } catch (error) {
     console.error('Enrollment submission error:', error);
