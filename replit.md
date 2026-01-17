@@ -98,6 +98,15 @@ A school management system for Harmony Learning Institute. This is a full-stack 
   - Payment status (Paid, Partial, Missed)
   - Summary totals and statistics
 
+## Email Notifications
+- **Enrollment Notifications** - Admins receive email alerts when parents submit new enrollment applications
+- Emails include: Student name, DOB, grade applying for, parent contact info, boarding preference, previous school, notes
+- Uses Gmail integration for reliable delivery
+- Email sent to: harmonylearninginstitute@gmail.com (configurable via ADMIN_NOTIFICATION_EMAIL env var)
+
+## Recent Changes (January 2026)
+- **Email Enrollment Notifications** - Gmail integration to notify admins of new applications
+
 ## Recent Changes (December 2025)
 - **Student Payment Excel Export** - Added feature to search students and download individual payment history as Excel
 - **Preschool Age Range Updated** - Preschool now accepts ages 0-6 (was 3-5)
