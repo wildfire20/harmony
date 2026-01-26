@@ -1424,6 +1424,334 @@ router.post('/redistribute-documents', [
   }
 });
 
+// ==================== GRADE PROMOTION ====================
+
+// Get grade promotion preview (shows how many students will be moved)
+router.get('/grade-promotion/preview', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT g.id, g.name, 
+             COUNT(u.id) FILTER (WHERE u.is_active = true) as active_students,
+             COUNT(u.id) FILTER (WHERE u.is_active = false) as archived_students
+      FROM grades g
+      LEFT JOIN users u ON g.id = u.grade_id AND u.role = 'student'
+      GROUP BY g.id, g.name
+      ORDER BY g.name
+    `);
+
+    res.json({
+      success: true,
+      grades: result.rows,
+      message: 'Grade promotion preview'
+    });
+  } catch (error) {
+    console.error('Grade promotion preview error:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching grade promotion preview' });
+  }
+});
+
+// Promote students from one grade to another
+router.post('/grade-promotion', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+  body('from_grade_id').isInt().withMessage('Source grade ID is required'),
+  body('to_grade_id').isInt().withMessage('Destination grade ID is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { from_grade_id, to_grade_id } = req.body;
+
+    if (from_grade_id === to_grade_id) {
+      return res.status(400).json({ message: 'Source and destination grades cannot be the same' });
+    }
+
+    // Get grade names for logging
+    const gradesResult = await db.query(
+      'SELECT id, name FROM grades WHERE id IN ($1, $2)',
+      [from_grade_id, to_grade_id]
+    );
+
+    const fromGrade = gradesResult.rows.find(g => g.id === parseInt(from_grade_id));
+    const toGrade = gradesResult.rows.find(g => g.id === parseInt(to_grade_id));
+
+    if (!fromGrade || !toGrade) {
+      return res.status(404).json({ message: 'One or both grades not found' });
+    }
+
+    // Update all active students from the source grade to destination grade
+    // Clear their class assignment since they'll need to be reassigned
+    const result = await db.query(`
+      UPDATE users 
+      SET grade_id = $1, class_id = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE grade_id = $2 AND role = 'student' AND is_active = true
+      RETURNING id, student_number, first_name, last_name
+    `, [to_grade_id, from_grade_id]);
+
+    console.log(`✅ Promoted ${result.rows.length} students from ${fromGrade.name} to ${toGrade.name}`);
+
+    res.json({
+      success: true,
+      message: `Successfully promoted ${result.rows.length} students from ${fromGrade.name} to ${toGrade.name}`,
+      promoted_count: result.rows.length,
+      from_grade: fromGrade.name,
+      to_grade: toGrade.name,
+      promoted_students: result.rows
+    });
+
+  } catch (error) {
+    console.error('Grade promotion error:', error);
+    res.status(500).json({ success: false, message: 'Server error during grade promotion' });
+  }
+});
+
+// Bulk promote all grades (end of year promotion)
+router.post('/grade-promotion/bulk', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    // Get all grades ordered by name (assumes names like "Grade 1", "Grade 2", etc.)
+    const gradesResult = await db.query(`
+      SELECT id, name FROM grades 
+      WHERE is_active = true 
+      ORDER BY 
+        CASE 
+          WHEN name ILIKE '%preschool%' OR name ILIKE '%grade r%' OR name ILIKE '%gr r%' THEN 0
+          WHEN name ~ '^Grade\\s*\\d+' THEN CAST(REGEXP_REPLACE(name, '[^0-9]', '', 'g') AS INTEGER)
+          ELSE 999
+        END
+    `);
+
+    const grades = gradesResult.rows;
+    
+    if (grades.length < 2) {
+      return res.status(400).json({ message: 'Need at least 2 grades for bulk promotion' });
+    }
+
+    const promotionResults = [];
+    const client = await db.pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Start from highest grade and work down to avoid conflicts
+      for (let i = grades.length - 1; i > 0; i--) {
+        const fromGrade = grades[i - 1];
+        const toGrade = grades[i];
+
+        const result = await client.query(`
+          UPDATE users 
+          SET grade_id = $1, class_id = NULL, updated_at = CURRENT_TIMESTAMP
+          WHERE grade_id = $2 AND role = 'student' AND is_active = true
+          RETURNING id
+        `, [toGrade.id, fromGrade.id]);
+
+        promotionResults.push({
+          from_grade: fromGrade.name,
+          to_grade: toGrade.name,
+          students_promoted: result.rows.length
+        });
+      }
+
+      await client.query('COMMIT');
+
+      const totalPromoted = promotionResults.reduce((sum, r) => sum + r.students_promoted, 0);
+
+      console.log(`✅ Bulk promotion completed: ${totalPromoted} students promoted across ${promotionResults.length} grade levels`);
+
+      res.json({
+        success: true,
+        message: `Successfully promoted ${totalPromoted} students across all grade levels`,
+        total_promoted: totalPromoted,
+        details: promotionResults
+      });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+  } catch (error) {
+    console.error('Bulk grade promotion error:', error);
+    res.status(500).json({ success: false, message: 'Server error during bulk grade promotion' });
+  }
+});
+
+// ==================== STUDENT ARCHIVING ====================
+
+// Archive a student (mark as inactive)
+router.put('/students/:id/archive', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const result = await db.query(`
+      UPDATE users 
+      SET is_active = false, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND role = 'student'
+      RETURNING id, student_number, first_name, last_name, is_active
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    console.log(`📦 Archived student: ${result.rows[0].student_number} - ${result.rows[0].first_name} ${result.rows[0].last_name}${reason ? ` (Reason: ${reason})` : ''}`);
+
+    res.json({
+      success: true,
+      message: `Student ${result.rows[0].first_name} ${result.rows[0].last_name} has been archived`,
+      student: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Archive student error:', error);
+    res.status(500).json({ success: false, message: 'Server error archiving student' });
+  }
+});
+
+// Unarchive a student (restore to active)
+router.put('/students/:id/unarchive', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      UPDATE users 
+      SET is_active = true, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND role = 'student'
+      RETURNING id, student_number, first_name, last_name, is_active
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    console.log(`✅ Unarchived student: ${result.rows[0].student_number} - ${result.rows[0].first_name} ${result.rows[0].last_name}`);
+
+    res.json({
+      success: true,
+      message: `Student ${result.rows[0].first_name} ${result.rows[0].last_name} has been restored`,
+      student: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Unarchive student error:', error);
+    res.status(500).json({ success: false, message: 'Server error restoring student' });
+  }
+});
+
+// Bulk archive students
+router.post('/students/bulk-archive', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+  body('student_ids').isArray().withMessage('Student IDs must be an array')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { student_ids, reason } = req.body;
+
+    if (student_ids.length === 0) {
+      return res.status(400).json({ message: 'No students selected for archiving' });
+    }
+
+    const result = await db.query(`
+      UPDATE users 
+      SET is_active = false, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ANY($1) AND role = 'student'
+      RETURNING id, student_number, first_name, last_name
+    `, [student_ids]);
+
+    console.log(`📦 Bulk archived ${result.rows.length} students${reason ? ` (Reason: ${reason})` : ''}`);
+
+    res.json({
+      success: true,
+      message: `Successfully archived ${result.rows.length} students`,
+      archived_count: result.rows.length,
+      archived_students: result.rows
+    });
+
+  } catch (error) {
+    console.error('Bulk archive students error:', error);
+    res.status(500).json({ success: false, message: 'Server error bulk archiving students' });
+  }
+});
+
+// Get archived students
+router.get('/students/archived', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { page = 1, limit = 50, search } = req.query;
+    const offset = (page - 1) * limit;
+
+    let whereClause = "WHERE u.role = 'student' AND u.is_active = false";
+    const params = [];
+    let paramCount = 0;
+
+    if (search) {
+      paramCount++;
+      whereClause += ` AND (u.first_name ILIKE $${paramCount} OR u.last_name ILIKE $${paramCount} OR u.student_number ILIKE $${paramCount})`;
+      params.push(`%${search}%`);
+    }
+
+    const countResult = await db.query(`
+      SELECT COUNT(*) 
+      FROM users u
+      ${whereClause}
+    `, params);
+
+    const totalCount = parseInt(countResult.rows[0].count);
+
+    params.push(limit, offset);
+    const result = await db.query(`
+      SELECT u.id, u.student_number, u.first_name, u.last_name, u.email, 
+             u.grade_id, u.class_id, u.is_active, u.created_at, u.updated_at,
+             g.name as grade_name, c.name as class_name
+      FROM users u
+      LEFT JOIN grades g ON u.grade_id = g.id
+      LEFT JOIN classes c ON u.class_id = c.id
+      ${whereClause}
+      ORDER BY u.updated_at DESC
+      LIMIT $${params.length - 1} OFFSET $${params.length}
+    `, params);
+
+    res.json({
+      success: true,
+      students: result.rows,
+      pagination: {
+        current_page: parseInt(page),
+        total_pages: Math.ceil(totalCount / limit),
+        total_count: totalCount,
+        per_page: parseInt(limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get archived students error:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching archived students' });
+  }
+});
+
 // Get teacher assignments
 router.get('/teachers/:id/assignments', [
   authenticate,

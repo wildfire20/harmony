@@ -151,6 +151,17 @@ export const adminAPI = {
     responseType: 'blob' 
   }),
   
+  // Student Archiving
+  archiveStudent: (id, reason) => api.put(`/admin/students/${id}/archive`, { reason }),
+  unarchiveStudent: (id) => api.put(`/admin/students/${id}/unarchive`),
+  bulkArchiveStudents: (studentIds, reason) => api.post('/admin/students/bulk-archive', { student_ids: studentIds, reason }),
+  getArchivedStudents: (params) => api.get('/admin/students/archived', { params }),
+  
+  // Grade Promotion
+  getGradePromotionPreview: () => api.get('/admin/grade-promotion/preview'),
+  promoteGrade: (fromGradeId, toGradeId) => api.post('/admin/grade-promotion', { from_grade_id: fromGradeId, to_grade_id: toGradeId }),
+  bulkPromoteGrades: () => api.post('/admin/grade-promotion/bulk'),
+  
   // Teachers
   addTeacher: (data) => api.post('/admin/teachers', data),
   getTeachers: (params) => api.get('/admin/teachers', { params }),

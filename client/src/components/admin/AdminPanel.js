@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../common/ThemeProvider';
-import { Settings, Users, BarChart3, GraduationCap, ClipboardList } from 'lucide-react';
+import { Settings, Users, BarChart3, GraduationCap, ClipboardList, ArrowUpCircle } from 'lucide-react';
 import StudentManagement from './StudentManagement';
 import TeacherManagement from './TeacherManagement';
 import SystemSettings from './SystemSettings';
 import AdminReports from './AdminReports';
 import EnrollmentManagement from './EnrollmentManagement';
+import GradePromotion from './GradePromotion';
 
 const AdminPanel = () => {
   const { user } = useAuth();
@@ -23,6 +24,7 @@ const AdminPanel = () => {
     { id: 'overview', name: 'Overview', icon: BarChart3 },
     { id: 'enrollments', name: 'Enrollments', icon: ClipboardList },
     { id: 'students', name: 'Student Management', icon: GraduationCap },
+    { id: 'promotion', name: 'Grade Promotion', icon: ArrowUpCircle },
     { id: 'teachers', name: 'Teacher Management', icon: Users },
     { id: 'settings', name: 'System Settings', icon: Settings },
     { id: 'reports', name: 'Reports', icon: BarChart3 },
@@ -34,6 +36,8 @@ const AdminPanel = () => {
         return <EnrollmentManagement />;
       case 'students':
         return <StudentManagement />;
+      case 'promotion':
+        return <GradePromotion />;
       case 'teachers':
         return <TeacherManagement />;
       case 'settings':

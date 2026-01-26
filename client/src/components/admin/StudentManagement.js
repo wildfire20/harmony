@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useForm } from 'react-hook-form';
-import { Plus, Search, Edit, Trash2, Download, Upload } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Download, Upload, Archive, RotateCcw, Users } from 'lucide-react';
 import { adminAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 import toast from 'react-hot-toast';
@@ -11,6 +11,7 @@ const StudentManagement = () => {
   const [editingStudent, setEditingStudent] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGrade, setSelectedGrade] = useState('all');
+  const [showArchived, setShowArchived] = useState(false);
   const queryClient = useQueryClient();
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm();
@@ -117,7 +118,46 @@ const StudentManagement = () => {
     }
   );
 
+  const archiveStudentMutation = useMutation(
+    ({ id, reason }) => adminAPI.archiveStudent(id, reason),
+    {
+      onSuccess: (response) => {
+        queryClient.invalidateQueries(['students']);
+        queryClient.invalidateQueries(['archivedStudents']);
+        toast.success(response.data?.message || 'Student archived successfully!');
+      },
+      onError: (error) => {
+        toast.error(error.response?.data?.message || 'Failed to archive student');
+      }
+    }
+  );
+
+  const unarchiveStudentMutation = useMutation(
+    (id) => adminAPI.unarchiveStudent(id),
+    {
+      onSuccess: (response) => {
+        queryClient.invalidateQueries(['students']);
+        queryClient.invalidateQueries(['archivedStudents']);
+        toast.success(response.data?.message || 'Student restored successfully!');
+      },
+      onError: (error) => {
+        toast.error(error.response?.data?.message || 'Failed to restore student');
+      }
+    }
+  );
+
+  const { data: archivedData, isLoading: archivedLoading } = useQuery(
+    ['archivedStudents', searchTerm],
+    () => adminAPI.getArchivedStudents({ search: searchTerm }),
+    {
+      enabled: showArchived,
+      refetchOnWindowFocus: false
+    }
+  );
+
   const students = studentsData?.data?.students || [];
+  const archivedStudents = archivedData?.data?.students || [];
+  const displayedStudents = showArchived ? archivedStudents : students;
   const grades = gradesData?.data?.grades || [];
   const classes = classesData?.data?.classes || [];
 
@@ -163,20 +203,57 @@ const StudentManagement = () => {
     }
   };
 
-  if (isLoading) return <LoadingSpinner />;
+  const handleArchive = (student) => {
+    const reason = window.prompt(`Why is ${student.first_name} ${student.last_name} leaving the school? (Optional)`);
+    if (reason !== null) {
+      archiveStudentMutation.mutate({ id: student.id, reason });
+    }
+  };
+
+  const handleUnarchive = (student) => {
+    if (window.confirm(`Restore ${student.first_name} ${student.last_name} to active students?`)) {
+      unarchiveStudentMutation.mutate(student.id);
+    }
+  };
+
+  if (isLoading || (showArchived && archivedLoading)) return <LoadingSpinner />;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">Student Management</h2>
-        <div className="flex space-x-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <h2 className="text-2xl font-bold text-gray-900">
+          {showArchived ? 'Archived Students' : 'Student Management'}
+        </h2>
+        <div className="flex flex-wrap gap-3">
           <button
-            onClick={() => setShowAddForm(true)}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center space-x-2"
+            onClick={() => setShowArchived(!showArchived)}
+            className={`px-4 py-2 rounded-md flex items-center space-x-2 ${
+              showArchived 
+                ? 'bg-green-600 text-white hover:bg-green-700' 
+                : 'bg-gray-600 text-white hover:bg-gray-700'
+            }`}
           >
-            <Plus className="h-4 w-4" />
-            <span>Add Student</span>
+            {showArchived ? (
+              <>
+                <Users className="h-4 w-4" />
+                <span>Active Students</span>
+              </>
+            ) : (
+              <>
+                <Archive className="h-4 w-4" />
+                <span>Archived ({archivedStudents.length})</span>
+              </>
+            )}
           </button>
+          {!showArchived && (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center space-x-2"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add Student</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -353,8 +430,8 @@ const StudentManagement = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {students.length > 0 ? (
-                students.map((student) => (
+              {displayedStudents.length > 0 ? (
+                displayedStudents.map((student) => (
                   <tr key={student.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div>
@@ -378,31 +455,53 @@ const StudentManagement = () => {
                           ? 'bg-green-100 text-green-800' 
                           : 'bg-red-100 text-red-800'
                       }`}>
-                        {student.is_active ? 'Active' : 'Inactive'}
+                        {student.is_active ? 'Active' : 'Archived'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                      <button
-                        onClick={() => handleEdit(student)}
-                        className="text-blue-600 hover:text-blue-900"
-                        title="Edit"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(student.id, `${student.first_name} ${student.last_name}`)}
-                        className="text-red-600 hover:text-red-900"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {showArchived ? (
+                        <button
+                          onClick={() => handleUnarchive(student)}
+                          className="text-green-600 hover:text-green-900"
+                          title="Restore Student"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleEdit(student)}
+                            className="text-blue-600 hover:text-blue-900"
+                            title="Edit"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleArchive(student)}
+                            className="text-orange-600 hover:text-orange-900"
+                            title="Archive Student"
+                          >
+                            <Archive className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(student.id, `${student.first_name} ${student.last_name}`)}
+                            className="text-red-600 hover:text-red-900"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
                   <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
-                    No students found. Click "Add Student" to get started.
+                    {showArchived 
+                      ? 'No archived students found.' 
+                      : 'No students found. Click "Add Student" to get started.'
+                    }
                   </td>
                 </tr>
               )}
