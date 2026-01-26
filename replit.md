@@ -104,7 +104,23 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - Uses Gmail integration for reliable delivery
 - Email sent to: harmonylearninginstitute@gmail.com (configurable via ADMIN_NOTIFICATION_EMAIL env var)
 
+## Grade Promotion System
+- **Single Grade Promotion** - Move all students from one grade to another
+- **Bulk Year-End Promotion** - Promote all grades at once (Grade 1→2, 2→3, etc.)
+- **Visual Dashboard** - Shows current student distribution across grades
+- **Class Assignment Reset** - Students are unassigned from classes after promotion for manual reassignment
+- **Archived Student Protection** - Only active students are promoted; archived students are excluded
+
+## Student Archive System
+- **Archive Students** - Mark students as inactive when they leave the school
+- **Bulk Archive** - Archive multiple students at once from filtered views
+- **Archive Reason Tracking** - Optional reason field for audit trail
+- **Unarchive/Restore** - Reactivate archived students when needed
+- **Separate Views** - Toggle between active and archived students in management
+
 ## Recent Changes (January 2026)
+- **Grade Promotion System** - End-of-year tool for moving students to next grade level
+- **Student Archiving** - Archive inactive students who leave school (with restore option)
 - **Email Enrollment Notifications** - Gmail integration to notify admins of new applications
 
 ## Recent Changes (December 2025)
