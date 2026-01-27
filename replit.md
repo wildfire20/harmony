@@ -93,10 +93,18 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - **PDF Bank Statement Upload** - Upload FNB PDF bank statements with automatic parsing
 - **Payment Reconciliation** - Match payments using HAR-prefixed student IDs
 - **Student Payment History Export** - Search for students and download Excel reports showing:
+  - School logo at the top of the document
   - Monthly payment breakdown
   - Amount due, paid, and outstanding per month
   - Payment status (Paid, Partial, Missed)
   - Summary totals and statistics
+  - **Banking Details** for parent convenience:
+    - Bank: First National Bank (FNB)
+    - Account Holder: Harmony Learning Institute
+    - Account Type: Cheque
+    - Account Number: 63053202265
+    - Branch Code: 210755
+    - Reference instruction (student number)
 
 ## Email Notifications
 - **Enrollment Notifications** - Admins receive email alerts when parents submit new enrollment applications

@@ -834,58 +834,118 @@ router.get('/student-payment-history/:studentNumber', [
     if (format === 'excel') {
       // Generate Excel file
       const ExcelJS = require('exceljs');
+      const fs = require('fs');
+      const path = require('path');
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'Harmony Learning Institute';
       workbook.created = new Date();
       
       const worksheet = workbook.addWorksheet('Payment History');
       
-      // Title row
-      worksheet.mergeCells('A1:G1');
-      worksheet.getCell('A1').value = 'HARMONY LEARNING INSTITUTE - STUDENT PAYMENT HISTORY';
-      worksheet.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFDC2626' } };
-      worksheet.getCell('A1').alignment = { horizontal: 'center' };
+      // Try to add school logo
+      let logoRowOffset = 0;
+      try {
+        const logoPath = path.join(__dirname, '..', 'assets', 'school-logo.jpg');
+        if (fs.existsSync(logoPath)) {
+          const logoImage = workbook.addImage({
+            filename: logoPath,
+            extension: 'jpeg',
+          });
+          worksheet.addImage(logoImage, {
+            tl: { col: 0, row: 0 },
+            ext: { width: 100, height: 100 }
+          });
+          logoRowOffset = 6; // Leave space for logo
+          worksheet.getRow(1).height = 80;
+        }
+      } catch (logoErr) {
+        console.log('Could not add logo to Excel:', logoErr.message);
+      }
+      
+      // Title row (after logo)
+      const titleRow = 1 + logoRowOffset;
+      worksheet.mergeCells(`A${titleRow}:G${titleRow}`);
+      worksheet.getCell(`A${titleRow}`).value = 'HARMONY LEARNING INSTITUTE';
+      worksheet.getCell(`A${titleRow}`).font = { bold: true, size: 18, color: { argb: 'FFDC2626' } };
+      worksheet.getCell(`A${titleRow}`).alignment = { horizontal: 'center' };
+      
+      worksheet.mergeCells(`A${titleRow + 1}:G${titleRow + 1}`);
+      worksheet.getCell(`A${titleRow + 1}`).value = 'STUDENT PAYMENT HISTORY';
+      worksheet.getCell(`A${titleRow + 1}`).font = { bold: true, size: 14, color: { argb: 'FF1E40AF' } };
+      worksheet.getCell(`A${titleRow + 1}`).alignment = { horizontal: 'center' };
       
       // Student info
-      worksheet.mergeCells('A3:G3');
-      worksheet.getCell('A3').value = `Student: ${student.first_name} ${student.last_name} (${student.student_number})`;
-      worksheet.getCell('A3').font = { bold: true, size: 12 };
+      const studentInfoRow = titleRow + 3;
+      worksheet.mergeCells(`A${studentInfoRow}:G${studentInfoRow}`);
+      worksheet.getCell(`A${studentInfoRow}`).value = `Student: ${student.first_name} ${student.last_name} (${student.student_number})`;
+      worksheet.getCell(`A${studentInfoRow}`).font = { bold: true, size: 12 };
       
-      worksheet.mergeCells('A4:G4');
-      worksheet.getCell('A4').value = `Grade: ${student.grade || 'N/A'}`;
+      worksheet.mergeCells(`A${studentInfoRow + 1}:G${studentInfoRow + 1}`);
+      worksheet.getCell(`A${studentInfoRow + 1}`).value = `Grade: ${student.grade || 'N/A'}`;
       
-      worksheet.mergeCells('A5:G5');
-      worksheet.getCell('A5').value = `Report Generated: ${new Date().toLocaleDateString('en-ZA')}`;
+      worksheet.mergeCells(`A${studentInfoRow + 2}:G${studentInfoRow + 2}`);
+      worksheet.getCell(`A${studentInfoRow + 2}`).value = `Report Generated: ${new Date().toLocaleDateString('en-ZA')}`;
       
       // Summary section
-      worksheet.getCell('A7').value = 'SUMMARY';
-      worksheet.getCell('A7').font = { bold: true, size: 12 };
+      const summaryRow = studentInfoRow + 4;
+      worksheet.getCell(`A${summaryRow}`).value = 'PAYMENT SUMMARY';
+      worksheet.getCell(`A${summaryRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
       
-      worksheet.getCell('A8').value = 'Total Amount Due:';
-      worksheet.getCell('B8').value = totalDue;
-      worksheet.getCell('B8').numFmt = 'R #,##0.00';
+      worksheet.getCell(`A${summaryRow + 1}`).value = 'Total Amount Due:';
+      worksheet.getCell(`B${summaryRow + 1}`).value = totalDue;
+      worksheet.getCell(`B${summaryRow + 1}`).numFmt = 'R #,##0.00';
       
-      worksheet.getCell('A9').value = 'Total Paid:';
-      worksheet.getCell('B9').value = totalPaid;
-      worksheet.getCell('B9').numFmt = 'R #,##0.00';
+      worksheet.getCell(`A${summaryRow + 2}`).value = 'Total Paid:';
+      worksheet.getCell(`B${summaryRow + 2}`).value = totalPaid;
+      worksheet.getCell(`B${summaryRow + 2}`).numFmt = 'R #,##0.00';
       
-      worksheet.getCell('A10').value = 'Outstanding Balance:';
-      worksheet.getCell('B10').value = totalOutstanding;
-      worksheet.getCell('B10').numFmt = 'R #,##0.00';
-      worksheet.getCell('B10').font = { bold: true, color: totalOutstanding > 0 ? { argb: 'FFDC2626' } : { argb: 'FF16A34A' } };
+      worksheet.getCell(`A${summaryRow + 3}`).value = 'Outstanding Balance:';
+      worksheet.getCell(`B${summaryRow + 3}`).value = totalOutstanding;
+      worksheet.getCell(`B${summaryRow + 3}`).numFmt = 'R #,##0.00';
+      worksheet.getCell(`B${summaryRow + 3}`).font = { bold: true, color: totalOutstanding > 0 ? { argb: 'FFDC2626' } : { argb: 'FF16A34A' } };
       
-      worksheet.getCell('A11').value = 'Missed Payments:';
-      worksheet.getCell('B11').value = missedCount;
+      worksheet.getCell(`A${summaryRow + 4}`).value = 'Missed Payments:';
+      worksheet.getCell(`B${summaryRow + 4}`).value = missedCount;
       
-      worksheet.getCell('A12').value = 'Completed Payments:';
-      worksheet.getCell('B12').value = paidCount;
+      worksheet.getCell(`A${summaryRow + 5}`).value = 'Completed Payments:';
+      worksheet.getCell(`B${summaryRow + 5}`).value = paidCount;
+      
+      // Banking Details Section
+      const bankingRow = summaryRow + 7;
+      worksheet.getCell(`A${bankingRow}`).value = 'BANKING DETAILS';
+      worksheet.getCell(`A${bankingRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
+      
+      worksheet.getCell(`A${bankingRow + 1}`).value = 'Name of Bank:';
+      worksheet.getCell(`B${bankingRow + 1}`).value = 'First National Bank (FNB)';
+      worksheet.getCell(`B${bankingRow + 1}`).font = { bold: true };
+      
+      worksheet.getCell(`A${bankingRow + 2}`).value = 'Account Holder:';
+      worksheet.getCell(`B${bankingRow + 2}`).value = 'HARMONY LEARNING INSTITUTE';
+      worksheet.getCell(`B${bankingRow + 2}`).font = { bold: true };
+      
+      worksheet.getCell(`A${bankingRow + 3}`).value = 'Type of Account:';
+      worksheet.getCell(`B${bankingRow + 3}`).value = 'CHEQUE';
+      
+      worksheet.getCell(`A${bankingRow + 4}`).value = 'Account Number:';
+      worksheet.getCell(`B${bankingRow + 4}`).value = '63053202265';
+      worksheet.getCell(`B${bankingRow + 4}`).font = { bold: true, size: 12 };
+      
+      worksheet.getCell(`A${bankingRow + 5}`).value = 'Branch Code:';
+      worksheet.getCell(`B${bankingRow + 5}`).value = '210755';
+      worksheet.getCell(`B${bankingRow + 5}`).font = { bold: true };
+      
+      worksheet.getCell(`A${bankingRow + 6}`).value = 'Reference:';
+      worksheet.getCell(`B${bankingRow + 6}`).value = `Use student number: ${student.student_number}`;
+      worksheet.getCell(`B${bankingRow + 6}`).font = { bold: true, color: { argb: 'FFDC2626' } };
       
       // Payment history table
-      worksheet.getCell('A14').value = 'MONTHLY PAYMENT HISTORY';
-      worksheet.getCell('A14').font = { bold: true, size: 12 };
+      const historyTitleRow = bankingRow + 8;
+      worksheet.getCell(`A${historyTitleRow}`).value = 'MONTHLY PAYMENT HISTORY';
+      worksheet.getCell(`A${historyTitleRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
       
       // Table headers
-      const headerRow = worksheet.getRow(15);
+      const headerRowNum = historyTitleRow + 1;
+      const headerRow = worksheet.getRow(headerRowNum);
       headerRow.values = ['Year', 'Month', 'Amount Due', 'Amount Paid', 'Outstanding', 'Status', 'Reference'];
       headerRow.font = { bold: true };
       headerRow.eachCell((cell) => {
@@ -900,7 +960,7 @@ router.get('/student-payment-history/:studentNumber', [
       });
       
       // Add data rows
-      let rowNum = 16;
+      let rowNum = headerRowNum + 1;
       monthlyHistory.filter(m => m.amountDue > 0 || m.paymentStatus !== 'No Invoice').forEach(month => {
         const row = worksheet.getRow(rowNum);
         row.values = [
