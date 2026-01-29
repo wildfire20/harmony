@@ -168,6 +168,11 @@ export const adminAPI = {
   updateTeacher: (id, data) => api.put(`/admin/teachers/${id}`, data),
   deleteTeacher: (id) => api.delete(`/admin/teachers/${id}`),
   
+  // Teacher Archiving
+  archiveTeacher: (id, reason) => api.post(`/admin/teachers/${id}/archive`, { reason }),
+  unarchiveTeacher: (id) => api.post(`/admin/teachers/${id}/unarchive`),
+  getArchivedTeachers: (params) => api.get('/admin/teachers/archived', { params }),
+  
   // Grades (System Settings)
   getGrades: () => api.get('/admin/grades'),
   addGrade: (data) => api.post('/admin/grades', data),

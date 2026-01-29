@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useForm } from 'react-hook-form';
-import { Plus, Search, Edit, Trash2, Mail } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Mail, Archive, RotateCcw, Users } from 'lucide-react';
 import { adminAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 import toast from 'react-hot-toast';
@@ -10,7 +10,16 @@ const TeacherManagement = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const queryClient = useQueryClient();
+  const formRef = useRef(null);
+
+  // Scroll to form when editing
+  useEffect(() => {
+    if (showAddForm && formRef.current) {
+      formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [showAddForm, editingTeacher]);
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm();
 
@@ -91,38 +100,51 @@ const TeacherManagement = () => {
     }
   );
 
+  const archiveTeacherMutation = useMutation(
+    ({ id, reason }) => adminAPI.archiveTeacher(id, reason),
+    {
+      onSuccess: (response) => {
+        queryClient.invalidateQueries(['teachers']);
+        queryClient.invalidateQueries(['archivedTeachers']);
+        toast.success(response.data?.message || 'Teacher archived successfully!');
+      },
+      onError: (error) => {
+        toast.error(error.response?.data?.message || 'Failed to archive teacher');
+      }
+    }
+  );
+
+  const unarchiveTeacherMutation = useMutation(
+    (id) => adminAPI.unarchiveTeacher(id),
+    {
+      onSuccess: (response) => {
+        queryClient.invalidateQueries(['teachers']);
+        queryClient.invalidateQueries(['archivedTeachers']);
+        toast.success(response.data?.message || 'Teacher restored successfully!');
+      },
+      onError: (error) => {
+        toast.error(error.response?.data?.message || 'Failed to restore teacher');
+      }
+    }
+  );
+
+  const { data: archivedData, isLoading: archivedLoading } = useQuery(
+    ['archivedTeachers', searchTerm],
+    () => adminAPI.getArchivedTeachers({ search: searchTerm }),
+    {
+      enabled: showArchived,
+      refetchOnWindowFocus: false
+    }
+  );
+
   const teachers = teachersData?.data?.teachers || [];
+  const archivedTeachers = archivedData?.data?.teachers || [];
   const grades = gradesData?.data?.grades || [];
   const classes = classesData?.data?.classes || [];
 
   // Debug logging
   console.log('Teachers data:', teachersData);
   console.log('Processed teachers:', teachers);
-
-  // Process teachers to format assigned classes
-  const processedTeachers = teachers.map(teacher => {
-    let assignedClasses = 'None';
-    
-    if (teacher.assignments && Array.isArray(teacher.assignments) && teacher.assignments.length > 0) {
-      // Filter out null/empty assignments and format them
-      const validAssignments = teacher.assignments.filter(assignment => 
-        assignment && assignment.class_name && assignment.grade_name
-      );
-      
-      if (validAssignments.length > 0) {
-        assignedClasses = validAssignments
-          .map(assignment => `${assignment.grade_name} - ${assignment.class_name}`)
-          .join(', ');
-      }
-    }
-    
-    return {
-      ...teacher,
-      assigned_classes: assignedClasses
-    };
-  });
-
-  console.log('Processed teachers with assignments:', processedTeachers);
 
   const onSubmit = (data) => {
     console.log('Form data being submitted:', data);
@@ -182,19 +204,82 @@ const TeacherManagement = () => {
     }
   };
 
-  if (isLoading) return <LoadingSpinner />;
+  const handleArchive = (teacher) => {
+    const reason = window.prompt(`Why is ${teacher.first_name} ${teacher.last_name} leaving? (Optional)`);
+    if (reason !== null) {
+      archiveTeacherMutation.mutate({ id: teacher.id, reason });
+    }
+  };
+
+  const handleUnarchive = (teacher) => {
+    if (window.confirm(`Restore ${teacher.first_name} ${teacher.last_name} to active teachers?`)) {
+      unarchiveTeacherMutation.mutate(teacher.id);
+    }
+  };
+
+  const displayedTeachers = showArchived ? archivedTeachers : teachers;
+
+  // Process displayed teachers to format assigned classes
+  const processedDisplayedTeachers = displayedTeachers.map(teacher => {
+    let assignedClasses = 'None';
+    
+    if (teacher.assignments && Array.isArray(teacher.assignments) && teacher.assignments.length > 0) {
+      const validAssignments = teacher.assignments.filter(assignment => 
+        assignment && assignment.class_name && assignment.grade_name
+      );
+      
+      if (validAssignments.length > 0) {
+        assignedClasses = validAssignments
+          .map(assignment => `${assignment.grade_name} - ${assignment.class_name}`)
+          .join(', ');
+      }
+    }
+    
+    return {
+      ...teacher,
+      assigned_classes: assignedClasses
+    };
+  });
+
+  if (isLoading || (showArchived && archivedLoading)) return <LoadingSpinner />;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">Teacher Management</h2>
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 flex items-center space-x-2"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Add Teacher</span>
-        </button>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <h2 className="text-2xl font-bold text-gray-900">
+          {showArchived ? 'Archived Teachers' : 'Teacher Management'}
+        </h2>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => setShowArchived(!showArchived)}
+            className={`px-4 py-2 rounded-md flex items-center space-x-2 ${
+              showArchived 
+                ? 'bg-green-600 text-white hover:bg-green-700' 
+                : 'bg-gray-600 text-white hover:bg-gray-700'
+            }`}
+          >
+            {showArchived ? (
+              <>
+                <Users className="h-4 w-4" />
+                <span>Active Teachers</span>
+              </>
+            ) : (
+              <>
+                <Archive className="h-4 w-4" />
+                <span>Archived ({archivedTeachers.length})</span>
+              </>
+            )}
+          </button>
+          {!showArchived && (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 flex items-center space-x-2"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add Teacher</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Search */}
@@ -213,7 +298,7 @@ const TeacherManagement = () => {
 
       {/* Add Teacher Form */}
       {showAddForm && (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+        <div ref={formRef} className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">
               {editingTeacher ? 'Edit Teacher' : 'Add New Teacher'}
@@ -379,8 +464,8 @@ const TeacherManagement = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {processedTeachers.length > 0 ? (
-                processedTeachers.map((teacher) => (
+              {processedDisplayedTeachers.length > 0 ? (
+                processedDisplayedTeachers.map((teacher) => (
                   <tr key={teacher.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div>
@@ -414,25 +499,46 @@ const TeacherManagement = () => {
                           ? 'bg-green-100 text-green-800' 
                           : 'bg-red-100 text-red-800'
                       }`}>
-                        {teacher.is_active ? 'Active' : 'Inactive'}
+                        {teacher.is_active ? 'Active' : 'Archived'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                      <button
-                        onClick={() => handleEdit(teacher)}
-                        className="text-green-600 hover:text-green-900"
-                        title="Edit"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </button>
-                      {teacher.role !== 'super_admin' && (
+                      {showArchived ? (
                         <button
-                          onClick={() => handleDelete(teacher.id, `${teacher.first_name} ${teacher.last_name}`)}
-                          className="text-red-600 hover:text-red-900"
-                          title="Delete"
+                          onClick={() => handleUnarchive(teacher)}
+                          className="text-green-600 hover:text-green-900"
+                          title="Restore Teacher"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <RotateCcw className="h-4 w-4" />
                         </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleEdit(teacher)}
+                            className="text-green-600 hover:text-green-900"
+                            title="Edit"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                          {teacher.role !== 'super_admin' && (
+                            <>
+                              <button
+                                onClick={() => handleArchive(teacher)}
+                                className="text-orange-600 hover:text-orange-900"
+                                title="Archive Teacher"
+                              >
+                                <Archive className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(teacher.id, `${teacher.first_name} ${teacher.last_name}`)}
+                                className="text-red-600 hover:text-red-900"
+                                title="Delete"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </>
+                          )}
+                        </>
                       )}
                     </td>
                   </tr>
@@ -440,7 +546,10 @@ const TeacherManagement = () => {
               ) : (
                 <tr>
                   <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
-                    No teachers found. Click "Add Teacher" to get started.
+                    {showArchived 
+                      ? 'No archived teachers found.' 
+                      : 'No teachers found. Click "Add Teacher" to get started.'
+                    }
                   </td>
                 </tr>
               )}

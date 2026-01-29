@@ -474,7 +474,8 @@ router.get('/students', [
     const { page = 1, limit = 50, grade_id, class_id, search } = req.query;
     const offset = (page - 1) * limit;
 
-    let whereClause = "WHERE u.role = 'student'";
+    // Only show active students by default (exclude archived)
+    let whereClause = "WHERE u.role = 'student' AND u.is_active = true";
     const params = [];
     let paramCount = 0;
 
@@ -558,7 +559,7 @@ router.get('/teachers', [
       LEFT JOIN teacher_assignments ta ON u.id = ta.teacher_id
       LEFT JOIN grades g ON ta.grade_id = g.id
       LEFT JOIN classes c ON ta.class_id = c.id
-      WHERE u.role IN ('teacher', 'admin')
+      WHERE u.role IN ('teacher', 'admin') AND u.is_active = true
       GROUP BY u.id
       ORDER BY u.created_at DESC
     `);
@@ -1749,6 +1750,135 @@ router.get('/students/archived', [
   } catch (error) {
     console.error('Get archived students error:', error);
     res.status(500).json({ success: false, message: 'Server error fetching archived students' });
+  }
+});
+
+// Archive a teacher
+router.post('/teachers/:id/archive', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    // Don't allow archiving super_admin
+    const checkResult = await db.query(
+      'SELECT role FROM users WHERE id = $1',
+      [id]
+    );
+
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Teacher not found' });
+    }
+
+    if (checkResult.rows[0].role === 'super_admin') {
+      return res.status(403).json({ success: false, message: 'Cannot archive super admin' });
+    }
+
+    const result = await db.query(`
+      UPDATE users 
+      SET is_active = false, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND role IN ('teacher', 'admin')
+      RETURNING id, email, first_name, last_name
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Teacher not found' });
+    }
+
+    console.log(`📦 Archived teacher: ${result.rows[0].first_name} ${result.rows[0].last_name}${reason ? ` (Reason: ${reason})` : ''}`);
+
+    res.json({
+      success: true,
+      message: `Teacher ${result.rows[0].first_name} ${result.rows[0].last_name} has been archived`,
+      teacher: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Archive teacher error:', error);
+    res.status(500).json({ success: false, message: 'Server error archiving teacher' });
+  }
+});
+
+// Unarchive (restore) a teacher
+router.post('/teachers/:id/unarchive', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      UPDATE users 
+      SET is_active = true, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND role IN ('teacher', 'admin')
+      RETURNING id, email, first_name, last_name
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Teacher not found' });
+    }
+
+    console.log(`✅ Restored teacher: ${result.rows[0].first_name} ${result.rows[0].last_name}`);
+
+    res.json({
+      success: true,
+      message: `Teacher ${result.rows[0].first_name} ${result.rows[0].last_name} has been restored`,
+      teacher: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Unarchive teacher error:', error);
+    res.status(500).json({ success: false, message: 'Server error restoring teacher' });
+  }
+});
+
+// Get archived teachers
+router.get('/teachers/archived', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { search } = req.query;
+
+    let whereClause = "WHERE u.role IN ('teacher', 'admin') AND u.is_active = false";
+    const params = [];
+
+    if (search) {
+      whereClause += ` AND (u.first_name ILIKE $1 OR u.last_name ILIKE $1 OR u.email ILIKE $1)`;
+      params.push(`%${search}%`);
+    }
+
+    const result = await db.query(`
+      SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_active, u.created_at, u.updated_at,
+             COALESCE(
+               json_agg(
+                 json_build_object(
+                   'grade_id', ta.grade_id,
+                   'class_id', ta.class_id,
+                   'grade_name', g.name,
+                   'class_name', c.name
+                 )
+               ) FILTER (WHERE ta.id IS NOT NULL), '[]'
+             ) as assignments
+      FROM users u
+      LEFT JOIN teacher_assignments ta ON u.id = ta.teacher_id
+      LEFT JOIN grades g ON ta.grade_id = g.id
+      LEFT JOIN classes c ON ta.class_id = c.id
+      ${whereClause}
+      GROUP BY u.id
+      ORDER BY u.updated_at DESC
+    `, params);
+
+    res.json({
+      success: true,
+      teachers: result.rows
+    });
+
+  } catch (error) {
+    console.error('Get archived teachers error:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching archived teachers' });
   }
 });
 

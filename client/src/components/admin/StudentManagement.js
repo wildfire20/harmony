@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useForm } from 'react-hook-form';
 import { Plus, Search, Edit, Trash2, Download, Upload, Archive, RotateCcw, Users } from 'lucide-react';
@@ -10,20 +10,28 @@ const StudentManagement = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedGrade, setSelectedGrade] = useState('all');
+  const [selectedGrade, setSelectedGrade] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const queryClient = useQueryClient();
+  const formRef = useRef(null);
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm();
+
+  // Scroll to form when editing
+  useEffect(() => {
+    if (showAddForm && formRef.current) {
+      formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [showAddForm, editingStudent]);
 
   // Fetch students with improved query invalidation
   const { data: studentsData, isLoading, refetch } = useQuery(
     ['students', searchTerm, selectedGrade],
     () => {
-      console.log('Fetching students with params:', { search: searchTerm, grade_id: selectedGrade === 'all' ? '' : selectedGrade });
+      console.log('Fetching students with params:', { search: searchTerm, grade_id: selectedGrade });
       return adminAPI.getStudents({ 
         search: searchTerm, 
-        grade_id: selectedGrade === 'all' ? '' : selectedGrade 
+        grade_id: selectedGrade || '' 
       });
     },
     {
@@ -278,14 +286,10 @@ const StudentManagement = () => {
               onChange={(e) => {
                 console.log('Grade filter changed to:', e.target.value);
                 setSelectedGrade(e.target.value);
-                // Force refetch when grade changes
-                setTimeout(() => {
-                  refetch();
-                }, 100);
               }}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              <option value="all">All Grades</option>
+              <option value="">All Grades</option>
               {grades.map((grade) => (
                 <option key={grade.id} value={grade.id}>
                   {grade.name}
@@ -298,7 +302,7 @@ const StudentManagement = () => {
 
       {/* Add Student Form */}
       {showAddForm && (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+        <div ref={formRef} className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">
               {editingStudent ? 'Edit Student' : 'Add New Student'}
