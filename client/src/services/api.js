@@ -213,4 +213,13 @@ export const documentsAPI = {
   getDocumentTypes: () => api.get('/documents/types'),
 };
 
+// Password Management API
+export const passwordsAPI = {
+  getStudentPasswords: (params) => api.get('/passwords/students', { params }),
+  getTeacherPasswords: (params) => api.get('/passwords/teachers', { params }),
+  resetPassword: (userId, customPassword) => api.post(`/passwords/reset/${userId}`, { customPassword }),
+  bulkResetPasswords: (userIds) => api.post('/passwords/bulk-reset', { userIds }),
+  generatePassword: (firstName) => api.get('/passwords/generate', { params: { firstName } }),
+};
+
 export default api;

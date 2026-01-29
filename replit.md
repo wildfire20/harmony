@@ -126,7 +126,18 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - **Unarchive/Restore** - Reactivate archived students when needed
 - **Separate Views** - Toggle between active and archived students in management
 
+## Password Management System
+- **Password Portal** - Admins can view and manage student/teacher passwords
+- **Kid-Friendly Passwords** - System generates easy-to-remember passwords (e.g., "HappyLion42", "BraveTiger78")
+- **Password Reset** - Reset individual or bulk passwords with one click
+- **Display Passwords** - Admins can view current passwords to share with students/parents
+- **Custom Passwords** - Option to set custom passwords or auto-generate
+- **Copy to Clipboard** - Easy copy button for sharing passwords
+
 ## Recent Changes (January 2026)
+- **Password Management Portal** - Admin tool to view and reset student/teacher passwords with kid-friendly generation
+- **Teacher Archiving** - Archive inactive teachers who leave school (with restore option)
+- **Active-Only Default Views** - Student and teacher lists now show only active users by default
 - **Grade Promotion System** - End-of-year tool for moving students to next grade level
 - **Student Archiving** - Archive inactive students who leave school (with restore option)
 - **Email Enrollment Notifications** - Gmail integration to notify admins of new applications
