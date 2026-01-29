@@ -5,8 +5,32 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { generatePasswordForUser, generateKidFriendlyPassword } = require('../utils/passwordGenerator');
 
+// Ensure display_password column exists (for Railway/production compatibility)
+async function ensureDisplayPasswordColumn() {
+  try {
+    const checkColumn = await pool.query(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'users' AND column_name = 'display_password'
+    `);
+    
+    if (checkColumn.rows.length === 0) {
+      console.log('🔧 Adding display_password column to users table...');
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS display_password VARCHAR(255)`);
+      console.log('✅ display_password column added successfully');
+    }
+  } catch (error) {
+    console.error('Error checking/adding display_password column:', error.message);
+  }
+}
+
+// Run on startup
+ensureDisplayPasswordColumn();
+
 router.get('/students', authenticate, authorize('admin', 'super_admin'), async (req, res) => {
   try {
+    // Ensure column exists before querying
+    await ensureDisplayPasswordColumn();
+    
     const { search, grade_id, class_id } = req.query;
     console.log('📋 Password API - Fetching students with params:', { search, grade_id, class_id });
     
@@ -63,6 +87,9 @@ router.get('/students', authenticate, authorize('admin', 'super_admin'), async (
 
 router.get('/teachers', authenticate, authorize('admin', 'super_admin'), async (req, res) => {
   try {
+    // Ensure column exists before querying
+    await ensureDisplayPasswordColumn();
+    
     const { search } = req.query;
     
     let query = `
