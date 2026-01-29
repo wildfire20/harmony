@@ -27,14 +27,14 @@ const StudentManagement = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // Scroll to form when editing - with delay to ensure form is rendered
+  // Scroll to inline edit form when editing a student
   useEffect(() => {
-    if (showAddForm && formRef.current) {
+    if (editingStudent && formRef.current) {
       setTimeout(() => {
-        formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 100);
     }
-  }, [showAddForm, editingStudent]);
+  }, [editingStudent]);
 
   // Fetch students with improved query invalidation
   const { data: studentsData, isLoading, refetch } = useQuery(
@@ -200,8 +200,8 @@ const StudentManagement = () => {
   };
 
   const handleEdit = (student) => {
+    setShowAddForm(false); // Close add form if open
     setEditingStudent(student);
-    setShowAddForm(true);
     reset({
       first_name: student.first_name,
       last_name: student.last_name,
@@ -448,68 +448,138 @@ const StudentManagement = () => {
             <tbody className="bg-white divide-y divide-gray-200">
               {displayedStudents.length > 0 ? (
                 displayedStudents.map((student) => (
-                  <tr key={student.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">
-                          {student.first_name} {student.last_name}
+                  <React.Fragment key={student.id}>
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">
+                            {student.first_name} {student.last_name}
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {student.student_number}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {student.grade_name || 'Not assigned'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {student.class_name || 'Not assigned'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        student.is_active 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-red-100 text-red-800'
-                      }`}>
-                        {student.is_active ? 'Active' : 'Archived'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                      {showArchived ? (
-                        <button
-                          onClick={() => handleUnarchive(student)}
-                          className="text-green-600 hover:text-green-900"
-                          title="Restore Student"
-                        >
-                          <RotateCcw className="h-4 w-4" />
-                        </button>
-                      ) : (
-                        <>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {student.student_number}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {student.grade_name || 'Not assigned'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {student.class_name || 'Not assigned'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          student.is_active 
+                            ? 'bg-green-100 text-green-800' 
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {student.is_active ? 'Active' : 'Archived'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                        {showArchived ? (
                           <button
-                            onClick={() => handleEdit(student)}
-                            className="text-blue-600 hover:text-blue-900"
-                            title="Edit"
+                            onClick={() => handleUnarchive(student)}
+                            className="text-green-600 hover:text-green-900"
+                            title="Restore Student"
                           >
-                            <Edit className="h-4 w-4" />
+                            <RotateCcw className="h-4 w-4" />
                           </button>
-                          <button
-                            onClick={() => handleArchive(student)}
-                            className="text-orange-600 hover:text-orange-900"
-                            title="Archive Student"
-                          >
-                            <Archive className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(student.id, `${student.first_name} ${student.last_name}`)}
-                            className="text-red-600 hover:text-red-900"
-                            title="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleEdit(student)}
+                              className="text-blue-600 hover:text-blue-900"
+                              title="Edit"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleArchive(student)}
+                              className="text-orange-600 hover:text-orange-900"
+                              title="Archive Student"
+                            >
+                              <Archive className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(student.id, `${student.first_name} ${student.last_name}`)}
+                              className="text-red-600 hover:text-red-900"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                    {/* Inline Edit Form - appears right below the student being edited */}
+                    {editingStudent?.id === student.id && (
+                      <tr ref={formRef}>
+                        <td colSpan="6" className="px-4 py-4 bg-blue-50 border-l-4 border-blue-500">
+                          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">First Name *</label>
+                                <input
+                                  {...register('first_name', { required: 'First name is required' })}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                                {errors.first_name && <p className="text-red-500 text-xs mt-1">{errors.first_name.message}</p>}
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Last Name *</label>
+                                <input
+                                  {...register('last_name', { required: 'Last name is required' })}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                                {errors.last_name && <p className="text-red-500 text-xs mt-1">{errors.last_name.message}</p>}
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Grade *</label>
+                                <select
+                                  {...register('grade_id', { required: 'Grade is required' })}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                >
+                                  <option value="">Select Grade</option>
+                                  {grades.map((grade) => (
+                                    <option key={grade.id} value={grade.id}>{grade.name}</option>
+                                  ))}
+                                </select>
+                                {errors.grade_id && <p className="text-red-500 text-xs mt-1">{errors.grade_id.message}</p>}
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Class</label>
+                                <select
+                                  {...register('class_id')}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                >
+                                  <option value="">Select Class</option>
+                                  {classes.map((cls) => (
+                                    <option key={cls.id} value={cls.id}>{cls.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                            <div className="flex space-x-3">
+                              <button
+                                type="submit"
+                                disabled={updateStudentMutation.isLoading}
+                                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                              >
+                                {updateStudentMutation.isLoading ? 'Saving...' : 'Save Changes'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleCancelEdit}
+                                className="border border-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))
               ) : (
                 <tr>
