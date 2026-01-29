@@ -8,6 +8,7 @@ const { generatePasswordForUser, generateKidFriendlyPassword } = require('../uti
 router.get('/students', authenticate, authorize('admin', 'super_admin'), async (req, res) => {
   try {
     const { search, grade_id, class_id } = req.query;
+    console.log('📋 Password API - Fetching students with params:', { search, grade_id, class_id });
     
     let query = `
       SELECT u.id, u.student_number, u.first_name, u.last_name, u.email, 
@@ -21,9 +22,9 @@ router.get('/students', authenticate, authorize('admin', 'super_admin'), async (
     const params = [];
     let paramIndex = 1;
 
-    if (search) {
+    if (search && search.trim()) {
       query += ` AND (u.first_name ILIKE $${paramIndex} OR u.last_name ILIKE $${paramIndex} OR u.student_number ILIKE $${paramIndex} OR u.email ILIKE $${paramIndex})`;
-      params.push(`%${search}%`);
+      params.push(`%${search.trim()}%`);
       paramIndex++;
     }
 
@@ -40,8 +41,13 @@ router.get('/students', authenticate, authorize('admin', 'super_admin'), async (
     }
 
     query += ' ORDER BY u.first_name, u.last_name';
+    
+    console.log('📋 Password API - Query:', query);
+    console.log('📋 Password API - Params:', params);
 
     const result = await pool.query(query, params);
+    
+    console.log('📋 Password API - Found', result.rows.length, 'students');
     
     res.json({
       success: true,

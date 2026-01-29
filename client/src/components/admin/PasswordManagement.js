@@ -22,12 +22,19 @@ const PasswordManagement = () => {
 
   const { data: studentsData, isLoading: studentsLoading, refetch: refetchStudents } = useQuery(
     ['studentPasswords', search, selectedGrade, selectedClass],
-    () => passwordsAPI.getStudentPasswords({ 
-      search, 
-      grade_id: selectedGrade || undefined, 
-      class_id: selectedClass || undefined 
-    }),
-    { enabled: activeTab === 'students' }
+    () => {
+      console.log('Fetching student passwords with:', { search, selectedGrade, selectedClass });
+      return passwordsAPI.getStudentPasswords({ 
+        search: search || undefined, 
+        grade_id: selectedGrade || undefined, 
+        class_id: selectedClass || undefined 
+      });
+    },
+    { 
+      enabled: activeTab === 'students',
+      onSuccess: (data) => console.log('Student passwords response:', data),
+      onError: (error) => console.error('Student passwords error:', error)
+    }
   );
 
   const { data: teachersData, isLoading: teachersLoading, refetch: refetchTeachers } = useQuery(
@@ -74,8 +81,10 @@ const PasswordManagement = () => {
 
   const grades = gradesData?.data?.grades || [];
   const classes = classesData?.data?.classes || [];
-  const students = studentsData?.data?.students || [];
-  const teachers = teachersData?.data?.teachers || [];
+  const students = studentsData?.data?.data?.students || [];
+  const teachers = teachersData?.data?.data?.teachers || [];
+  
+  console.log('Students data parsed:', students.length, 'students found');
 
   const filteredClasses = selectedGrade 
     ? classes.filter(c => c.grade_id === parseInt(selectedGrade))
