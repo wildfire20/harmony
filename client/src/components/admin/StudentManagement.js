@@ -10,27 +10,39 @@ const StudentManagement = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [selectedGrade, setSelectedGrade] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const queryClient = useQueryClient();
   const formRef = useRef(null);
+  const searchInputRef = useRef(null);
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm();
 
-  // Scroll to form when editing
+  // Debounce search term to prevent refetch on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Scroll to form when editing - with delay to ensure form is rendered
   useEffect(() => {
     if (showAddForm && formRef.current) {
-      formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => {
+        formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
     }
   }, [showAddForm, editingStudent]);
 
   // Fetch students with improved query invalidation
   const { data: studentsData, isLoading, refetch } = useQuery(
-    ['students', searchTerm, selectedGrade],
+    ['students', debouncedSearchTerm, selectedGrade],
     () => {
-      console.log('Fetching students with params:', { search: searchTerm, grade_id: selectedGrade });
+      console.log('Fetching students with params:', { search: debouncedSearchTerm, grade_id: selectedGrade });
       return adminAPI.getStudents({ 
-        search: searchTerm, 
+        search: debouncedSearchTerm, 
         grade_id: selectedGrade || '' 
       });
     },
