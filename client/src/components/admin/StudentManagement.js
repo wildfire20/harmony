@@ -10,7 +10,7 @@ const StudentManagement = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const [activeSearchTerm, setActiveSearchTerm] = useState('');
   const [selectedGrade, setSelectedGrade] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const queryClient = useQueryClient();
@@ -19,13 +19,21 @@ const StudentManagement = () => {
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm();
 
-  // Debounce search term to prevent refetch on every keystroke
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
+  // Handle search - only triggers when user clicks search or presses Enter
+  const handleSearch = () => {
+    setActiveSearchTerm(searchTerm);
+  };
+
+  const handleSearchKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
+  };
+
+  const handleClearSearch = () => {
+    setSearchTerm('');
+    setActiveSearchTerm('');
+  };
 
   // Scroll to inline edit form when editing a student
   useEffect(() => {
@@ -38,11 +46,11 @@ const StudentManagement = () => {
 
   // Fetch students with improved query invalidation
   const { data: studentsData, isLoading, refetch } = useQuery(
-    ['students', debouncedSearchTerm, selectedGrade],
+    ['students', activeSearchTerm, selectedGrade],
     () => {
-      console.log('Fetching students with params:', { search: debouncedSearchTerm, grade_id: selectedGrade });
+      console.log('Fetching students with params:', { search: activeSearchTerm, grade_id: selectedGrade });
       return adminAPI.getStudents({ 
-        search: debouncedSearchTerm, 
+        search: activeSearchTerm, 
         grade_id: selectedGrade || '' 
       });
     },
@@ -281,15 +289,33 @@ const StudentManagement = () => {
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
         <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
           <div className="flex-1">
-            <div className="relative">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search students..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
+            <div className="flex space-x-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Type student name or number, then press Enter or click Search"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyPress={handleSearchKeyPress}
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <button
+                onClick={handleSearch}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center space-x-1"
+              >
+                <Search className="h-4 w-4" />
+                <span>Search</span>
+              </button>
+              {activeSearchTerm && (
+                <button
+                  onClick={handleClearSearch}
+                  className="border border-gray-300 text-gray-600 px-3 py-2 rounded-md hover:bg-gray-50"
+                >
+                  Clear
+                </button>
+              )}
             </div>
           </div>
           <div>
