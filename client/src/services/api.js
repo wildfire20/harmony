@@ -222,4 +222,13 @@ export const passwordsAPI = {
   generatePassword: (firstName) => api.get('/passwords/generate', { params: { firstName } }),
 };
 
+// Manual Payments API
+export const paymentsAPI = {
+  addManualPayment: (data) => api.post('/enhanced-invoices/manual-payment', data),
+  getStudentPayments: (studentId) => api.get(`/enhanced-invoices/student-payments/${studentId}`),
+  updateManualPayment: (paymentId, data) => api.put(`/enhanced-invoices/manual-payment/${paymentId}`, data),
+  deleteManualPayment: (paymentId) => api.delete(`/enhanced-invoices/manual-payment/${paymentId}`),
+  searchStudents: (query) => api.get('/enhanced-invoices/search-students', { params: { q: query } }),
+};
+
 export default api;

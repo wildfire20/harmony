@@ -92,6 +92,12 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - **CSV Bank Statement Upload** - Upload bank statements with auto-column detection
 - **PDF Bank Statement Upload** - Upload FNB PDF bank statements with automatic parsing
 - **Payment Reconciliation** - Match payments using HAR-prefixed student IDs
+- **Manual Payment Entry** - Admin feature to manually add payments when parents didn't use student number as reference:
+  - Search for student by name or number
+  - Enter payment amount, date, month/year
+  - Add optional bank reference and notes
+  - Edit or delete manual payments
+  - Automatically updates invoice balances
 - **Student Payment History Export** - Search for students and download Excel reports showing:
   - School logo at the top of the document
   - Monthly payment breakdown

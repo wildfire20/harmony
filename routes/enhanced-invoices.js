@@ -1083,6 +1083,283 @@ router.get('/search-students', [
   }
 });
 
+/**
+ * Manual Payment Entry - For payments where parent didn't use student number as reference
+ */
+router.post('/manual-payment', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+  body('student_id').isInt().withMessage('Student ID is required'),
+  body('amount').isFloat({ min: 0.01 }).withMessage('Amount must be greater than 0'),
+  body('payment_date').isISO8601().withMessage('Valid payment date is required'),
+  body('description').optional().isString(),
+  body('reference').optional().isString()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const { student_id, amount, payment_date, description, reference, month, year } = req.body;
+    const adminId = req.user.id;
+
+    // Verify student exists
+    const studentResult = await db.query(
+      'SELECT id, first_name, last_name, student_number FROM users WHERE id = $1 AND role = $2',
+      [student_id, 'student']
+    );
+
+    if (studentResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+
+    const student = studentResult.rows[0];
+
+    // Check if payment_transactions table exists, create if not
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id SERIAL PRIMARY KEY,
+        student_id INTEGER REFERENCES users(id),
+        amount DECIMAL(10,2) NOT NULL,
+        payment_date DATE NOT NULL,
+        reference VARCHAR(255),
+        description TEXT,
+        payment_method VARCHAR(50) DEFAULT 'manual_entry',
+        recorded_by INTEGER REFERENCES users(id),
+        month INTEGER,
+        year INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Insert the manual payment
+    const paymentResult = await db.query(`
+      INSERT INTO payment_transactions (student_id, amount, payment_date, reference, description, payment_method, recorded_by, month, year)
+      VALUES ($1, $2, $3, $4, $5, 'manual_entry', $6, $7, $8)
+      RETURNING *
+    `, [
+      student_id, 
+      amount, 
+      payment_date, 
+      reference || `MANUAL-${Date.now()}`,
+      description || `Manual payment entry by admin`,
+      adminId,
+      month || new Date(payment_date).getMonth() + 1,
+      year || new Date(payment_date).getFullYear()
+    ]);
+
+    // If there's an invoice for this month/year, update it
+    const paymentMonth = month || new Date(payment_date).getMonth() + 1;
+    const paymentYear = year || new Date(payment_date).getFullYear();
+
+    const invoiceResult = await db.query(`
+      UPDATE invoices 
+      SET amount_paid = COALESCE(amount_paid, 0) + $1,
+          status = CASE 
+            WHEN COALESCE(amount_paid, 0) + $1 >= amount THEN 'paid'
+            WHEN COALESCE(amount_paid, 0) + $1 > 0 THEN 'partial'
+            ELSE status
+          END
+      WHERE student_id = $2 AND month = $3 AND year = $4
+      RETURNING *
+    `, [amount, student_id, paymentMonth, paymentYear]);
+
+    console.log(`✅ Manual payment recorded: R${amount} for ${student.first_name} ${student.last_name} (${student.student_number})`);
+
+    res.json({
+      success: true,
+      message: `Payment of R${amount} recorded for ${student.first_name} ${student.last_name}`,
+      payment: paymentResult.rows[0],
+      invoiceUpdated: invoiceResult.rows.length > 0,
+      student: {
+        id: student.id,
+        name: `${student.first_name} ${student.last_name}`,
+        studentNumber: student.student_number
+      }
+    });
+
+  } catch (error) {
+    console.error('Manual payment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to record manual payment',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Get payment history for a student
+ */
+router.get('/student-payments/:studentId', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { studentId } = req.params;
+
+    // Get student info
+    const studentResult = await db.query(
+      'SELECT id, first_name, last_name, student_number FROM users WHERE id = $1',
+      [studentId]
+    );
+
+    if (studentResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+
+    const student = studentResult.rows[0];
+
+    // Get all payments for this student
+    const paymentsResult = await db.query(`
+      SELECT pt.*, u.first_name as recorded_by_name, u.last_name as recorded_by_lastname
+      FROM payment_transactions pt
+      LEFT JOIN users u ON pt.recorded_by = u.id
+      WHERE pt.student_id = $1
+      ORDER BY pt.payment_date DESC
+    `, [studentId]);
+
+    res.json({
+      success: true,
+      student: {
+        id: student.id,
+        name: `${student.first_name} ${student.last_name}`,
+        studentNumber: student.student_number
+      },
+      payments: paymentsResult.rows
+    });
+
+  } catch (error) {
+    console.error('Get student payments error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get payment history',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Edit a manual payment
+ */
+router.put('/manual-payment/:paymentId', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+  body('amount').optional().isFloat({ min: 0.01 }),
+  body('payment_date').optional().isISO8601(),
+  body('description').optional().isString()
+], async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    const { amount, payment_date, description, reference } = req.body;
+
+    // Get original payment
+    const originalPayment = await db.query(
+      'SELECT * FROM payment_transactions WHERE id = $1',
+      [paymentId]
+    );
+
+    if (originalPayment.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    const original = originalPayment.rows[0];
+
+    // Update payment
+    const updateResult = await db.query(`
+      UPDATE payment_transactions 
+      SET amount = COALESCE($1, amount),
+          payment_date = COALESCE($2, payment_date),
+          description = COALESCE($3, description),
+          reference = COALESCE($4, reference)
+      WHERE id = $5
+      RETURNING *
+    `, [amount, payment_date, description, reference, paymentId]);
+
+    // If amount changed, update invoice
+    if (amount && amount !== original.amount) {
+      const difference = amount - original.amount;
+      await db.query(`
+        UPDATE invoices 
+        SET amount_paid = COALESCE(amount_paid, 0) + $1,
+            status = CASE 
+              WHEN COALESCE(amount_paid, 0) + $1 >= amount THEN 'paid'
+              WHEN COALESCE(amount_paid, 0) + $1 > 0 THEN 'partial'
+              ELSE 'pending'
+            END
+        WHERE student_id = $2 AND month = $3 AND year = $4
+      `, [difference, original.student_id, original.month, original.year]);
+    }
+
+    res.json({
+      success: true,
+      message: 'Payment updated successfully',
+      payment: updateResult.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Edit payment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update payment',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Delete a manual payment
+ */
+router.delete('/manual-payment/:paymentId', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+
+    // Get payment before deleting
+    const paymentResult = await db.query(
+      'SELECT * FROM payment_transactions WHERE id = $1',
+      [paymentId]
+    );
+
+    if (paymentResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    const payment = paymentResult.rows[0];
+
+    // Delete payment
+    await db.query('DELETE FROM payment_transactions WHERE id = $1', [paymentId]);
+
+    // Update invoice to subtract this amount
+    await db.query(`
+      UPDATE invoices 
+      SET amount_paid = GREATEST(COALESCE(amount_paid, 0) - $1, 0),
+          status = CASE 
+            WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) >= amount THEN 'paid'
+            WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) > 0 THEN 'partial'
+            ELSE 'pending'
+          END
+      WHERE student_id = $2 AND month = $3 AND year = $4
+    `, [payment.amount, payment.student_id, payment.month, payment.year]);
+
+    res.json({
+      success: true,
+      message: 'Payment deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete payment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete payment',
+      error: error.message
+    });
+  }
+});
+
 async function logUploadActivity(filename, userId, parseResult, results) {
   try {
     // Simple logging - just console log for now since the table might not exist

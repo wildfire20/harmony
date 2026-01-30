@@ -471,7 +471,7 @@ router.get('/students', [
   authorize('admin', 'super_admin', 'teacher')
 ], async (req, res) => {
   try {
-    const { page = 1, limit = 50, grade_id, class_id, search } = req.query;
+    const { page = 1, limit = 1000, grade_id, class_id, search } = req.query;
     const offset = (page - 1) * limit;
 
     // Only show active students by default (exclude archived)
