@@ -152,8 +152,8 @@ const ManualPayments = () => {
     }
   };
 
-  const students = studentsData?.data?.students || [];
-  const payments = paymentsData?.data?.payments || [];
+  const students = studentsData?.data?.students || studentsData?.students || [];
+  const payments = paymentsData?.data?.payments || paymentsData?.payments || [];
 
   const months = [
     { value: 1, label: 'January' },

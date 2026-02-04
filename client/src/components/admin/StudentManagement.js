@@ -12,6 +12,7 @@ const StudentManagement = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeSearchTerm, setActiveSearchTerm] = useState('');
   const [selectedGrade, setSelectedGrade] = useState('');
+  const [selectedClass, setSelectedClass] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const queryClient = useQueryClient();
   const formRef = useRef(null);
@@ -46,12 +47,13 @@ const StudentManagement = () => {
 
   // Fetch students with improved query invalidation
   const { data: studentsData, isLoading, refetch } = useQuery(
-    ['students', activeSearchTerm, selectedGrade],
+    ['students', activeSearchTerm, selectedGrade, selectedClass],
     () => {
-      console.log('Fetching students with params:', { search: activeSearchTerm, grade_id: selectedGrade });
+      console.log('Fetching students with params:', { search: activeSearchTerm, grade_id: selectedGrade, class_id: selectedClass });
       return adminAPI.getStudents({ 
         search: activeSearchTerm, 
-        grade_id: selectedGrade || '' 
+        grade_id: selectedGrade || '',
+        class_id: selectedClass || ''
       });
     },
     {
@@ -324,6 +326,7 @@ const StudentManagement = () => {
               onChange={(e) => {
                 console.log('Grade filter changed to:', e.target.value);
                 setSelectedGrade(e.target.value);
+                setSelectedClass(''); // Reset class when grade changes
               }}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
@@ -333,6 +336,25 @@ const StudentManagement = () => {
                   {grade.name}
                 </option>
               ))}
+            </select>
+          </div>
+          <div>
+            <select
+              value={selectedClass}
+              onChange={(e) => {
+                console.log('Class filter changed to:', e.target.value);
+                setSelectedClass(e.target.value);
+              }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">All Classes</option>
+              {classes
+                .filter(cls => !selectedGrade || cls.grade_id === parseInt(selectedGrade))
+                .map((cls) => (
+                  <option key={cls.id} value={cls.id}>
+                    {cls.name}
+                  </option>
+                ))}
             </select>
           </div>
         </div>
