@@ -503,4 +503,87 @@ router.get('/today', [
   }
 });
 
+router.get('/class-breakdown', [
+  authenticate,
+  authorize('admin', 'super_admin', 'teacher')
+], async (req, res) => {
+  try {
+    const { date, grade_id } = req.query;
+    const targetDate = date || new Date().toISOString().split('T')[0];
+
+    let gradeFilter = '';
+    let teacherFilter = '';
+    const params = [targetDate];
+
+    if (req.user.role === 'teacher') {
+      params.push(req.user.id);
+      teacherFilter = ` AND EXISTS (
+        SELECT 1 FROM teacher_assignments ta 
+        WHERE ta.teacher_id = $${params.length} 
+        AND ta.grade_id = c.grade_id 
+        AND ta.class_id = c.id
+      )`;
+    }
+
+    if (grade_id) {
+      params.push(grade_id);
+      gradeFilter = ` AND c.grade_id = $${params.length}`;
+    }
+
+    const classStats = await db.query(`
+      SELECT 
+        c.id as class_id,
+        c.name as class_name,
+        g.name as grade_name,
+        g.id as grade_id,
+        COUNT(DISTINCT CASE WHEN a.status = 'present' THEN a.student_id END) as present,
+        COUNT(DISTINCT CASE WHEN a.status = 'absent' THEN a.student_id END) as absent,
+        COUNT(DISTINCT CASE WHEN a.status = 'late' THEN a.student_id END) as late,
+        COUNT(DISTINCT CASE WHEN a.status = 'excused' THEN a.student_id END) as excused,
+        COUNT(DISTINCT a.student_id) as total_recorded,
+        (SELECT COUNT(*) FROM users u2 WHERE u2.class_id = c.id AND u2.role = 'student' AND u2.is_active = true) as total_students
+      FROM classes c
+      JOIN grades g ON c.grade_id = g.id
+      LEFT JOIN attendance a ON a.class_id = c.id AND a.date = $1
+      WHERE c.is_active = true ${teacherFilter} ${gradeFilter}
+      GROUP BY c.id, c.name, g.name, g.id
+      ORDER BY g.name, c.name
+    `, params);
+
+    const allStudents = await db.query(`
+      SELECT 
+        u.id, u.first_name, u.last_name, u.student_number, u.class_id,
+        COALESCE(a.status, 'not_recorded') as status,
+        a.notes
+      FROM users u
+      LEFT JOIN attendance a ON u.id = a.student_id AND a.date = $1 AND a.class_id = u.class_id
+      WHERE u.role = 'student' AND u.is_active = true AND u.class_id IS NOT NULL
+      ORDER BY u.last_name, u.first_name
+    `, [targetDate]);
+
+    const studentsByClass = {};
+    for (const student of allStudents.rows) {
+      if (!studentsByClass[student.class_id]) {
+        studentsByClass[student.class_id] = [];
+      }
+      studentsByClass[student.class_id].push(student);
+    }
+
+    const classDetails = classStats.rows.map(cls => ({
+      ...cls,
+      students: studentsByClass[cls.class_id] || []
+    }));
+
+    res.json({
+      success: true,
+      date: targetDate,
+      classes: classDetails
+    });
+
+  } catch (error) {
+    console.error('Get class breakdown error:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching class breakdown' });
+  }
+});
+
 module.exports = router;

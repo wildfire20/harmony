@@ -9,6 +9,7 @@ import {
   Check,
   X,
   ChevronDown,
+  ChevronUp,
   RefreshCw,
   TrendingUp,
   Eye
@@ -22,6 +23,7 @@ const AttendanceReports = () => {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedGrade, setSelectedGrade] = useState('');
   const [lateDays, setLateDays] = useState(30);
+  const [expandedClasses, setExpandedClasses] = useState({});
 
   const { data: statsData, isLoading: loadingStats, refetch: refetchStats } = useQuery(
     ['attendance-stats', selectedDate, selectedGrade],
@@ -41,6 +43,12 @@ const AttendanceReports = () => {
     { enabled: true }
   );
 
+  const { data: classBreakdownData, isLoading: loadingBreakdown } = useQuery(
+    ['class-breakdown', selectedDate, selectedGrade],
+    () => attendanceAPI.getClassBreakdown({ date: selectedDate, grade_id: selectedGrade || undefined }),
+    { enabled: true }
+  );
+
   const { data: gradesData } = useQuery(
     ['grades'],
     () => classesAPI.getGrades()
@@ -49,6 +57,7 @@ const AttendanceReports = () => {
   const stats = statsData?.data;
   const today = todayData?.data;
   const lateReport = lateReportData?.data;
+  const classBreakdown = classBreakdownData?.data?.classes || [];
   const grades = gradesData?.data?.grades || [];
 
   const getAttendanceRate = () => {
@@ -56,6 +65,30 @@ const AttendanceReports = () => {
     const { present, late, excused, total_students } = stats.overall;
     const attended = (parseInt(present) || 0) + (parseInt(late) || 0) + (parseInt(excused) || 0);
     return total_students > 0 ? Math.round((attended / total_students) * 100) : 0;
+  };
+
+  const toggleClassExpand = (classId) => {
+    setExpandedClasses(prev => ({ ...prev, [classId]: !prev[classId] }));
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'present': return 'bg-green-100 text-green-800';
+      case 'absent': return 'bg-red-100 text-red-800';
+      case 'late': return 'bg-yellow-100 text-yellow-800';
+      case 'excused': return 'bg-blue-100 text-blue-800';
+      default: return 'bg-gray-100 text-gray-600';
+    }
+  };
+
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case 'present': return 'Present';
+      case 'absent': return 'Absent';
+      case 'late': return 'Late';
+      case 'excused': return 'Excused';
+      default: return 'Not Recorded';
+    }
   };
 
   return (
@@ -248,6 +281,171 @@ const AttendanceReports = () => {
             </div>
           )}
         </>
+      )}
+
+      {loadingBreakdown ? (
+        <LoadingSpinner />
+      ) : classBreakdown.length > 0 && (
+        <div className={`rounded-xl shadow-lg p-6 ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'}`}>
+          <div className="flex items-center gap-2 mb-6">
+            <Users className="h-6 w-6 text-indigo-600" />
+            <h3 className={`text-xl font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+              Class-by-Class Attendance
+            </h3>
+          </div>
+
+          <div className="space-y-4">
+            {classBreakdown.map((cls) => {
+              const isExpanded = expandedClasses[cls.class_id];
+              const presentStudents = cls.students?.filter(s => s.status === 'present') || [];
+              const absentStudents = cls.students?.filter(s => s.status === 'absent') || [];
+              const lateStudents = cls.students?.filter(s => s.status === 'late') || [];
+              const excusedStudents = cls.students?.filter(s => s.status === 'excused') || [];
+              const notRecorded = cls.students?.filter(s => s.status === 'not_recorded') || [];
+              const totalStudents = parseInt(cls.total_students) || 0;
+              const attendancePercent = totalStudents > 0 
+                ? Math.round(((parseInt(cls.present) || 0) + (parseInt(cls.late) || 0)) / totalStudents * 100) 
+                : 0;
+
+              return (
+                <div 
+                  key={cls.class_id}
+                  className={`border rounded-xl overflow-hidden ${
+                    theme === 'dark' ? 'border-gray-700' : 'border-gray-200'
+                  }`}
+                >
+                  <button
+                    onClick={() => toggleClassExpand(cls.class_id)}
+                    className={`w-full px-5 py-4 flex items-center justify-between ${
+                      theme === 'dark' ? 'hover:bg-gray-700' : 'hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div>
+                        <h4 className={`font-semibold text-left ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+                          {cls.grade_name} - {cls.class_name}
+                        </h4>
+                        <p className={`text-sm text-left ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                          {totalStudents} students
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="flex gap-2">
+                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          {cls.present || 0} Present
+                        </span>
+                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                          {cls.absent || 0} Absent
+                        </span>
+                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                          {cls.late || 0} Late
+                        </span>
+                      </div>
+                      <div className={`text-sm font-bold ${attendancePercent >= 80 ? 'text-green-600' : attendancePercent >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        {attendancePercent}%
+                      </div>
+                      {isExpanded ? (
+                        <ChevronUp className={`h-5 w-5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} />
+                      ) : (
+                        <ChevronDown className={`h-5 w-5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} />
+                      )}
+                    </div>
+                  </button>
+
+                  {isExpanded && cls.students && (
+                    <div className={`px-5 pb-4 border-t ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        {presentStudents.length > 0 && (
+                          <div className={`rounded-lg p-4 ${theme === 'dark' ? 'bg-green-900/20 border border-green-800' : 'bg-green-50 border border-green-200'}`}>
+                            <h5 className={`font-semibold mb-3 flex items-center gap-2 ${theme === 'dark' ? 'text-green-300' : 'text-green-800'}`}>
+                              <Check className="h-4 w-4" />
+                              Present ({presentStudents.length})
+                            </h5>
+                            <div className="space-y-1">
+                              {presentStudents.map(s => (
+                                <div key={s.id} className={`text-sm py-1 ${theme === 'dark' ? 'text-green-200' : 'text-green-700'}`}>
+                                  {s.first_name} {s.last_name} <span className="opacity-60">({s.student_number})</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {absentStudents.length > 0 && (
+                          <div className={`rounded-lg p-4 ${theme === 'dark' ? 'bg-red-900/20 border border-red-800' : 'bg-red-50 border border-red-200'}`}>
+                            <h5 className={`font-semibold mb-3 flex items-center gap-2 ${theme === 'dark' ? 'text-red-300' : 'text-red-800'}`}>
+                              <X className="h-4 w-4" />
+                              Absent ({absentStudents.length})
+                            </h5>
+                            <div className="space-y-1">
+                              {absentStudents.map(s => (
+                                <div key={s.id} className={`text-sm py-1 ${theme === 'dark' ? 'text-red-200' : 'text-red-700'}`}>
+                                  {s.first_name} {s.last_name} <span className="opacity-60">({s.student_number})</span>
+                                  {s.notes && <span className="italic ml-1">- {s.notes}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {lateStudents.length > 0 && (
+                          <div className={`rounded-lg p-4 ${theme === 'dark' ? 'bg-yellow-900/20 border border-yellow-800' : 'bg-yellow-50 border border-yellow-200'}`}>
+                            <h5 className={`font-semibold mb-3 flex items-center gap-2 ${theme === 'dark' ? 'text-yellow-300' : 'text-yellow-800'}`}>
+                              <Clock className="h-4 w-4" />
+                              Late ({lateStudents.length})
+                            </h5>
+                            <div className="space-y-1">
+                              {lateStudents.map(s => (
+                                <div key={s.id} className={`text-sm py-1 ${theme === 'dark' ? 'text-yellow-200' : 'text-yellow-700'}`}>
+                                  {s.first_name} {s.last_name} <span className="opacity-60">({s.student_number})</span>
+                                  {s.notes && <span className="italic ml-1">- {s.notes}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {excusedStudents.length > 0 && (
+                          <div className={`rounded-lg p-4 ${theme === 'dark' ? 'bg-blue-900/20 border border-blue-800' : 'bg-blue-50 border border-blue-200'}`}>
+                            <h5 className={`font-semibold mb-3 flex items-center gap-2 ${theme === 'dark' ? 'text-blue-300' : 'text-blue-800'}`}>
+                              <Calendar className="h-4 w-4" />
+                              Excused ({excusedStudents.length})
+                            </h5>
+                            <div className="space-y-1">
+                              {excusedStudents.map(s => (
+                                <div key={s.id} className={`text-sm py-1 ${theme === 'dark' ? 'text-blue-200' : 'text-blue-700'}`}>
+                                  {s.first_name} {s.last_name} <span className="opacity-60">({s.student_number})</span>
+                                  {s.notes && <span className="italic ml-1">- {s.notes}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {notRecorded.length > 0 && (
+                          <div className={`rounded-lg p-4 ${theme === 'dark' ? 'bg-gray-900/40 border border-gray-600' : 'bg-gray-50 border border-gray-200'}`}>
+                            <h5 className={`font-semibold mb-3 flex items-center gap-2 ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+                              <AlertTriangle className="h-4 w-4" />
+                              Not Recorded ({notRecorded.length})
+                            </h5>
+                            <div className="space-y-1">
+                              {notRecorded.map(s => (
+                                <div key={s.id} className={`text-sm py-1 ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>
+                                  {s.first_name} {s.last_name} <span className="opacity-60">({s.student_number})</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {loadingLate ? (

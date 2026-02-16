@@ -50,7 +50,7 @@ router.post('/generate-monthly', [
     }
 
     const { month, year, amountDue } = req.body;
-    const dueDate = new Date(year, month, 15); // Due on 15th of the month
+    const dueDate = new Date(year, month, 0); // Due on last day of the month (month is 1-based, so month with day 0 = last day of that month)
 
     console.log('Generating monthly invoices:', { month, year, amountDue });
 
