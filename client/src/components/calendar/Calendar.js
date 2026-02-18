@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, momentLocalizer } from 'react-big-calendar';
 import moment from 'moment';
-import { Calendar as CalendarIcon, Plus, X, Clock, MapPin, Users, BookOpen, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar as CalendarIcon, Plus, X, Clock, MapPin, Users, BookOpen, AlertCircle, ChevronLeft, ChevronRight, Edit, Trash2 } from 'lucide-react';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../common/ThemeProvider';
@@ -19,6 +19,7 @@ const CalendarComponent = () => {
   const [error, setError] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
+  const [editingEvent, setEditingEvent] = useState(null);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [currentView, setCurrentView] = useState('month');
 
@@ -29,7 +30,7 @@ const CalendarComponent = () => {
   const textSecondary = isDark ? 'text-gray-400' : 'text-gray-600';
   const inputBg = isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
 
-  const [eventForm, setEventForm] = useState({
+  const defaultForm = {
     title: '',
     description: '',
     start_date: '',
@@ -39,7 +40,9 @@ const CalendarComponent = () => {
     event_type: 'other',
     target_audience: 'all',
     grade_id: ''
-  });
+  };
+
+  const [eventForm, setEventForm] = useState(defaultForm);
 
   useEffect(() => {
     fetchCalendarEvents();
@@ -100,33 +103,71 @@ const CalendarComponent = () => {
       if (eventForm.grade_id && eventForm.grade_id !== '') {
         cleanedForm.grade_id = parseInt(eventForm.grade_id);
       }
-      
-      const response = await api.post('/calendar/events', cleanedForm);
+
+      let response;
+      if (editingEvent) {
+        response = await api.put(`/calendar/events/${editingEvent.id}`, cleanedForm);
+      } else {
+        response = await api.post('/calendar/events', cleanedForm);
+      }
       
       if (response.data.success) {
         setShowCreateEvent(false);
-        setEventForm({
-          title: '',
-          description: '',
-          start_date: '',
-          start_time: '09:00',
-          end_date: '',
-          end_time: '10:00',
-          event_type: 'other',
-          target_audience: 'all',
-          grade_id: ''
-        });
+        setEditingEvent(null);
+        setEventForm(defaultForm);
+        setSelectedEvent(null);
         await fetchCalendarEvents();
-        toast.success('Event created successfully!');
+        toast.success(editingEvent ? 'Event updated successfully!' : 'Event created successfully!');
       }
     } catch (error) {
-      console.error('Error creating event:', error);
+      console.error('Error saving event:', error);
       const errorMessage = error.response?.data?.message || 
                           (error.response?.data?.errors ? 
                            error.response.data.errors.map(e => e.msg).join(', ') : 
-                           'Failed to create event');
+                           'Failed to save event');
       setError(errorMessage);
       toast.error(errorMessage);
+    }
+  };
+
+  const handleEditEvent = (event) => {
+    const resource = event.resource;
+    const startDate = resource.start_date || resource.due_date;
+    const endDate = resource.end_date;
+
+    const startMoment = moment(startDate);
+    const endMoment = endDate ? moment(endDate) : null;
+
+    setEventForm({
+      title: resource.title || '',
+      description: resource.description || '',
+      start_date: startMoment.format('YYYY-MM-DD'),
+      start_time: startMoment.format('HH:mm'),
+      end_date: endMoment ? endMoment.format('YYYY-MM-DD') : '',
+      end_time: endMoment ? endMoment.format('HH:mm') : '10:00',
+      event_type: resource.category || resource.event_type || 'other',
+      target_audience: resource.target_audience || 'all',
+      grade_id: resource.grade_id || ''
+    });
+    setEditingEvent(resource);
+    setSelectedEvent(null);
+    setShowCreateEvent(true);
+  };
+
+  const handleDeleteEvent = async (event) => {
+    const resource = event.resource;
+    if (!window.confirm(`Are you sure you want to delete "${resource.title}"?`)) return;
+
+    try {
+      const response = await api.delete(`/calendar/events/${resource.id}`);
+      if (response.data.success) {
+        setSelectedEvent(null);
+        await fetchCalendarEvents();
+        toast.success('Event deleted successfully!');
+      }
+    } catch (error) {
+      console.error('Error deleting event:', error);
+      toast.error('Failed to delete event');
     }
   };
 
@@ -233,6 +274,9 @@ const CalendarComponent = () => {
     fetchCalendarEvents(date);
   };
 
+  const isAdmin = user.role === 'admin' || user.role === 'super_admin';
+  const isSchoolEvent = (event) => event?.resource?.event_type === 'school_event';
+
   const formatEventDetails = (event) => {
     const resource = event.resource;
     const startTime = moment(event.start).format('h:mm A');
@@ -277,13 +321,21 @@ const CalendarComponent = () => {
             {resource.description && (
               <p className={textSecondary}>{resource.description}</p>
             )}
-            <div className={`inline-block px-3 py-1.5 rounded-full text-sm font-medium ${
-              resource.category === 'holiday' ? 'bg-emerald-100 text-emerald-700' :
-              resource.category === 'exam' ? 'bg-amber-100 text-amber-700' :
-              resource.category === 'meeting' ? 'bg-purple-100 text-purple-700' :
-              'bg-gray-100 text-gray-700'
-            }`}>
-              {resource.category || resource.event_type}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`inline-block px-3 py-1.5 rounded-full text-sm font-medium ${
+                resource.category === 'holiday' ? 'bg-emerald-100 text-emerald-700' :
+                resource.category === 'exam' ? 'bg-amber-100 text-amber-700' :
+                resource.category === 'meeting' ? 'bg-purple-100 text-purple-700' :
+                resource.category === 'deadline' ? 'bg-red-100 text-red-700' :
+                'bg-gray-100 text-gray-700'
+              }`}>
+                {resource.category || resource.event_type}
+              </span>
+              {resource.target_audience && resource.target_audience !== 'all' && (
+                <span className="inline-block px-3 py-1.5 rounded-full text-sm font-medium bg-blue-100 text-blue-700">
+                  {resource.target_audience}
+                </span>
+              )}
             </div>
           </>
         )}
@@ -292,12 +344,12 @@ const CalendarComponent = () => {
   };
 
   const legendItems = [
-    { color: '#3b82f6', label: 'Assignments', icon: '📋' },
-    { color: '#ef4444', label: 'Quizzes', icon: '📝' },
-    { color: '#10b981', label: 'Holidays', icon: '🎉' },
-    { color: '#f59e0b', label: 'Exams', icon: '📊' },
-    { color: '#8b5cf6', label: 'Meetings', icon: '👥' },
-    { color: '#6b7280', label: 'Other', icon: '📌' }
+    { color: '#3b82f6', label: 'Assignments', icon: '' },
+    { color: '#ef4444', label: 'Quizzes', icon: '' },
+    { color: '#10b981', label: 'Holidays', icon: '' },
+    { color: '#f59e0b', label: 'Exams', icon: '' },
+    { color: '#8b5cf6', label: 'Meetings', icon: '' },
+    { color: '#6b7280', label: 'Other', icon: '' }
   ];
 
   if (loading) {
@@ -313,7 +365,6 @@ const CalendarComponent = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-xl shadow-lg shadow-emerald-500/25">
@@ -324,10 +375,14 @@ const CalendarComponent = () => {
             <p className={`text-sm ${textSecondary}`}>View tasks, events, and important dates</p>
           </div>
         </div>
-        {(user.role === 'admin' || user.role === 'super_admin') && (
+        {isAdmin && (
           <button 
             className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-emerald-500/25 transition-all"
-            onClick={() => setShowCreateEvent(true)}
+            onClick={() => {
+              setEditingEvent(null);
+              setEventForm(defaultForm);
+              setShowCreateEvent(true);
+            }}
           >
             <Plus className="h-4 w-4" />
             Create Event
@@ -335,7 +390,6 @@ const CalendarComponent = () => {
         )}
       </div>
 
-      {/* Error Display */}
       {error && (
         <div className="flex items-center gap-3 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl">
           <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
@@ -349,7 +403,6 @@ const CalendarComponent = () => {
         </div>
       )}
 
-      {/* Legend */}
       <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-4`}>
         <div className="flex flex-wrap items-center gap-4">
           {legendItems.map((item, idx) => (
@@ -358,13 +411,12 @@ const CalendarComponent = () => {
                 className="w-3 h-3 rounded-full" 
                 style={{ backgroundColor: item.color }}
               ></div>
-              <span className={`text-sm ${textSecondary}`}>{item.icon} {item.label}</span>
+              <span className={`text-sm ${textSecondary}`}>{item.label}</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Calendar */}
       <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-6`}>
         <Calendar
           localizer={localizer}
@@ -399,7 +451,6 @@ const CalendarComponent = () => {
         />
       </div>
 
-      {/* Event Details Modal */}
       {selectedEvent && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setSelectedEvent(null)}>
           <div className={`${cardBg} rounded-2xl shadow-2xl max-w-md w-full overflow-hidden`} onClick={(e) => e.stopPropagation()}>
@@ -415,24 +466,43 @@ const CalendarComponent = () => {
             <div className="p-6">
               {formatEventDetails(selectedEvent)}
             </div>
+            {isAdmin && isSchoolEvent(selectedEvent) && (
+              <div className={`px-6 py-4 border-t ${cardBorder} flex gap-3`}>
+                <button
+                  onClick={() => handleEditEvent(selectedEvent)}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all"
+                >
+                  <Edit className="h-4 w-4" />
+                  Edit Event
+                </button>
+                <button
+                  onClick={() => handleDeleteEvent(selectedEvent)}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Create Event Modal */}
-      {showCreateEvent && (user.role === 'admin' || user.role === 'super_admin') && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowCreateEvent(false)}>
+      {showCreateEvent && isAdmin && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => { setShowCreateEvent(false); setEditingEvent(null); }}>
           <div className={`${cardBg} rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto`} onClick={(e) => e.stopPropagation()}>
             <div className={`px-6 py-4 border-b ${cardBorder} flex items-center justify-between sticky top-0 ${cardBg}`}>
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-lg">
-                  <Plus className="h-4 w-4 text-white" />
+                <div className={`p-2 rounded-lg ${editingEvent ? 'bg-blue-600' : 'bg-gradient-to-br from-emerald-500 to-teal-500'}`}>
+                  {editingEvent ? <Edit className="h-4 w-4 text-white" /> : <Plus className="h-4 w-4 text-white" />}
                 </div>
-                <h3 className={`text-lg font-semibold ${textPrimary}`}>Create School Event</h3>
+                <h3 className={`text-lg font-semibold ${textPrimary}`}>
+                  {editingEvent ? 'Edit School Event' : 'Create School Event'}
+                </h3>
               </div>
               <button 
                 className={`p-2 rounded-xl ${isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-100'} transition-colors`}
-                onClick={() => setShowCreateEvent(false)}
+                onClick={() => { setShowCreateEvent(false); setEditingEvent(null); }}
               >
                 <X className={`h-5 w-5 ${textSecondary}`} />
               </button>
@@ -461,7 +531,6 @@ const CalendarComponent = () => {
                 />
               </div>
 
-              {/* Start Date & Time */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={`block text-sm font-medium ${textSecondary} mb-2`}>
@@ -490,7 +559,6 @@ const CalendarComponent = () => {
                 </div>
               </div>
 
-              {/* End Date & Time */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={`block text-sm font-medium ${textSecondary} mb-2`}>End Date</label>
@@ -520,11 +588,11 @@ const CalendarComponent = () => {
                     onChange={(e) => setEventForm({ ...eventForm, event_type: e.target.value })}
                     className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${textPrimary} focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all`}
                   >
-                    <option value="holiday">🎉 Holiday</option>
-                    <option value="exam">📊 Exam</option>
-                    <option value="meeting">👥 Meeting</option>
-                    <option value="deadline">⏰ Deadline</option>
-                    <option value="other">📌 Other</option>
+                    <option value="holiday">Holiday</option>
+                    <option value="exam">Exam</option>
+                    <option value="meeting">Meeting</option>
+                    <option value="deadline">Deadline</option>
+                    <option value="other">Other</option>
                   </select>
                 </div>
 
@@ -546,16 +614,20 @@ const CalendarComponent = () => {
               <div className={`flex gap-3 pt-4 border-t ${cardBorder}`}>
                 <button 
                   type="button" 
-                  onClick={() => setShowCreateEvent(false)}
+                  onClick={() => { setShowCreateEvent(false); setEditingEvent(null); }}
                   className={`flex-1 px-4 py-3 rounded-xl font-medium ${isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-100 hover:bg-gray-200'} ${textPrimary} transition-all`}
                 >
                   Cancel
                 </button>
                 <button 
                   type="submit" 
-                  className="flex-1 px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-emerald-500/25 transition-all"
+                  className={`flex-1 px-4 py-3 rounded-xl font-medium text-white transition-all ${
+                    editingEvent 
+                      ? 'bg-blue-600 hover:bg-blue-700' 
+                      : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:shadow-lg hover:shadow-emerald-500/25'
+                  }`}
                 >
-                  Create Event
+                  {editingEvent ? 'Update Event' : 'Create Event'}
                 </button>
               </div>
             </form>

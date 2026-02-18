@@ -69,8 +69,8 @@ router.get('/', authenticate, async (req, res) => {
 
     // Get school events
     let eventQuery = `
-      SELECT id, title, description, start_date as due_date, end_date, 'school_event' as event_type,
-             event_type as category, created_by
+      SELECT id, title, description, start_date, start_date as due_date, end_date, 'school_event' as event_type,
+             event_type as category, target_audience, created_by
       FROM school_events
       WHERE is_active = true
     `;
@@ -96,29 +96,7 @@ router.get('/', authenticate, async (req, res) => {
       events = events.concat(eventResult.rows);
       console.log('School events loaded:', eventResult.rows.length);
     } catch (error) {
-      console.log('School events table may not exist yet, creating it...', error.message);
-      // Try to create the table
-      try {
-        await db.query(`
-          CREATE TABLE IF NOT EXISTS school_events (
-            id SERIAL PRIMARY KEY,
-            title VARCHAR(255) NOT NULL,
-            description TEXT,
-            start_date DATE NOT NULL,
-            end_date DATE,
-            event_type VARCHAR(50) NOT NULL CHECK (event_type IN ('holiday', 'exam', 'meeting', 'deadline', 'other')),
-            target_audience VARCHAR(50) NOT NULL CHECK (target_audience IN ('all', 'students', 'teachers', 'staff')),
-            grade_id INTEGER REFERENCES grades(id),
-            created_by INTEGER REFERENCES users(id),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            is_active BOOLEAN DEFAULT true
-          )
-        `);
-        console.log('School events table created successfully');
-      } catch (createError) {
-        console.error('Failed to create school events table:', createError);
-      }
+      console.log('School events table may not exist yet:', error.message);
     }
 
     // Sort events by date
@@ -138,19 +116,59 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
+// One-time migration: ensure school_events uses TIMESTAMP for time preservation
+let _schoolEventsChecked = false;
+async function ensureSchoolEventsTimestamp() {
+  if (_schoolEventsChecked) return;
+  _schoolEventsChecked = true;
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS school_events (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        start_date TIMESTAMP NOT NULL,
+        end_date TIMESTAMP,
+        event_type VARCHAR(50) NOT NULL,
+        target_audience VARCHAR(50) NOT NULL,
+        grade_id INTEGER REFERENCES grades(id),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_active BOOLEAN DEFAULT true
+      )
+    `);
+    // Check if start_date is DATE type and upgrade to TIMESTAMP
+    const colCheck = await db.query(`
+      SELECT data_type FROM information_schema.columns 
+      WHERE table_name = 'school_events' AND column_name = 'start_date'
+    `);
+    if (colCheck.rows.length > 0 && colCheck.rows[0].data_type === 'date') {
+      await db.query(`ALTER TABLE school_events ALTER COLUMN start_date TYPE TIMESTAMP USING start_date + TIME '08:00:00'`);
+      await db.query(`ALTER TABLE school_events ALTER COLUMN end_date TYPE TIMESTAMP USING end_date + TIME '14:00:00'`);
+      console.log('Migrated school_events DATE columns to TIMESTAMP (existing events set to 08:00/14:00)');
+    }
+  } catch (err) {
+    console.log('School events table setup:', err.message);
+  }
+}
+ensureSchoolEventsTimestamp();
+
 // Create school event (admin only)
 router.post('/events', [
   authenticate,
   authorize('admin', 'super_admin'),
   body('title').notEmpty().trim().withMessage('Title is required'),
   body('description').optional().trim(),
-  body('start_date').isISO8601().withMessage('Start date must be a valid date'),
+  body('start_date').notEmpty().withMessage('Start date is required').custom((value) => {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) throw new Error('Start date must be a valid date/time');
+    return true;
+  }),
   body('end_date').optional().custom((value) => {
     if (value && value !== '') {
-      const date = new Date(value);
-      if (isNaN(date.getTime())) {
-        throw new Error('End date must be a valid date');
-      }
+      const d = new Date(value);
+      if (isNaN(d.getTime())) throw new Error('End date must be a valid date/time');
     }
     return true;
   }),
@@ -179,34 +197,15 @@ router.post('/events', [
     const { title, description, start_date, end_date, event_type, target_audience, grade_id } = req.body;
     const user = req.user;
 
-    // Convert grade_id to integer or null
     const processedGradeId = grade_id && grade_id !== '' ? parseInt(grade_id) : null;
 
     console.log('Creating event:', { title, description, start_date, end_date, event_type, target_audience, grade_id: processedGradeId });
-
-    // Create school_events table if it doesn't exist
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS school_events (
-        id SERIAL PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
-        description TEXT,
-        start_date DATE NOT NULL,
-        end_date DATE,
-        event_type VARCHAR(50) NOT NULL CHECK (event_type IN ('holiday', 'exam', 'meeting', 'deadline', 'other')),
-        target_audience VARCHAR(50) NOT NULL CHECK (target_audience IN ('all', 'students', 'teachers', 'staff')),
-        grade_id INTEGER REFERENCES grades(id),
-        created_by INTEGER REFERENCES users(id),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        is_active BOOLEAN DEFAULT true
-      )
-    `);
 
     const result = await db.query(`
       INSERT INTO school_events (title, description, start_date, end_date, event_type, target_audience, grade_id, created_by)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING id, title, description, start_date, end_date, event_type, target_audience, grade_id, created_at
-    `, [title, description, start_date, end_date, event_type, target_audience, processedGradeId, user.id]);
+    `, [title, description, start_date, end_date || null, event_type, target_audience, processedGradeId, user.id]);
 
     res.status(201).json({
       success: true,
