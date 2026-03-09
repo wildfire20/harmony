@@ -141,6 +141,7 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - **Copy to Clipboard** - Easy copy button for sharing passwords
 
 ## Recent Changes (March 2026)
+- **Weekly Attendance Report** - Admin can now view all grades' attendance for an entire week (Mon-Fri) in one view. Select start/end dates, navigate weeks with Previous/Next buttons. Shows daily attendance percentages per class with expandable student-by-student grids showing P/A/L/E status for each day. Weekly summary column per student.
 - **Payment System Schema Fix** - Fixed `payment_transactions` table schema mismatch between bank statement processing and manual payment features. Added missing columns (`recorded_by`, `payment_method`, `month`, `year`, `payment_date`, `reference`) with automatic migration. Fixed invoice update queries to use `due_date`-based month/year matching instead of non-existent `month`/`year` columns on `invoices` table. Disabled destructive `quick-db-fix.js` that was dropping and recreating tables on every startup.
 - **Calendar Edit/Delete** - Added edit and delete functionality for school events. Migrated `school_events` table from DATE to TIMESTAMP columns to preserve event times.
 

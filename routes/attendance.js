@@ -586,4 +586,154 @@ router.get('/class-breakdown', [
   }
 });
 
+// Get weekly attendance overview (admin - all grades, all days in range)
+router.get('/weekly', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { start_date, end_date, grade_id } = req.query;
+
+    if (!start_date || !end_date) {
+      return res.status(400).json({ success: false, message: 'start_date and end_date are required' });
+    }
+
+    let gradeFilter = '';
+    const params = [start_date, end_date];
+
+    if (grade_id) {
+      params.push(grade_id);
+      gradeFilter = ` AND c.grade_id = $${params.length}`;
+    }
+
+    const classStats = await db.query(`
+      SELECT 
+        c.id as class_id,
+        c.name as class_name,
+        g.name as grade_name,
+        g.id as grade_id,
+        a.date,
+        COUNT(DISTINCT CASE WHEN a.status = 'present' THEN a.student_id END) as present,
+        COUNT(DISTINCT CASE WHEN a.status = 'absent' THEN a.student_id END) as absent,
+        COUNT(DISTINCT CASE WHEN a.status = 'late' THEN a.student_id END) as late,
+        COUNT(DISTINCT CASE WHEN a.status = 'excused' THEN a.student_id END) as excused,
+        COUNT(DISTINCT a.student_id) as total_recorded,
+        (SELECT COUNT(*) FROM users u2 WHERE u2.class_id = c.id AND u2.role = 'student' AND u2.is_active = true) as total_students
+      FROM classes c
+      JOIN grades g ON c.grade_id = g.id
+      LEFT JOIN attendance a ON a.class_id = c.id AND a.date >= $1 AND a.date <= $2
+      WHERE c.is_active = true ${gradeFilter}
+      GROUP BY c.id, c.name, g.name, g.id, a.date
+      ORDER BY g.name, c.name, a.date
+    `, params);
+
+    // Build weekday dates array
+    const dates = [];
+    const d = new Date(start_date + 'T12:00:00');
+    const endD = new Date(end_date + 'T12:00:00');
+    while (d <= endD) {
+      const dayOfWeek = d.getDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        const yr = d.getFullYear();
+        const mo = String(d.getMonth() + 1).padStart(2, '0');
+        const dy = String(d.getDate()).padStart(2, '0');
+        dates.push(`${yr}-${mo}-${dy}`);
+      }
+      d.setDate(d.getDate() + 1);
+    }
+
+    // Get all active students with their classes
+    const allStudents = await db.query(`
+      SELECT u.id, u.first_name, u.last_name, u.student_number, u.class_id
+      FROM users u
+      WHERE u.role = 'student' AND u.is_active = true AND u.class_id IS NOT NULL
+      ORDER BY u.last_name, u.first_name
+    `);
+
+    // Get attendance records in the date range
+    const attendanceRecords = await db.query(`
+      SELECT a.student_id, a.class_id, a.date, a.status, a.notes
+      FROM attendance a
+      WHERE a.date >= $1 AND a.date <= $2
+    `, [start_date, end_date]);
+
+    // Build class map from stats
+    const classMap = {};
+    for (const row of classStats.rows) {
+      const key = row.class_id;
+      if (!classMap[key]) {
+        classMap[key] = {
+          class_id: row.class_id,
+          class_name: row.class_name,
+          grade_name: row.grade_name,
+          grade_id: row.grade_id,
+          total_students: parseInt(row.total_students) || 0,
+          daily: {}
+        };
+      }
+      if (row.date) {
+        const rd = new Date(row.date);
+        const dateStr = `${rd.getFullYear()}-${String(rd.getMonth()+1).padStart(2,'0')}-${String(rd.getDate()).padStart(2,'0')}`;
+        classMap[key].daily[dateStr] = {
+          present: parseInt(row.present) || 0,
+          absent: parseInt(row.absent) || 0,
+          late: parseInt(row.late) || 0,
+          excused: parseInt(row.excused) || 0,
+          total_recorded: parseInt(row.total_recorded) || 0
+        };
+      }
+    }
+
+    // Build lookup: student_id + date -> status
+    const attendanceLookup = {};
+    for (const rec of attendanceRecords.rows) {
+      const rd = new Date(rec.date);
+      const dateStr = `${rd.getFullYear()}-${String(rd.getMonth()+1).padStart(2,'0')}-${String(rd.getDate()).padStart(2,'0')}`;
+      attendanceLookup[`${rec.student_id}_${dateStr}`] = {
+        status: rec.status,
+        notes: rec.notes
+      };
+    }
+
+    // Group students by class_id
+    const studentsByClass = {};
+    for (const s of allStudents.rows) {
+      if (!studentsByClass[s.class_id]) studentsByClass[s.class_id] = [];
+      studentsByClass[s.class_id].push(s);
+    }
+
+    // Build studentsByDate for each class - includes ALL students, not just those with records
+    const classes = Object.values(classMap).map(cls => {
+      const classStudents = studentsByClass[cls.class_id] || [];
+      const studentsByDate = {};
+      dates.forEach(dt => {
+        studentsByDate[dt] = classStudents.map(s => {
+          const rec = attendanceLookup[`${s.id}_${dt}`];
+          return {
+            id: s.id,
+            first_name: s.first_name,
+            last_name: s.last_name,
+            student_number: s.student_number,
+            status: rec ? rec.status : 'not_recorded',
+            notes: rec ? rec.notes : null
+          };
+        });
+      });
+      return { ...cls, studentsByDate };
+    });
+
+    res.json({
+      success: true,
+      start_date,
+      end_date,
+      dates,
+      classes
+    });
+
+  } catch (error) {
+    console.error('Get weekly attendance error:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching weekly attendance' });
+  }
+});
+
 module.exports = router;

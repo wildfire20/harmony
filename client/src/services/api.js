@@ -198,6 +198,7 @@ export const attendanceAPI = {
   getLateReport: (params) => api.get('/attendance/late-report', { params }),
   getTodayAttendance: () => api.get('/attendance/today'),
   getClassBreakdown: (params) => api.get('/attendance/class-breakdown', { params }),
+  getWeeklyReport: (params) => api.get('/attendance/weekly', { params }),
 };
 
 // Documents API
