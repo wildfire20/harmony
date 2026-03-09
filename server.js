@@ -250,6 +250,28 @@ const initializeInvoiceSystem = async () => {
       )
     `);
 
+    // Add missing columns to payment_transactions for manual payments & reconciliation
+    const ptColumns = [
+      { name: 'recorded_by', def: 'INTEGER REFERENCES users(id) ON DELETE SET NULL' },
+      { name: 'payment_method', def: "VARCHAR(50) DEFAULT 'bank_transfer'" },
+      { name: 'month', def: 'INTEGER' },
+      { name: 'year', def: 'INTEGER' },
+      { name: 'payment_date', def: 'DATE' },
+      { name: 'reference', def: 'VARCHAR(255)' },
+      { name: 'student_number', def: 'VARCHAR(50)' },
+      { name: 'transaction_date', def: 'DATE' }
+    ];
+    for (const col of ptColumns) {
+      await db.query(`ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS ${col.name} ${col.def}`).catch(() => {});
+    }
+    // Allow reference_number and invoice_id to be nullable (manual payments may not have these)
+    await db.query(`ALTER TABLE payment_transactions ALTER COLUMN reference_number DROP NOT NULL`).catch(() => {});
+    await db.query(`ALTER TABLE payment_transactions ALTER COLUMN invoice_id DROP NOT NULL`).catch(() => {});
+    // Backfill payment_date from transaction_date where null
+    await db.query(`UPDATE payment_transactions SET payment_date = transaction_date WHERE payment_date IS NULL AND transaction_date IS NOT NULL`).catch(() => {});
+    // Backfill reference from reference_number where null
+    await db.query(`UPDATE payment_transactions SET reference = reference_number WHERE reference IS NULL AND reference_number IS NOT NULL`).catch(() => {});
+
     // Create payment_upload_logs table
     await db.query(`
       CREATE TABLE IF NOT EXISTS payment_upload_logs (
@@ -742,22 +764,8 @@ const startServer = async () => {
       console.warn('⚠️ Enhanced Payment System initialization failed:', enhancedPaymentError.message);
     }
     
-    try {
-      const quickDatabaseFix = require('./quick-db-fix');
-      await quickDatabaseFix();
-      console.log('✅ Quick database fix applied successfully');
-    } catch (quickFixError) {
-      console.warn('⚠️ Quick database fix failed:', quickFixError.message);
-      
-      // Fallback to original fix
-      try {
-        const fixDatabaseSchema = require('./fix-database-schema');
-        await fixDatabaseSchema();
-        console.log('✅ Fallback database schema fix applied successfully');
-      } catch (schemaError) {
-        console.warn('⚠️ Fallback database schema fix failed:', schemaError.message);
-      }
-    }
+    // Note: quick-db-fix.js and fix-database-schema.js are legacy scripts
+    // Schema is now managed via CREATE TABLE IF NOT EXISTS + ALTER TABLE ADD COLUMN IF NOT EXISTS above
     
     console.log('🎉 Server fully initialized and ready!');
     

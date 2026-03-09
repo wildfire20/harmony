@@ -407,7 +407,7 @@ async function processTransactions(transactions, userId) {
       // Check for duplicate transactions
       const duplicateCheck = await client.query(`
         SELECT id FROM payment_transactions 
-        WHERE reference_number = $1 AND amount = $2 AND payment_date = $3
+        WHERE reference_number = $1 AND amount = $2 AND (transaction_date = $3 OR payment_date = $3)
       `, [transaction.reference, transaction.amount, transaction.date]);
 
       if (duplicateCheck.rows.length > 0) {
@@ -598,11 +598,11 @@ async function processTransactions(transactions, userId) {
         }
       }
 
-      // Record transaction in payment_transactions table (matching existing schema)
+      // Record transaction in payment_transactions table
       const transactionResult = await client.query(`
         INSERT INTO payment_transactions (
-          invoice_id, student_id, student_number, reference_number, amount, payment_date, description
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+          invoice_id, student_id, student_number, reference_number, amount, transaction_date, payment_date, description, payment_method
+        ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7, 'bank_transfer')
         RETURNING id
       `, [
         invoice.id,
@@ -1116,37 +1116,27 @@ router.post('/manual-payment', [
 
     const student = studentResult.rows[0];
 
-    // Check if payment_transactions table exists, create if not
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS payment_transactions (
-        id SERIAL PRIMARY KEY,
-        student_id INTEGER REFERENCES users(id),
-        amount DECIMAL(10,2) NOT NULL,
-        payment_date DATE NOT NULL,
-        reference VARCHAR(255),
-        description TEXT,
-        payment_method VARCHAR(50) DEFAULT 'manual_entry',
-        recorded_by INTEGER REFERENCES users(id),
-        month INTEGER,
-        year INTEGER,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
     // Insert the manual payment
+    const refValue = reference || `MANUAL-${Date.now()}`;
     const paymentResult = await db.query(`
-      INSERT INTO payment_transactions (student_id, amount, payment_date, reference, description, payment_method, recorded_by, month, year)
-      VALUES ($1, $2, $3, $4, $5, 'manual_entry', $6, $7, $8)
+      INSERT INTO payment_transactions (
+        student_id, amount, payment_date, transaction_date, 
+        reference, reference_number, description, 
+        payment_method, recorded_by, month, year,
+        student_number
+      )
+      VALUES ($1, $2, $3, $3, $4, $4, $5, 'manual_entry', $6, $7, $8, $9)
       RETURNING *
     `, [
       student_id, 
       amount, 
       payment_date, 
-      reference || `MANUAL-${Date.now()}`,
+      refValue,
       description || `Manual payment entry by admin`,
       adminId,
       month || new Date(payment_date).getMonth() + 1,
-      year || new Date(payment_date).getFullYear()
+      year || new Date(payment_date).getFullYear(),
+      student.student_number || ''
     ]);
 
     // If there's an invoice for this month/year, update it
@@ -1157,11 +1147,13 @@ router.post('/manual-payment', [
       UPDATE invoices 
       SET amount_paid = COALESCE(amount_paid, 0) + $1,
           status = CASE 
-            WHEN COALESCE(amount_paid, 0) + $1 >= amount THEN 'paid'
-            WHEN COALESCE(amount_paid, 0) + $1 > 0 THEN 'partial'
+            WHEN COALESCE(amount_paid, 0) + $1 >= amount_due THEN 'Paid'
+            WHEN COALESCE(amount_paid, 0) + $1 > 0 THEN 'Partial'
             ELSE status
           END
-      WHERE student_id = $2 AND month = $3 AND year = $4
+      WHERE student_id = $2 
+        AND EXTRACT(MONTH FROM due_date) = $3 
+        AND EXTRACT(YEAR FROM due_date) = $4
       RETURNING *
     `, [amount, student_id, paymentMonth, paymentYear]);
 
@@ -1213,11 +1205,13 @@ router.get('/student-payments/:studentId', [
 
     // Get all payments for this student
     const paymentsResult = await db.query(`
-      SELECT pt.*, u.first_name as recorded_by_name, u.last_name as recorded_by_lastname
+      SELECT pt.*, 
+             COALESCE(pt.payment_date, pt.transaction_date) as effective_date,
+             u.first_name as recorded_by_name, u.last_name as recorded_by_lastname
       FROM payment_transactions pt
       LEFT JOIN users u ON pt.recorded_by = u.id
       WHERE pt.student_id = $1
-      ORDER BY pt.payment_date DESC
+      ORDER BY COALESCE(pt.payment_date, pt.transaction_date) DESC
     `, [studentId]);
 
     res.json({
@@ -1278,18 +1272,24 @@ router.put('/manual-payment/:paymentId', [
     `, [amount, payment_date, description, reference, paymentId]);
 
     // If amount changed, update invoice
-    if (amount && amount !== original.amount) {
-      const difference = amount - original.amount;
-      await db.query(`
-        UPDATE invoices 
-        SET amount_paid = COALESCE(amount_paid, 0) + $1,
-            status = CASE 
-              WHEN COALESCE(amount_paid, 0) + $1 >= amount THEN 'paid'
-              WHEN COALESCE(amount_paid, 0) + $1 > 0 THEN 'partial'
-              ELSE 'pending'
-            END
-        WHERE student_id = $2 AND month = $3 AND year = $4
-      `, [difference, original.student_id, original.month, original.year]);
+    if (amount && parseFloat(amount) !== parseFloat(original.amount)) {
+      const difference = parseFloat(amount) - parseFloat(original.amount);
+      const pMonth = original.month || (original.payment_date ? new Date(original.payment_date).getMonth() + 1 : null);
+      const pYear = original.year || (original.payment_date ? new Date(original.payment_date).getFullYear() : null);
+      if (pMonth && pYear) {
+        await db.query(`
+          UPDATE invoices 
+          SET amount_paid = COALESCE(amount_paid, 0) + $1,
+              status = CASE 
+                WHEN COALESCE(amount_paid, 0) + $1 >= amount_due THEN 'Paid'
+                WHEN COALESCE(amount_paid, 0) + $1 > 0 THEN 'Partial'
+                ELSE 'Unpaid'
+              END
+          WHERE student_id = $2 
+            AND EXTRACT(MONTH FROM due_date) = $3 
+            AND EXTRACT(YEAR FROM due_date) = $4
+        `, [difference, original.student_id, pMonth, pYear]);
+      }
     }
 
     res.json({
@@ -1334,16 +1334,22 @@ router.delete('/manual-payment/:paymentId', [
     await db.query('DELETE FROM payment_transactions WHERE id = $1', [paymentId]);
 
     // Update invoice to subtract this amount
-    await db.query(`
-      UPDATE invoices 
-      SET amount_paid = GREATEST(COALESCE(amount_paid, 0) - $1, 0),
-          status = CASE 
-            WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) >= amount THEN 'paid'
-            WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) > 0 THEN 'partial'
-            ELSE 'pending'
-          END
-      WHERE student_id = $2 AND month = $3 AND year = $4
-    `, [payment.amount, payment.student_id, payment.month, payment.year]);
+    const delMonth = payment.month || (payment.payment_date ? new Date(payment.payment_date).getMonth() + 1 : null);
+    const delYear = payment.year || (payment.payment_date ? new Date(payment.payment_date).getFullYear() : null);
+    if (delMonth && delYear) {
+      await db.query(`
+        UPDATE invoices 
+        SET amount_paid = GREATEST(COALESCE(amount_paid, 0) - $1, 0),
+            status = CASE 
+              WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) >= amount_due THEN 'Paid'
+              WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) > 0 THEN 'Partial'
+              ELSE 'Unpaid'
+            END
+        WHERE student_id = $2 
+          AND EXTRACT(MONTH FROM due_date) = $3 
+          AND EXTRACT(YEAR FROM due_date) = $4
+      `, [payment.amount, payment.student_id, delMonth, delYear]);
+    }
 
     res.json({
       success: true,

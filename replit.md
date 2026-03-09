@@ -140,6 +140,10 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - **Custom Passwords** - Option to set custom passwords or auto-generate
 - **Copy to Clipboard** - Easy copy button for sharing passwords
 
+## Recent Changes (March 2026)
+- **Payment System Schema Fix** - Fixed `payment_transactions` table schema mismatch between bank statement processing and manual payment features. Added missing columns (`recorded_by`, `payment_method`, `month`, `year`, `payment_date`, `reference`) with automatic migration. Fixed invoice update queries to use `due_date`-based month/year matching instead of non-existent `month`/`year` columns on `invoices` table. Disabled destructive `quick-db-fix.js` that was dropping and recreating tables on every startup.
+- **Calendar Edit/Delete** - Added edit and delete functionality for school events. Migrated `school_events` table from DATE to TIMESTAMP columns to preserve event times.
+
 ## Recent Changes (January 2026)
 - **Password Management Portal** - Admin tool to view and reset student/teacher passwords with kid-friendly generation
 - **Teacher Archiving** - Archive inactive teachers who leave school (with restore option)
