@@ -42,7 +42,14 @@ const ManualPayments = () => {
     (data) => paymentsAPI.addManualPayment(data),
     {
       onSuccess: (response) => {
-        toast.success(response.data?.message || 'Payment recorded successfully');
+        const msg = response.data?.message || 'Payment recorded successfully';
+        const invoiceUpdated = response.data?.invoiceUpdated;
+        if (invoiceUpdated) {
+          toast.success(msg + ' — Invoice updated.');
+        } else {
+          toast.success(msg);
+          toast(`No invoice found for the selected month/year. Payment recorded but invoice was not updated.`, { icon: '⚠️' });
+        }
         queryClient.invalidateQueries(['studentPayments', selectedStudent?.id]);
         resetPaymentForm();
       },
@@ -289,7 +296,19 @@ const ManualPayments = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">For Month</label>
                     <select
                       value={paymentData.month}
-                      onChange={(e) => setPaymentData({ ...paymentData, month: parseInt(e.target.value) })}
+                      onChange={(e) => {
+                        const selectedMonth = parseInt(e.target.value);
+                        const payDateMonth = paymentData.payment_date
+                          ? new Date(paymentData.payment_date).getMonth() + 1
+                          : new Date().getMonth() + 1;
+                        const payDateYear = paymentData.payment_date
+                          ? new Date(paymentData.payment_date).getFullYear()
+                          : new Date().getFullYear();
+                        // If selected month is earlier than payment month (e.g. Jan selected when payment is December),
+                        // automatically set year to the next year
+                        const autoYear = selectedMonth < payDateMonth ? payDateYear + 1 : payDateYear;
+                        setPaymentData({ ...paymentData, month: selectedMonth, year: autoYear });
+                      }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"
                     >
                       {months.map((m) => (

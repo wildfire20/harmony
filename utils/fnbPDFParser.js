@@ -3,15 +3,24 @@ const pdfExtract = new PDFExtract();
 
 class FNBPDFParser {
   constructor() {
-    this.datePatterns = [
-      /^(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})$/i,
-      /^(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})$/i,
-      /^(\d{2})\/(\d{2})\/(\d{4})$/,
-      /^(\d{4})-(\d{2})-(\d{2})$/
-    ];
-    
-    this.amountPattern = /^-?R?\s*[\d,]+\.\d{2}$/;
-    this.studentIdPattern = /HAR\d+/gi;
+    // FNB date formats
+    this.monthMap = {
+      'jan': '01', 'january': '01',
+      'feb': '02', 'february': '02',
+      'mar': '03', 'march': '03',
+      'apr': '04', 'april': '04',
+      'may': '05',
+      'jun': '06', 'june': '06',
+      'jul': '07', 'july': '07',
+      'aug': '08', 'august': '08',
+      'sep': '09', 'september': '09',
+      'oct': '10', 'october': '10',
+      'nov': '11', 'november': '11',
+      'dec': '12', 'december': '12'
+    };
+    // Supports: R1,234.56  1,234.56  1 234.56  R 1 234.56  1234.56
+    this.amountRegex = /R?\s*([\d]{1,3}(?:[,\s]\d{3})*(?:\.\d{2})|\d+\.\d{2})/;
+    this.studentIdPattern = /HAR\s*\d+/gi;
   }
 
   async parsePDF(filePath) {
@@ -21,9 +30,10 @@ class FNBPDFParser {
           console.error('PDF extraction error:', err);
           return reject(err);
         }
-        
+
         try {
           const transactions = this.extractTransactions(data);
+          console.log(`PDF parsed: found ${transactions.length} transactions`);
           resolve({
             success: true,
             transactions,
@@ -40,104 +50,90 @@ class FNBPDFParser {
 
   extractTransactions(pdfData) {
     const transactions = [];
-    
-    pdfData.pages.forEach((page, pageIndex) => {
+    const seen = new Set();
+
+    for (const page of pdfData.pages) {
+      // Group PDF content items into lines by Y position
       const lines = this.groupContentByLine(page.content);
-      
-      lines.forEach((line, lineIndex) => {
-        const transaction = this.parseTransactionLineWithPositions(line);
-        if (transaction) {
-          transactions.push(transaction);
-        }
-      });
-    });
-    
+
+      for (const lineItems of lines) {
+        const lineText = lineItems.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim();
+        if (!lineText) continue;
+
+        const tx = this.parseTransactionLine(lineText, lineItems);
+        if (!tx) continue;
+
+        // Deduplicate
+        const key = `${tx.date}_${tx.amount}_${tx.reference}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        transactions.push(tx);
+      }
+    }
+
     return transactions;
   }
 
   groupContentByLine(content) {
     if (!content || content.length === 0) return [];
-    
-    const sortedContent = [...content].sort((a, b) => {
-      if (Math.abs(a.y - b.y) < 3) {
-        return a.x - b.x;
-      }
+
+    const sorted = [...content].sort((a, b) => {
+      if (Math.abs(a.y - b.y) < 6) return a.x - b.x;
       return a.y - b.y;
     });
-    
+
     const lines = [];
     let currentLine = [];
     let currentY = null;
-    const yTolerance = 5;
-    
-    sortedContent.forEach(item => {
-      if (currentY === null || Math.abs(item.y - currentY) <= yTolerance) {
+
+    for (const item of sorted) {
+      if (!item.str || !item.str.trim()) continue;
+      if (currentY === null || Math.abs(item.y - currentY) <= 6) {
         currentLine.push(item);
-        currentY = item.y;
+        currentY = currentY === null ? item.y : currentY;
       } else {
-        if (currentLine.length > 0) {
-          currentLine.sort((a, b) => a.x - b.x);
-          lines.push(currentLine);
-        }
+        if (currentLine.length > 0) lines.push(currentLine);
         currentLine = [item];
         currentY = item.y;
       }
-    });
-    
-    if (currentLine.length > 0) {
-      currentLine.sort((a, b) => a.x - b.x);
-      lines.push(currentLine);
     }
-    
+    if (currentLine.length > 0) lines.push(currentLine);
+
     return lines;
   }
 
-  parseTransactionLineWithPositions(lineItems) {
-    if (!lineItems || lineItems.length < 3) return null;
-    
-    const lineText = lineItems.map(item => item.str.trim()).filter(s => s).join(' ');
-    
+  parseTransactionLine(lineText, lineItems) {
+    // Must have a date
     const dateMatch = this.findDate(lineText);
     if (!dateMatch) return null;
-    
-    const studentIds = lineText.match(this.studentIdPattern) || [];
-    
-    const amountsWithPositions = this.findAmountsWithPositions(lineItems);
-    if (amountsWithPositions.length === 0) return null;
-    
-    amountsWithPositions.sort((a, b) => a.x - b.x);
-    
-    let creditAmount = 0;
-    
-    if (amountsWithPositions.length >= 3) {
-      const creditCandidate = amountsWithPositions[amountsWithPositions.length - 2];
-      if (creditCandidate && creditCandidate.amount > 0) {
-        creditAmount = creditCandidate.amount;
-      }
-    } else if (amountsWithPositions.length === 2) {
-      if (studentIds.length > 0) {
-        const firstAmount = amountsWithPositions[0];
-        if (firstAmount && firstAmount.amount > 0) {
-          creditAmount = firstAmount.amount;
-        }
-      } else {
-        return null;
-      }
-    } else if (amountsWithPositions.length === 1) {
-      return null;
+
+    // Find student ID references
+    const studentIds = [];
+    let match;
+    const idRegex = /HAR\s*(\d+)/gi;
+    while ((match = idRegex.exec(lineText)) !== null) {
+      studentIds.push('HAR' + match[1]);
     }
-    
+
+    // Find all amounts in the line
+    const amounts = this.findAllAmounts(lineText, lineItems);
+    if (amounts.length === 0) return null;
+
+    // Extract credit amount using multiple strategies
+    let creditAmount = this.extractCreditAmount(amounts, lineItems, studentIds.length > 0);
     if (creditAmount <= 0) return null;
-    
-    const description = this.extractDescriptionFromItems(lineItems, dateMatch.matchedText, amountsWithPositions);
-    
+
+    // Extract description
+    const description = this.extractDescription(lineText, dateMatch.matchedText);
+
+    // Determine reference
     const reference = studentIds.length > 0 ? studentIds[0].toUpperCase() : description;
-    
-    const isLikelyPayment = this.isLikelyPaymentTransaction(lineText, studentIds.length > 0);
-    if (!isLikelyPayment && amountsWithPositions.length < 3) {
-      return null;
-    }
-    
+
+    // Only include payments (credits), not debits, unless has student ID
+    const isPayment = studentIds.length > 0 || this.isLikelyCredit(lineText);
+    if (!isPayment) return null;
+
     return {
       date: dateMatch.date,
       description: description,
@@ -147,163 +143,139 @@ class FNBPDFParser {
       hasStudentId: studentIds.length > 0
     };
   }
-  
-  isLikelyPaymentTransaction(lineText, hasStudentId) {
-    if (hasStudentId) return true;
-    
-    const paymentKeywords = [
-      /deposit/i,
-      /payment/i,
-      /transfer\s+in/i,
-      /eft\s+in/i,
-      /credit/i,
-      /school\s*fee/i,
-      /tuition/i,
-      /received/i,
-      /inward/i
-    ];
-    
-    for (const pattern of paymentKeywords) {
-      if (pattern.test(lineText)) {
-        return true;
-      }
-    }
-    
-    const debitKeywords = [
-      /debit\s+order/i,
-      /purchase/i,
-      /withdrawal/i,
-      /atm/i,
-      /transfer\s+out/i,
-      /eft\s+out/i,
-      /payment\s+to/i,
-      /card\s+transaction/i,
-      /service\s+fee/i,
-      /bank\s+charge/i
-    ];
-    
-    for (const pattern of debitKeywords) {
-      if (pattern.test(lineText)) {
-        return false;
-      }
-    }
-    
-    return false;
-  }
 
-  findAmountsWithPositions(lineItems) {
+  findAllAmounts(lineText, lineItems) {
     const amounts = [];
-    const amountRegex = /^-?R?\s*([\d,]+\.\d{2})$/;
     
-    lineItems.forEach(item => {
-      const text = item.str.trim();
-      const match = text.match(amountRegex);
-      if (match) {
-        const cleanAmount = match[1].replace(/,/g, '');
-        const amount = parseFloat(cleanAmount);
-        if (!isNaN(amount) && amount > 0) {
-          const isNegative = text.startsWith('-');
-          amounts.push({
-            amount: isNegative ? -amount : amount,
-            x: item.x,
-            text: text
-          });
-        }
-      }
-    });
-    
-    return amounts;
-  }
-
-  findDate(text) {
-    const parts = text.split(/\s+/);
-    
-    for (let i = 0; i < parts.length; i++) {
-      for (let j = 1; j <= 3 && i + j <= parts.length; j++) {
-        const potentialDate = parts.slice(i, i + j).join(' ');
-        
-        for (const pattern of this.datePatterns) {
-          const match = potentialDate.match(pattern);
-          if (match) {
-            const parsedDate = this.parseDate(potentialDate);
-            if (parsedDate) {
-              return { date: parsedDate, matchedText: potentialDate };
-            }
+    // Strategy 1: Find amounts in individual PDF items (standalone amounts)
+    if (lineItems) {
+      for (const item of lineItems) {
+        const text = item.str.trim();
+        // Match standalone amount: optional R, digits with comma/space separators, decimal
+        const m = text.match(/^-?\s*R?\s*([\d]{1,3}(?:[,\s]\d{3})*\.\d{2}|\d+\.\d{2})\s*$/);
+        if (m) {
+          const clean = m[1].replace(/[\s,]/g, '');
+          const val = parseFloat(clean);
+          if (!isNaN(val) && val > 0) {
+            amounts.push({ amount: val, x: item.x, source: 'item' });
           }
         }
       }
     }
-    
-    return null;
-  }
 
-  parseDate(dateStr) {
-    const monthMap = {
-      'jan': '01', 'january': '01',
-      'feb': '02', 'february': '02',
-      'mar': '03', 'march': '03',
-      'apr': '04', 'april': '04',
-      'may': '05',
-      'jun': '06', 'june': '06',
-      'jul': '07', 'july': '07',
-      'aug': '08', 'august': '08',
-      'sep': '09', 'september': '09',
-      'oct': '10', 'october': '10',
-      'nov': '11', 'november': '11',
-      'dec': '12', 'december': '12'
-    };
-    
-    const fnbPattern = /^(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})$/i;
-    let match = dateStr.match(fnbPattern);
-    if (match) {
-      const day = match[1].padStart(2, '0');
-      const month = monthMap[match[2].toLowerCase()];
-      const year = match[3];
-      return `${year}-${month}-${day}`;
-    }
-    
-    const slashPattern = /^(\d{2})\/(\d{2})\/(\d{4})$/;
-    match = dateStr.match(slashPattern);
-    if (match) {
-      return `${match[3]}-${match[2]}-${match[1]}`;
-    }
-    
-    const isoPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
-    match = dateStr.match(isoPattern);
-    if (match) {
-      return dateStr;
-    }
-    
-    return null;
-  }
-
-  extractDescriptionFromItems(lineItems, dateText, amountsWithPositions) {
-    const amountXPositions = new Set(amountsWithPositions.map(a => a.x));
-    
-    let description = '';
-    lineItems.forEach(item => {
-      const text = item.str.trim();
-      if (!amountXPositions.has(item.x) && text && !text.match(/^-?R?\s*[\d,]+\.\d{2}$/)) {
-        description += text + ' ';
+    // Strategy 2: Find amounts in the full line text using regex (catches all formats)
+    const lineAmountRegex = /(?:^|\s)-?\s*R?\s*([\d]{1,3}(?:[,\s]\d{3})*\.\d{2}|\d+\.\d{2})(?:\s|$)/g;
+    let m2;
+    while ((m2 = lineAmountRegex.exec(lineText)) !== null) {
+      const clean = m2[1].replace(/[\s,]/g, '');
+      const val = parseFloat(clean);
+      if (!isNaN(val) && val > 0) {
+        // Only add if not already captured
+        const alreadyHave = amounts.some(a => Math.abs(a.amount - val) < 0.01);
+        if (!alreadyHave) {
+          amounts.push({ amount: val, x: null, source: 'linetext' });
+        }
       }
-    });
-    
-    description = description.replace(dateText, '');
-    description = description.replace(/\s+/g, ' ').trim();
-    
-    return description || 'Payment';
+    }
+
+    return amounts;
+  }
+
+  extractCreditAmount(amounts, lineItems, hasStudentId) {
+    if (amounts.length === 0) return 0;
+
+    // Sort by x position (left to right) for positional logic
+    const withX = amounts.filter(a => a.x !== null).sort((a, b) => a.x - b.x);
+    const all = amounts.sort((a, b) => (a.x || 9999) - (b.x || 9999));
+
+    // With 3+ amounts: FNB typical format is [Debit, Credit, Balance]
+    // Credit is second-to-last positionally
+    if (withX.length >= 3) {
+      const creditCandidate = withX[withX.length - 2];
+      if (creditCandidate && creditCandidate.amount > 0) {
+        return creditCandidate.amount;
+      }
+    }
+
+    // With 2 positional amounts: [Credit, Balance] or [Debit, Balance]
+    if (withX.length === 2) {
+      // If this line has a student ID, it's almost certainly a payment/credit
+      if (hasStudentId) {
+        return withX[0].amount; // First amount is the payment
+      }
+      // Otherwise skip to avoid debit mismatches
+      return 0;
+    }
+
+    // With 1 amount (common in some PDF layouts): use it if has student ID
+    if (all.length === 1 && hasStudentId) {
+      return all[0].amount;
+    }
+
+    // Fallback: if we found amounts from linetext but not items, use smallest non-balance amount
+    if (all.length >= 2 && hasStudentId) {
+      // Use the smallest positive amount as payment (balance is usually larger)
+      const sorted = [...all].sort((a, b) => a.amount - b.amount);
+      return sorted[0].amount;
+    }
+
+    return 0;
+  }
+
+  isLikelyCredit(lineText) {
+    const creditKeywords = /deposit|payment|transfer\s*in|eft\s*in|credit|school\s*fee|tuition|received|inward/i;
+    const debitKeywords = /debit\s*order|purchase|withdrawal|atm|transfer\s*out|eft\s*out|payment\s*to|card\s*transaction|service\s*fee|bank\s*charge/i;
+    if (debitKeywords.test(lineText)) return false;
+    return creditKeywords.test(lineText);
+  }
+
+  findDate(text) {
+    // Pattern: "17 Mar 2026" or "17 March 2026"
+    const longPattern = /\b(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})\b/i;
+    let m = text.match(longPattern);
+    if (m) {
+      const day = m[1].padStart(2, '0');
+      const month = this.monthMap[m[2].toLowerCase().slice(0, 3)];
+      const year = m[3];
+      if (month) return { date: `${year}-${month}-${day}`, matchedText: m[0] };
+    }
+
+    // Pattern: "17/03/2026" or "2026-03-17"
+    const slashPattern = /\b(\d{2})\/(\d{2})\/(\d{4})\b/;
+    m = text.match(slashPattern);
+    if (m) {
+      return { date: `${m[3]}-${m[2]}-${m[1]}`, matchedText: m[0] };
+    }
+
+    const isoPattern = /\b(\d{4})-(\d{2})-(\d{2})\b/;
+    m = text.match(isoPattern);
+    if (m) {
+      return { date: m[0], matchedText: m[0] };
+    }
+
+    return null;
+  }
+
+  extractDescription(lineText, dateText) {
+    // Remove the date from line text and amount patterns to get description
+    let desc = lineText;
+    if (dateText) desc = desc.replace(dateText, '');
+    // Remove standalone amounts
+    desc = desc.replace(/\b-?\s*R?\s*[\d]{1,3}(?:[,\s]\d{3})*\.\d{2}\b/g, '');
+    desc = desc.replace(/\s+/g, ' ').trim();
+    return desc || 'Payment';
   }
 
   async analyzeFile(filePath) {
     const result = await this.parsePDF(filePath);
-    
+
     const sampleTransactions = result.transactions.slice(0, 5).map(t => ({
       date: t.date,
-      description: t.description.substring(0, 50) + (t.description.length > 50 ? '...' : ''),
+      description: t.description.substring(0, 60) + (t.description.length > 60 ? '...' : ''),
       amount: t.amount,
       reference: t.reference
     }));
-    
+
     return {
       success: true,
       fileType: 'PDF',
