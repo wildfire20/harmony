@@ -1,26 +1,32 @@
 const { PDFExtract } = require('pdf.js-extract');
 const pdfExtract = new PDFExtract();
 
+/**
+ * FNB Bank Statement PDF Parser
+ *
+ * Actual FNB PDF format (from real statements):
+ *   Date:        "02 Feb"  (DD Mon, NO year - year from statement header)
+ *   Description: "Payshap Credit Boikano Seroka Blazr"
+ *   Reference:   "Har 375"  (optional column, may contain HAR ref with space)
+ *   Amount:      "2,200.00"  (separate item)
+ *   Cr/Dr:       "Cr" or blank  (separate item after amount)
+ *   Balance:     "86,688.21"
+ *   Cr:          "Cr"
+ *   Accrued:     "34.92"  (optional)
+ */
 class FNBPDFParser {
   constructor() {
-    // FNB date formats
     this.monthMap = {
-      'jan': '01', 'january': '01',
-      'feb': '02', 'february': '02',
-      'mar': '03', 'march': '03',
-      'apr': '04', 'april': '04',
-      'may': '05',
-      'jun': '06', 'june': '06',
-      'jul': '07', 'july': '07',
-      'aug': '08', 'august': '08',
-      'sep': '09', 'september': '09',
-      'oct': '10', 'october': '10',
-      'nov': '11', 'november': '11',
-      'dec': '12', 'december': '12'
+      jan: '01', feb: '02', mar: '03', apr: '04',
+      may: '05', jun: '06', jul: '07', aug: '08',
+      sep: '09', oct: '10', nov: '11', dec: '12'
     };
-    // Supports: R1,234.56  1,234.56  1 234.56  R 1 234.56  1234.56
-    this.amountRegex = /R?\s*([\d]{1,3}(?:[,\s]\d{3})*(?:\.\d{2})|\d+\.\d{2})/;
-    this.studentIdPattern = /HAR\s*\d+/gi;
+    // FNB date: "02 Feb" (no year)
+    this.datePattern = /^\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$/i;
+    // Amount: digits with optional comma-thousands, mandatory 2 decimal places
+    this.amountPattern = /^\d{1,3}(?:,\d{3})*\.\d{2}$|^\d+\.\d{2}$/;
+    // HAR reference with optional space: HAR375 or HAR 375 or Har 375
+    this.harPattern = /\bHAR\s*(\d+)\b/i;
   }
 
   async parsePDF(filePath) {
@@ -30,10 +36,13 @@ class FNBPDFParser {
           console.error('PDF extraction error:', err);
           return reject(err);
         }
-
         try {
-          const transactions = this.extractTransactions(data);
-          console.log(`PDF parsed: found ${transactions.length} transactions`);
+          // Extract year from statement header (e.g. "Statement Period : 31 January 2026 to 28 February 2026")
+          const statementYear = this.extractStatementYear(data);
+          console.log(`PDF statement year detected: ${statementYear}`);
+
+          const transactions = this.extractTransactions(data, statementYear);
+          console.log(`PDF parsed: found ${transactions.length} credit transactions`);
           resolve({
             success: true,
             transactions,
@@ -48,23 +57,34 @@ class FNBPDFParser {
     });
   }
 
-  extractTransactions(pdfData) {
+  /**
+   * Try to find the statement year from header text like
+   * "Statement Period : 31 January 2026 to 28 February 2026"
+   * or "Statement Date : 28 February 2026"
+   */
+  extractStatementYear(pdfData) {
+    const fullText = pdfData.pages
+      .slice(0, 2) // Only check first 2 pages for header
+      .map(p => p.content.map(i => i.str).join(' '))
+      .join(' ');
+
+    const yearMatch = fullText.match(/\b(20\d{2})\b/);
+    return yearMatch ? parseInt(yearMatch[1]) : new Date().getFullYear();
+  }
+
+  extractTransactions(pdfData, statementYear) {
     const transactions = [];
     const seen = new Set();
 
     for (const page of pdfData.pages) {
-      // Group PDF content items into lines by Y position
       const lines = this.groupContentByLine(page.content);
 
       for (const lineItems of lines) {
-        const lineText = lineItems.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim();
-        if (!lineText) continue;
-
-        const tx = this.parseTransactionLine(lineText, lineItems);
+        const tx = this.parseTransactionLine(lineItems, statementYear);
         if (!tx) continue;
 
-        // Deduplicate
-        const key = `${tx.date}_${tx.amount}_${tx.reference}`;
+        // Deduplicate by date+amount+description
+        const key = `${tx.date}_${tx.amount}_${tx.reference.substring(0, 30)}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
@@ -78,20 +98,21 @@ class FNBPDFParser {
   groupContentByLine(content) {
     if (!content || content.length === 0) return [];
 
-    const sorted = [...content].sort((a, b) => {
-      if (Math.abs(a.y - b.y) < 6) return a.x - b.x;
-      return a.y - b.y;
-    });
+    const sorted = [...content]
+      .filter(i => i.str && i.str.trim())
+      .sort((a, b) => {
+        if (Math.abs(a.y - b.y) < 4) return a.x - b.x;
+        return a.y - b.y;
+      });
 
     const lines = [];
     let currentLine = [];
     let currentY = null;
 
     for (const item of sorted) {
-      if (!item.str || !item.str.trim()) continue;
-      if (currentY === null || Math.abs(item.y - currentY) <= 6) {
+      if (currentY === null || Math.abs(item.y - currentY) <= 4) {
         currentLine.push(item);
-        currentY = currentY === null ? item.y : currentY;
+        if (currentY === null) currentY = item.y;
       } else {
         if (currentLine.length > 0) lines.push(currentLine);
         currentLine = [item];
@@ -103,167 +124,113 @@ class FNBPDFParser {
     return lines;
   }
 
-  parseTransactionLine(lineText, lineItems) {
-    // Must have a date
-    const dateMatch = this.findDate(lineText);
-    if (!dateMatch) return null;
+  parseTransactionLine(lineItems, statementYear) {
+    if (!lineItems || lineItems.length < 3) return null;
 
-    // Find student ID references
-    const studentIds = [];
-    let match;
-    const idRegex = /HAR\s*(\d+)/gi;
-    while ((match = idRegex.exec(lineText)) !== null) {
-      studentIds.push('HAR' + match[1]);
+    const texts = lineItems.map(i => i.str.trim()).filter(s => s);
+    const lineText = texts.join(' ');
+
+    // ── 1. Find date ──────────────────────────────────────────────────────────
+    // FNB format: first two tokens are "02" and "Feb"
+    // Must start with day number and month abbreviation
+    const firstToken = texts[0];
+    const secondToken = texts[1] || '';
+
+    if (!firstToken || !/^\d{1,2}$/.test(firstToken)) return null;
+
+    const combined = `${firstToken} ${secondToken}`;
+    if (!this.datePattern.test(combined)) return null;
+
+    const parsedDate = this.parseDate(combined, statementYear);
+    if (!parsedDate) return null;
+
+    // ── 2. Find Cr/Dr markers and amounts ────────────────────────────────────
+    // Walk items: when we find an amount, check next item for "Cr"/"Dr"
+    const creditAmounts = [];
+    for (let i = 0; i < lineItems.length; i++) {
+      const text = lineItems[i].str.trim();
+      if (!this.amountPattern.test(text)) continue;
+
+      const nextText = (lineItems[i + 1]?.str || '').trim();
+      const isCredit = nextText === 'Cr';
+      const isDebit = nextText === 'Dr' || nextText === '';
+
+      if (isCredit) {
+        const amount = this.parseAmount(text);
+        if (amount > 0) {
+          creditAmounts.push({ amount, x: lineItems[i].x });
+        }
+      }
     }
 
-    // Find all amounts in the line
-    const amounts = this.findAllAmounts(lineText, lineItems);
-    if (amounts.length === 0) return null;
+    // No credit amounts on this line → skip (debit or non-transaction line)
+    if (creditAmounts.length === 0) return null;
 
-    // Extract credit amount using multiple strategies
-    let creditAmount = this.extractCreditAmount(amounts, lineItems, studentIds.length > 0);
-    if (creditAmount <= 0) return null;
+    // FNB layout: [payment amount Cr] [balance Cr] [optional accrued]
+    // The first credit amount (leftmost x) is the payment; the second is the balance.
+    creditAmounts.sort((a, b) => a.x - b.x);
+    const paymentAmount = creditAmounts[0].amount;
 
-    // Extract description
-    const description = this.extractDescription(lineText, dateMatch.matchedText);
+    // ── 3. Find HAR reference ─────────────────────────────────────────────────
+    let harRef = null;
+    for (const text of texts) {
+      const m = text.match(this.harPattern);
+      if (m) {
+        harRef = `HAR${m[1]}`; // Normalise: always HAR+digits no space
+        break;
+      }
+    }
 
-    // Determine reference
-    const reference = studentIds.length > 0 ? studentIds[0].toUpperCase() : description;
+    // ── 4. Build description (skip date tokens and amount/Cr tokens) ──────────
+    const amountValues = new Set(creditAmounts.map(a => a.amount));
+    const descParts = [];
+    let skipNext = false;
 
-    // Only include payments (credits), not debits, unless has student ID
-    const isPayment = studentIds.length > 0 || this.isLikelyCredit(lineText);
-    if (!isPayment) return null;
+    for (let i = 2; i < lineItems.length; i++) { // skip first 2 (date)
+      const text = lineItems[i].str.trim();
+      if (!text) continue;
+
+      if (skipNext) { skipNext = false; continue; } // Skip "Cr"/"Dr" after amount
+
+      if (this.amountPattern.test(text)) {
+        const amt = this.parseAmount(text);
+        if (amountValues.has(amt)) { skipNext = true; continue; } // Skip amount + next Cr
+        // Also skip balance amounts
+        const nextT = (lineItems[i + 1]?.str || '').trim();
+        if (nextT === 'Cr' || nextT === 'Dr') { skipNext = true; continue; }
+      }
+
+      if (text === 'Cr' || text === 'Dr') continue;
+      descParts.push(text);
+    }
+
+    const description = descParts.join(' ').trim() || 'Payment';
+    const reference = harRef || description;
 
     return {
-      date: dateMatch.date,
-      description: description,
-      amount: creditAmount,
-      reference: reference,
+      date: parsedDate,
+      description,
+      amount: paymentAmount,
+      reference,
       rawLine: lineText,
-      hasStudentId: studentIds.length > 0
+      hasStudentId: !!harRef
     };
   }
 
-  findAllAmounts(lineText, lineItems) {
-    const amounts = [];
-    
-    // Strategy 1: Find amounts in individual PDF items (standalone amounts)
-    if (lineItems) {
-      for (const item of lineItems) {
-        const text = item.str.trim();
-        // Match standalone amount: optional R, digits with comma/space separators, decimal
-        const m = text.match(/^-?\s*R?\s*([\d]{1,3}(?:[,\s]\d{3})*\.\d{2}|\d+\.\d{2})\s*$/);
-        if (m) {
-          const clean = m[1].replace(/[\s,]/g, '');
-          const val = parseFloat(clean);
-          if (!isNaN(val) && val > 0) {
-            amounts.push({ amount: val, x: item.x, source: 'item' });
-          }
-        }
-      }
-    }
-
-    // Strategy 2: Find amounts in the full line text using regex (catches all formats)
-    const lineAmountRegex = /(?:^|\s)-?\s*R?\s*([\d]{1,3}(?:[,\s]\d{3})*\.\d{2}|\d+\.\d{2})(?:\s|$)/g;
-    let m2;
-    while ((m2 = lineAmountRegex.exec(lineText)) !== null) {
-      const clean = m2[1].replace(/[\s,]/g, '');
-      const val = parseFloat(clean);
-      if (!isNaN(val) && val > 0) {
-        // Only add if not already captured
-        const alreadyHave = amounts.some(a => Math.abs(a.amount - val) < 0.01);
-        if (!alreadyHave) {
-          amounts.push({ amount: val, x: null, source: 'linetext' });
-        }
-      }
-    }
-
-    return amounts;
+  parseDate(dateStr, year) {
+    // "02 Feb" → "2026-02-02"
+    const m = dateStr.match(/^(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$/i);
+    if (!m) return null;
+    const day = m[1].padStart(2, '0');
+    const month = this.monthMap[m[2].toLowerCase()];
+    if (!month) return null;
+    return `${year}-${month}-${day}`;
   }
 
-  extractCreditAmount(amounts, lineItems, hasStudentId) {
-    if (amounts.length === 0) return 0;
-
-    // Sort by x position (left to right) for positional logic
-    const withX = amounts.filter(a => a.x !== null).sort((a, b) => a.x - b.x);
-    const all = amounts.sort((a, b) => (a.x || 9999) - (b.x || 9999));
-
-    // With 3+ amounts: FNB typical format is [Debit, Credit, Balance]
-    // Credit is second-to-last positionally
-    if (withX.length >= 3) {
-      const creditCandidate = withX[withX.length - 2];
-      if (creditCandidate && creditCandidate.amount > 0) {
-        return creditCandidate.amount;
-      }
-    }
-
-    // With 2 positional amounts: [Credit, Balance] or [Debit, Balance]
-    if (withX.length === 2) {
-      // If this line has a student ID, it's almost certainly a payment/credit
-      if (hasStudentId) {
-        return withX[0].amount; // First amount is the payment
-      }
-      // Otherwise skip to avoid debit mismatches
-      return 0;
-    }
-
-    // With 1 amount (common in some PDF layouts): use it if has student ID
-    if (all.length === 1 && hasStudentId) {
-      return all[0].amount;
-    }
-
-    // Fallback: if we found amounts from linetext but not items, use smallest non-balance amount
-    if (all.length >= 2 && hasStudentId) {
-      // Use the smallest positive amount as payment (balance is usually larger)
-      const sorted = [...all].sort((a, b) => a.amount - b.amount);
-      return sorted[0].amount;
-    }
-
-    return 0;
-  }
-
-  isLikelyCredit(lineText) {
-    const creditKeywords = /deposit|payment|transfer\s*in|eft\s*in|credit|school\s*fee|tuition|received|inward/i;
-    const debitKeywords = /debit\s*order|purchase|withdrawal|atm|transfer\s*out|eft\s*out|payment\s*to|card\s*transaction|service\s*fee|bank\s*charge/i;
-    if (debitKeywords.test(lineText)) return false;
-    return creditKeywords.test(lineText);
-  }
-
-  findDate(text) {
-    // Pattern: "17 Mar 2026" or "17 March 2026"
-    const longPattern = /\b(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})\b/i;
-    let m = text.match(longPattern);
-    if (m) {
-      const day = m[1].padStart(2, '0');
-      const month = this.monthMap[m[2].toLowerCase().slice(0, 3)];
-      const year = m[3];
-      if (month) return { date: `${year}-${month}-${day}`, matchedText: m[0] };
-    }
-
-    // Pattern: "17/03/2026" or "2026-03-17"
-    const slashPattern = /\b(\d{2})\/(\d{2})\/(\d{4})\b/;
-    m = text.match(slashPattern);
-    if (m) {
-      return { date: `${m[3]}-${m[2]}-${m[1]}`, matchedText: m[0] };
-    }
-
-    const isoPattern = /\b(\d{4})-(\d{2})-(\d{2})\b/;
-    m = text.match(isoPattern);
-    if (m) {
-      return { date: m[0], matchedText: m[0] };
-    }
-
-    return null;
-  }
-
-  extractDescription(lineText, dateText) {
-    // Remove the date from line text and amount patterns to get description
-    let desc = lineText;
-    if (dateText) desc = desc.replace(dateText, '');
-    // Remove standalone amounts
-    desc = desc.replace(/\b-?\s*R?\s*[\d]{1,3}(?:[,\s]\d{3})*\.\d{2}\b/g, '');
-    desc = desc.replace(/\s+/g, ' ').trim();
-    return desc || 'Payment';
+  parseAmount(text) {
+    const clean = text.replace(/,/g, '');
+    const val = parseFloat(clean);
+    return isNaN(val) ? 0 : val;
   }
 
   async analyzeFile(filePath) {

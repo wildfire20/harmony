@@ -591,6 +591,38 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
         </div>
       </div>
 
+      {/* Unmatched Transactions — show full list so admin can act */}
+      {uploadResults?.results?.unmatched?.length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h4 className="text-sm font-semibold text-red-800 mb-1">
+            ⚠️ {uploadResults.results.unmatched.length} Unmatched Payment{uploadResults.results.unmatched.length > 1 ? 's' : ''} — Action Required
+          </h4>
+          <p className="text-xs text-red-700 mb-3">
+            These payments could not be linked to any student. Parents likely used an incorrect reference (their name, child's name, or grade instead of the HAR number). Use <strong>Manual Payment Entry</strong> to allocate them individually.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="border-b border-red-200">
+                  <th className="text-left py-1 pr-3 text-red-700 font-medium">Date</th>
+                  <th className="text-left py-1 pr-3 text-red-700 font-medium">Amount</th>
+                  <th className="text-left py-1 pr-3 text-red-700 font-medium">Description / Reference Used</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uploadResults.results.unmatched.map((tx, idx) => (
+                  <tr key={idx} className="border-b border-red-100">
+                    <td className="py-1 pr-3 text-gray-700 whitespace-nowrap">{tx.date}</td>
+                    <td className="py-1 pr-3 font-medium text-red-700 whitespace-nowrap">R {parseFloat(tx.amount).toFixed(2)}</td>
+                    <td className="py-1 text-gray-600">{tx.description || tx.reference}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {uploadResults?.summary?.errors > 0 && (
         <div className="bg-red-50 p-4 rounded-lg border border-red-200">
           <h4 className="text-sm font-medium text-red-800 mb-2">

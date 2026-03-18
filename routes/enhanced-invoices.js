@@ -387,6 +387,52 @@ async function updateMappingUsage(mappingName) {
   `, [mappingName]);
 }
 
+/**
+ * Extract a likely student/parent name from an FNB bank statement description.
+ * FNB descriptions often look like:
+ *   "Payshap Credit Bontle Madiba Grd3"
+ *   "Magtape Credit Capitec Elleanor Jordaan G1B"
+ *   "FNB App Payment From Mohaugrade3B"
+ *   "Rtc Credit Kabelo Mogashoa Grad"
+ *   "ADT Cash Deposit Lephmall Watson"
+ * Strip payment-method prefixes, bank names, and grade suffixes.
+ */
+function extractNameFromDescription(description) {
+  if (!description) return null;
+
+  let text = description;
+
+  // Remove common FNB payment method prefixes
+  const prefixes = [
+    /^Payshap\s+Credit\s+/i,
+    /^Magtape\s+Credit\s+(?:Capitec|ABSA\s+Bank|Nedbank|Standard\s+Bank|FNB)?\s*/i,
+    /^FNB\s+App\s+Payment\s+From\s+/i,
+    /^FNB\s+App\s+Payment\s+To\s+/i,
+    /^Rtc\s+Credit\s+/i,
+    /^ADT\s+Cash\s+Deposit\s+\w+\s*/i,
+    /^Send\s+Money\s+App\s+Dr\s+Send\s+/i,
+    /^Electricity\s+Prepaid\s+/i,
+    /^Payshap\s+Account\s+Off-Us\s+/i,
+  ];
+
+  for (const prefix of prefixes) {
+    text = text.replace(prefix, '').trim();
+  }
+
+  // Remove trailing grade/class indicators like "G5", "Gr5", "Grade3B", "Grd3", "G1B", "Grad", "Grr", "Rrr"
+  text = text.replace(/\s+(?:Gr(?:ade|d)?|G)\s*\d+\w*\s*$/i, '').trim();
+  text = text.replace(/\s+(?:Grad|Grr|Rrr|Grd|Gr)\s*$/i, '').trim();
+  text = text.replace(/\s+\d+[A-Z]?\s*$/i, '').trim(); // trailing "3B" or "5"
+
+  // Remove HAR references from text (already handled by HAR strategy)
+  text = text.replace(/\bHAR\s*\d+\b/i, '').trim();
+
+  // If less than 3 chars left, nothing useful
+  if (text.length < 3) return null;
+
+  return text;
+}
+
 async function processTransactions(transactions, userId) {
   const results = {
     matched: [],
@@ -420,95 +466,107 @@ async function processTransactions(transactions, userId) {
       }
 
       // Find matching invoice with enhanced reference matching
-      console.log(`Looking for invoice with reference: "${transaction.reference}"`);
+      console.log(`Looking for invoice with reference: "${transaction.reference}" | desc: "${transaction.description}"`);
       
       let invoiceResult = null;
-      
-      // Strategy 1: Exact match
-      invoiceResult = await client.query(`
-        SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
-        FROM invoices i
-        LEFT JOIN users u ON i.student_id = u.id
-        WHERE UPPER(i.reference_number) = UPPER($1) AND i.status IN ('Unpaid', 'Partial')
-        ORDER BY i.due_date ASC
-        LIMIT 1
-      `, [transaction.reference]);
+      let matchStrategy = null;
 
-      // Strategy 2: Try with padded zeros (HAR20 -> HAR020)
-      if (invoiceResult.rows.length === 0 && transaction.reference) {
-        const paddedRef = transaction.reference.toString().replace(/(\D+)(\d+)/, (match, letters, numbers) => 
-          letters + numbers.padStart(3, '0'));
-        console.log(`Trying padded reference: "${paddedRef}"`);
-        
+      // ── Strategy 1: Exact HAR reference match on invoice ──────────────────
+      if (!invoiceResult?.rows.length) {
         invoiceResult = await client.query(`
           SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
           FROM invoices i
           LEFT JOIN users u ON i.student_id = u.id
           WHERE UPPER(i.reference_number) = UPPER($1) AND i.status IN ('Unpaid', 'Partial')
-          ORDER BY i.due_date ASC
-          LIMIT 1
-        `, [paddedRef]);
+          ORDER BY i.due_date ASC LIMIT 1
+        `, [transaction.reference]);
+        if (invoiceResult.rows.length) matchStrategy = 'exact_invoice_ref';
       }
 
-      // Strategy 3: Try removing leading zeros (HAR020 -> HAR20)
-      if (invoiceResult.rows.length === 0 && transaction.reference) {
-        const trimmedRef = transaction.reference.toString().replace(/(\D+)0+(\d+)/, '$1$2');
-        if (trimmedRef !== transaction.reference) {
-          console.log(`Trying trimmed reference: "${trimmedRef}"`);
-          
+      // ── Strategy 2: Match HAR ref against student_number in users table ───
+      // (HAR375 → student whose student_number = 'HAR375' or 'HAR0375' etc.)
+      if (!invoiceResult?.rows.length && transaction.hasStudentId) {
+        const harNum = transaction.reference.replace(/^HAR0*/i, '');
+        invoiceResult = await client.query(`
+          SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
+          FROM invoices i
+          JOIN users u ON i.student_id = u.id
+          WHERE (UPPER(u.student_number) = UPPER($1)
+              OR UPPER(u.student_number) = UPPER($2)
+              OR UPPER(u.student_number) = UPPER($3)
+              OR UPPER(u.student_number) = UPPER($4))
+            AND i.status IN ('Unpaid', 'Partial')
+          ORDER BY i.due_date ASC LIMIT 1
+        `, [
+          transaction.reference,           // HAR375
+          `HAR${harNum}`,                  // HAR375  (no leading zeros)
+          `HAR${harNum.padStart(3,'0')}`,  // HAR375 -> HAR375
+          `HAR0${harNum}`                  // HAR0375
+        ]);
+        if (invoiceResult.rows.length) matchStrategy = 'student_number';
+      }
+
+      // ── Strategy 3: Padded/trimmed zeros for HAR reference ────────────────
+      if (!invoiceResult?.rows.length && transaction.reference) {
+        const padded = transaction.reference.replace(/(\D+)(\d+)/, (_, l, n) => l + n.padStart(3,'0'));
+        const trimmed = transaction.reference.replace(/(\D+)0+(\d+)/, '$1$2');
+        const variants = [...new Set([padded, trimmed])].filter(v => v !== transaction.reference);
+        for (const variant of variants) {
           invoiceResult = await client.query(`
             SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
             FROM invoices i
             LEFT JOIN users u ON i.student_id = u.id
             WHERE UPPER(i.reference_number) = UPPER($1) AND i.status IN ('Unpaid', 'Partial')
-            ORDER BY i.due_date ASC
-            LIMIT 1
-          `, [trimmedRef]);
+            ORDER BY i.due_date ASC LIMIT 1
+          `, [variant]);
+          if (invoiceResult.rows.length) { matchStrategy = 'padded_ref'; break; }
         }
       }
 
-      // Strategy 4: Try partial matching with LIKE
-      if (invoiceResult.rows.length === 0 && transaction.reference && transaction.reference.length >= 3) {
-        console.log(`Trying partial match for: "${transaction.reference}"`);
-        
-        invoiceResult = await client.query(`
-          SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
-          FROM invoices i
-          LEFT JOIN users u ON i.student_id = u.id
-          WHERE UPPER(i.reference_number) LIKE UPPER($1) AND i.status IN ('Unpaid', 'Partial')
-          ORDER BY i.due_date ASC
-          LIMIT 1
-        `, [`%${transaction.reference}%`]);
+      // ── Strategy 4: Name matching from description ─────────────────────────
+      // FNB descriptions often contain parent/student names:
+      // "Payshap Credit Bontle Madiba Grd3" → try "Bontle Madiba"
+      // "Magtape Credit Capitec Elleanor Jordaan G1B" → try "Elleanor Jordaan"
+      if (!invoiceResult?.rows.length) {
+        const cleanedName = extractNameFromDescription(transaction.description || transaction.reference);
+        if (cleanedName && cleanedName.length >= 3) {
+          console.log(`Trying name match: "${cleanedName}"`);
+          const nameParts = cleanedName.split(/\s+/).filter(p => p.length >= 2);
+          
+          // Try full name first, then individual parts
+          const nameCandidates = [
+            cleanedName,
+            ...nameParts
+          ];
+          
+          for (const nameCandidate of nameCandidates) {
+            invoiceResult = await client.query(`
+              SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
+              FROM invoices i
+              JOIN users u ON i.student_id = u.id
+              WHERE (
+                UPPER(CONCAT(u.first_name, ' ', u.last_name)) LIKE UPPER($1)
+                OR UPPER(u.first_name) LIKE UPPER($1)
+                OR UPPER(u.last_name) LIKE UPPER($1)
+              ) AND i.status IN ('Unpaid', 'Partial')
+              ORDER BY i.due_date ASC LIMIT 1
+            `, [`%${nameCandidate}%`]);
+            if (invoiceResult.rows.length) { matchStrategy = 'name_from_description'; break; }
+          }
+        }
       }
 
-      // Strategy 5: Try matching by student name if reference looks like a name
-      if (invoiceResult.rows.length === 0 && transaction.reference && 
-          /^[A-Za-z\s]+$/.test(transaction.reference) && transaction.reference.length > 3) {
-        console.log(`Trying student name match for: "${transaction.reference}"`);
-        
-        invoiceResult = await client.query(`
-          SELECT i.*, u.first_name, u.last_name FROM invoices i
-          JOIN users u ON i.student_id = u.id
-          WHERE (UPPER(u.first_name) LIKE UPPER($1) OR 
-                 UPPER(u.last_name) LIKE UPPER($1) OR
-                 UPPER(CONCAT(u.first_name, ' ', u.last_name)) LIKE UPPER($1))
-          AND i.status IN ('Unpaid', 'Partial')
-          ORDER BY i.due_date ASC
-          LIMIT 1
-        `, [`%${transaction.reference}%`]);
-      }
-
-      if (invoiceResult.rows.length === 0) {
-        console.log(`UNMATCHED: Transaction ${transaction.reference} - ${transaction.description}`);
-        
+      if (!invoiceResult?.rows.length) {
+        console.log(`UNMATCHED: "${transaction.reference}" | desc: "${transaction.description}"`);
         await client.query('COMMIT');
-        
         results.unmatched.push({
           ...transaction,
-          reason: 'No matching invoice found'
+          reason: 'No matching student or invoice found. Parent may have used wrong reference.'
         });
         continue;
       }
+
+      if (matchStrategy) console.log(`Matched via strategy: ${matchStrategy}`);
 
       const invoice = invoiceResult.rows[0];
       const outstandingAmount = invoice.outstanding_balance || invoice.amount_due;
