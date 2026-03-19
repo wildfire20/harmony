@@ -11,7 +11,7 @@ console.log('API Base URL:', API_BASE_URL);
 // Create axios instance
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 60000,
   withCredentials: true, // Include cookies for CORS
 });
 
