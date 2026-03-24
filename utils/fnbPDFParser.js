@@ -183,7 +183,8 @@ class FNBPDFParser {
     const paymentAmount = creditMatches[0].amount;
 
     // ── 3. Find HAR reference anywhere in the line ───────────────────────────
-    const harMatch = lineText.match(/\bHAR\s*(\d+)\b/i);
+    // Also catches common typos like HGR024, HBR024 (parent mistyped middle letter)
+    const harMatch = lineText.match(/\bH[A-Z]R\s*(\d+)\b/i);
     const harRef = harMatch ? `HAR${harMatch[1]}` : null;
 
     // ── 4. Build description: everything between the date and the first amount ─

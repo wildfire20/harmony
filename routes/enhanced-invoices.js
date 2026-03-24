@@ -406,12 +406,12 @@ function extractNameFromDescription(description) {
   const prefixes = [
     /^Payshap\s+Credit\s+/i,
     /^Magtape\s+Credit\s+(?:Capitec|ABSA\s+Bank|Nedbank|Standard\s+Bank|FNB)?\s*/i,
-    /^FNB\s+App\s+Payment\s+From\s+/i,
-    /^FNB\s+App\s+Payment\s+To\s+/i,
+    /^FNB\s+App\s+(?:Rtc\s+Pmt|Payment)\s+(?:From|To)\s+/i,
     /^Rtc\s+Credit\s+/i,
-    /^ADT\s+Cash\s+Deposit\s+\w+\s*/i,
-    /^Send\s+Money\s+App\s+Dr\s+Send\s+/i,
-    /^Electricity\s+Prepaid\s+/i,
+    /^ADT\s+Cash\s+Deposit\s+\S+\s*/i,
+    /^Send\s+Money\s+App\s+(?:Dr\s+Send\s+)?/i,
+    /^Electricity\s+Prepaid\s+\S+\s*/i,
+    /^Rev-Electricity\s+\S+\s*/i,
     /^Payshap\s+Account\s+Off-Us\s+/i,
   ];
 
@@ -419,18 +419,46 @@ function extractNameFromDescription(description) {
     text = text.replace(prefix, '').trim();
   }
 
-  // Remove trailing grade/class indicators like "G5", "Gr5", "Grade3B", "Grd3", "G1B", "Grad", "Grr", "Rrr"
-  text = text.replace(/\s+(?:Gr(?:ade|d)?|G)\s*\d+\w*\s*$/i, '').trim();
-  text = text.replace(/\s+(?:Grad|Grr|Rrr|Grd|Gr)\s*$/i, '').trim();
-  text = text.replace(/\s+\d+[A-Z]?\s*$/i, '').trim(); // trailing "3B" or "5"
+  // Remove trailing grade/class indicators — run until stable
+  const gradeSuffixPatterns = [
+    /\s+(?:Gr(?:ade|d)?|G)\s*\d+\w*\s*$/i,   // "G5", "Grade3B", "Gr5", "Grd3"
+    /\s+(?:Grad|Grr|Rrr|Grd|Gr)\s*(?:Grr|Rrr|Rr)?\s*$/i,  // "Gr Rrr", "Grr", "Rrr"
+    /\s+\d+[A-Z]?\s*$/i,                        // trailing "3B" or "5"
+    /\s+[A-Z]\d[A-Z]\s*$/i,                     // trailing "G1B"
+  ];
+  let prev = '';
+  while (prev !== text) {
+    prev = text;
+    for (const p of gradeSuffixPatterns) {
+      text = text.replace(p, '').trim();
+    }
+  }
+
+  // Remove trailing single characters (like "R" leftover from "Gr R")
+  text = text.replace(/\s+[A-Z]\s*$/i, '').trim();
 
   // Remove HAR references from text (already handled by HAR strategy)
-  text = text.replace(/\bHAR\s*\d+\b/i, '').trim();
+  text = text.replace(/\bH[A-Z]R\s*\d+\b/i, '').trim();
 
   // If less than 3 chars left, nothing useful
   if (text.length < 3) return null;
 
   return text;
+}
+
+/**
+ * Detect HAR-like references (including common typos like HGR, HBR, HER).
+ * Returns normalised "HARxxx" string or null.
+ */
+function detectHarReference(text) {
+  if (!text) return null;
+  // Standard HAR: HAR375, Har 375, HAR0375
+  const standard = text.match(/\bHAR\s*(\d+)\b/i);
+  if (standard) return `HAR${standard[1]}`;
+  // Common typos: HGR024, HBR024 (middle letter mistyped)
+  const typo = text.match(/\bH[A-Z]R\s*(\d+)\b/i);
+  if (typo) return `HAR${typo[1]}`;
+  return null;
 }
 
 async function processTransactions(transactions, userId) {
@@ -471,39 +499,55 @@ async function processTransactions(transactions, userId) {
       let invoiceResult = null;
       let matchStrategy = null;
 
-      // ── Strategy 1: Exact HAR reference match on invoice ──────────────────
-      if (!invoiceResult?.rows.length) {
-        invoiceResult = await client.query(`
-          SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
-          FROM invoices i
-          LEFT JOIN users u ON i.student_id = u.id
-          WHERE UPPER(i.reference_number) = UPPER($1) AND i.status IN ('Unpaid', 'Partial')
-          ORDER BY i.due_date ASC LIMIT 1
-        `, [transaction.reference]);
-        if (invoiceResult.rows.length) matchStrategy = 'exact_invoice_ref';
-      }
+      // Try to detect HAR reference in description too (catches typos like HGR024)
+      const harFromDesc = detectHarReference(transaction.description || '');
+      const harRef = transaction.hasStudentId ? transaction.reference : harFromDesc;
 
-      // ── Strategy 2: Match HAR ref against student_number in users table ───
-      // (HAR375 → student whose student_number = 'HAR375' or 'HAR0375' etc.)
-      if (!invoiceResult?.rows.length && transaction.hasStudentId) {
-        const harNum = transaction.reference.replace(/^HAR0*/i, '');
-        invoiceResult = await client.query(`
+      // Helper: find oldest unpaid invoice by student_number variants
+      async function findByStudentNumber(ref) {
+        if (!ref) return null;
+        const num = ref.replace(/^H[A-Z]R0*/i, '');
+        const result = await client.query(`
           SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
           FROM invoices i
           JOIN users u ON i.student_id = u.id
           WHERE (UPPER(u.student_number) = UPPER($1)
               OR UPPER(u.student_number) = UPPER($2)
               OR UPPER(u.student_number) = UPPER($3)
-              OR UPPER(u.student_number) = UPPER($4))
+              OR UPPER(u.student_number) = 'HAR' || $4)
             AND i.status IN ('Unpaid', 'Partial')
           ORDER BY i.due_date ASC LIMIT 1
         `, [
-          transaction.reference,           // HAR375
-          `HAR${harNum}`,                  // HAR375  (no leading zeros)
-          `HAR${harNum.padStart(3,'0')}`,  // HAR375 -> HAR375
-          `HAR0${harNum}`                  // HAR0375
+          ref,
+          `HAR${num}`,
+          `HAR${num.padStart(3,'0')}`,
+          num
         ]);
-        if (invoiceResult.rows.length) matchStrategy = 'student_number';
+        return result;
+      }
+
+      // ── Strategy 1: Exact HAR reference match on invoice reference_number ─
+      if (!invoiceResult?.rows.length && harRef) {
+        invoiceResult = await client.query(`
+          SELECT i.*, u.first_name, u.last_name, u.student_number as user_student_number
+          FROM invoices i
+          LEFT JOIN users u ON i.student_id = u.id
+          WHERE UPPER(i.reference_number) = UPPER($1) AND i.status IN ('Unpaid', 'Partial')
+          ORDER BY i.due_date ASC LIMIT 1
+        `, [harRef]);
+        if (invoiceResult.rows.length) matchStrategy = 'exact_invoice_ref';
+      }
+
+      // ── Strategy 2: Match HAR ref against student_number in users table ───
+      if (!invoiceResult?.rows.length && harRef) {
+        invoiceResult = await findByStudentNumber(harRef);
+        if (invoiceResult?.rows.length) matchStrategy = 'student_number';
+      }
+
+      // ── Strategy 2b: Try HAR from description (typo catch) ────────────────
+      if (!invoiceResult?.rows.length && harFromDesc && harFromDesc !== harRef) {
+        invoiceResult = await findByStudentNumber(harFromDesc);
+        if (invoiceResult?.rows.length) matchStrategy = 'har_typo_from_desc';
       }
 
       // ── Strategy 3: Padded/trimmed zeros for HAR reference ────────────────
@@ -831,34 +875,91 @@ router.get('/student-payment-history/:studentNumber', [
     `, [student.id, student.student_number]);
     
     const invoices = invoicesResult.rows;
+
+    // ALSO fetch all payment_transactions for this student grouped by month/year
+    // This catches manual payments for months that have no invoice
+    const ptResult = await db.query(`
+      SELECT 
+        month, year,
+        SUM(amount) as total_paid,
+        MIN(payment_date::text) as earliest_date,
+        STRING_AGG(COALESCE(reference, reference_number, 'Manual'), ', ') as refs
+      FROM payment_transactions
+      WHERE (student_id = $1 OR student_number = $2)
+        AND month IS NOT NULL AND year IS NOT NULL
+      GROUP BY month, year
+      ORDER BY year ASC, month ASC
+    `, [student.id, student.student_number]);
+
+    // Build a map: "year-month" → total paid from payment_transactions
+    const ptByMonth = {};
+    ptResult.rows.forEach(pt => {
+      const key = `${pt.year}-${String(pt.month).padStart(2,'0')}`;
+      ptByMonth[key] = {
+        totalPaid: parseFloat(pt.total_paid) || 0,
+        refs: pt.refs || 'Manual Entry'
+      };
+    });
     
-    // Build monthly payment history from actual invoices only
+    // Build monthly payment history from invoices, merging payment_transactions data
     const monthlyHistory = [];
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 
                     'July', 'August', 'September', 'October', 'November', 'December'];
+    const invoiceMonthKeys = new Set();
     
-    // Process only invoices that exist (no artificial months)
     invoices.forEach(inv => {
       if (!inv.due_date) return;
       
       const date = new Date(inv.due_date);
       const year = date.getFullYear();
       const monthIndex = date.getMonth();
+      const monthNum = monthIndex + 1;
+      const key = `${year}-${String(monthNum).padStart(2,'0')}`;
+      invoiceMonthKeys.add(key);
+
+      // Use the larger of invoice.amount_paid vs sum from payment_transactions
+      // (handles edge case where invoice wasn't updated but payment_transactions was)
+      const ptPaid = ptByMonth[key]?.totalPaid || 0;
+      const invoicePaid = parseFloat(inv.amount_paid) || 0;
+      const effectivePaid = Math.max(invoicePaid, ptPaid);
+      const amountDue = parseFloat(inv.amount_due) || 0;
+      const effectiveOutstanding = Math.max(amountDue - effectivePaid, 0);
+
+      const normalStatus = (inv.status || '').toLowerCase();
       
       monthlyHistory.push({
-        year: year,
+        year,
         month: months[monthIndex],
-        monthNumber: monthIndex + 1,
-        amountDue: parseFloat(inv.amount_due) || 0,
-        amountPaid: parseFloat(inv.amount_paid) || 0,
-        outstanding: parseFloat(inv.outstanding_balance) || 0,
+        monthNumber: monthNum,
+        amountDue,
+        amountPaid: effectivePaid,
+        outstanding: effectiveOutstanding,
         status: inv.status,
         paymentStatus: 
-          inv.status === 'paid' ? 'Paid' :
-          inv.status === 'overpaid' ? 'Overpaid' :
-          parseFloat(inv.amount_paid) > 0 ? 'Partial Payment' : 'Missed Payment',
+          normalStatus === 'paid' || normalStatus === 'overpaid' ? 'Paid' :
+          effectivePaid >= amountDue && amountDue > 0 ? 'Paid' :
+          effectivePaid > 0 ? 'Partial Payment' : 'Missed Payment',
         reference: inv.reference_number || '-'
       });
+    });
+
+    // Add months that only exist in payment_transactions (no invoice for that month)
+    // e.g. manual payment entered for December 2025 when invoices start from January 2026
+    Object.entries(ptByMonth).forEach(([key, pt]) => {
+      if (!invoiceMonthKeys.has(key)) {
+        const [yr, mo] = key.split('-').map(Number);
+        monthlyHistory.push({
+          year: yr,
+          month: months[mo - 1],
+          monthNumber: mo,
+          amountDue: 0,
+          amountPaid: pt.totalPaid,
+          outstanding: 0,
+          status: 'Paid',
+          paymentStatus: 'Paid',
+          reference: pt.refs
+        });
+      }
     });
     
     // Sort by year and month
