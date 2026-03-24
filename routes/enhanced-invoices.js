@@ -1412,7 +1412,7 @@ router.put('/manual-payment/:paymentId', [
 ], async (req, res) => {
   try {
     const { paymentId } = req.params;
-    const { amount, payment_date, description, reference } = req.body;
+    const { amount, payment_date, description, reference, month, year } = req.body;
 
     // Get original payment
     const originalPayment = await db.query(
@@ -1426,38 +1426,74 @@ router.put('/manual-payment/:paymentId', [
 
     const original = originalPayment.rows[0];
 
-    // Update payment
+    // Resolve old and new month/year
+    const oldMonth = original.month || (original.payment_date ? new Date(original.payment_date).getMonth() + 1 : null);
+    const oldYear  = original.year  || (original.payment_date ? new Date(original.payment_date).getFullYear()  : null);
+    const newMonth = month  ? parseInt(month)  : oldMonth;
+    const newYear  = year   ? parseInt(year)   : oldYear;
+    const oldAmount = parseFloat(original.amount);
+    const newAmount = amount ? parseFloat(amount) : oldAmount;
+
+    // Update payment_transactions — save ALL changed fields including month/year
     const updateResult = await db.query(`
       UPDATE payment_transactions 
-      SET amount = COALESCE($1, amount),
+      SET amount       = COALESCE($1, amount),
           payment_date = COALESCE($2, payment_date),
-          description = COALESCE($3, description),
-          reference = COALESCE($4, reference)
-      WHERE id = $5
+          transaction_date = COALESCE($2, transaction_date),
+          description  = COALESCE($3, description),
+          reference    = COALESCE($4, reference),
+          reference_number = COALESCE($4, reference_number),
+          month        = $5,
+          year         = $6
+      WHERE id = $7
       RETURNING *
-    `, [amount, payment_date, description, reference, paymentId]);
+    `, [amount || null, payment_date || null, description || null, reference || null,
+        newMonth, newYear, paymentId]);
 
-    // If amount changed, update invoice
-    if (amount && parseFloat(amount) !== parseFloat(original.amount)) {
-      const difference = parseFloat(amount) - parseFloat(original.amount);
-      const pMonth = original.month || (original.payment_date ? new Date(original.payment_date).getMonth() + 1 : null);
-      const pYear = original.year || (original.payment_date ? new Date(original.payment_date).getFullYear() : null);
-      if (pMonth && pYear) {
+    // ── Update invoices ────────────────────────────────────────────────────────
+    // If the month/year OR the amount changed we need to:
+    //   1. Reverse the payment on the OLD invoice
+    //   2. Apply  the payment on the NEW invoice
+    const monthYearChanged = (newMonth !== oldMonth) || (newYear !== oldYear);
+    const amountChanged    = newAmount !== oldAmount;
+
+    if ((monthYearChanged || amountChanged) && original.student_id) {
+      // 1. Reverse old invoice (subtract old amount)
+      if (oldMonth && oldYear) {
         await db.query(`
-          UPDATE invoices 
-          SET amount_paid = COALESCE(amount_paid, 0) + $1,
+          UPDATE invoices
+          SET amount_paid        = GREATEST(COALESCE(amount_paid, 0) - $1, 0),
+              outstanding_balance = LEAST(COALESCE(outstanding_balance, 0) + $1, amount_due),
+              status = CASE
+                WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) = 0 THEN 'Unpaid'
+                WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) < amount_due THEN 'Partial'
+                ELSE status
+              END
+          WHERE student_id = $2
+            AND EXTRACT(MONTH FROM due_date) = $3
+            AND EXTRACT(YEAR  FROM due_date) = $4
+        `, [oldAmount, original.student_id, oldMonth, oldYear]);
+      }
+
+      // 2. Apply new amount to new invoice
+      if (newMonth && newYear) {
+        await db.query(`
+          UPDATE invoices
+          SET amount_paid        = COALESCE(amount_paid, 0) + $1,
               outstanding_balance = GREATEST(COALESCE(outstanding_balance, amount_due) - $1, 0),
-              status = CASE 
+              status = CASE
                 WHEN COALESCE(amount_paid, 0) + $1 >= amount_due THEN 'Paid'
                 WHEN COALESCE(amount_paid, 0) + $1 > 0 THEN 'Partial'
                 ELSE 'Unpaid'
               END
-          WHERE student_id = $2 
-            AND EXTRACT(MONTH FROM due_date) = $3 
-            AND EXTRACT(YEAR FROM due_date) = $4
-        `, [difference, original.student_id, pMonth, pYear]);
+          WHERE student_id = $2
+            AND EXTRACT(MONTH FROM due_date) = $3
+            AND EXTRACT(YEAR  FROM due_date) = $4
+        `, [newAmount, original.student_id, newMonth, newYear]);
       }
     }
+
+    console.log(`✅ Manual payment ${paymentId} updated: month ${oldMonth}/${oldYear} → ${newMonth}/${newYear}, amount R${oldAmount} → R${newAmount}`);
 
     res.json({
       success: true,
