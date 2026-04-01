@@ -672,13 +672,12 @@ async function processTransactions(transactions, userId) {
         UPDATE invoices SET 
           status = $1, 
           amount_paid = $2::DECIMAL(10,2),
-          outstanding_balance = $3::DECIMAL(10,2),
-          overpaid_amount = $4::DECIMAL(10,2),
+          overpaid_amount = $3::DECIMAL(10,2),
           updated_at = NOW()
-        WHERE id = $5
+        WHERE id = $4
         RETURNING id, status, amount_paid, outstanding_balance, overpaid_amount, reference_number
       `;
-      let updateParams = [newStatus, properAmountPaid, properNewOutstanding, properOverpaidAmount, invoice.id];
+      let updateParams = [newStatus, properAmountPaid, properOverpaidAmount, invoice.id];
       
       try {
         const updateResult = await client.query(updateQuery, updateParams);
@@ -1311,7 +1310,6 @@ router.post('/manual-payment', [
     const invoiceResult = await db.query(`
       UPDATE invoices 
       SET amount_paid = COALESCE(amount_paid, 0) + $1,
-          outstanding_balance = GREATEST(COALESCE(outstanding_balance, amount_due) - $1, 0),
           status = CASE 
             WHEN COALESCE(amount_paid, 0) + $1 >= amount_due THEN 'Paid'
             WHEN COALESCE(amount_paid, 0) + $1 > 0 THEN 'Partial'
@@ -1462,8 +1460,7 @@ router.put('/manual-payment/:paymentId', [
       if (oldMonth && oldYear) {
         await db.query(`
           UPDATE invoices
-          SET amount_paid        = GREATEST(COALESCE(amount_paid, 0) - $1, 0),
-              outstanding_balance = LEAST(COALESCE(outstanding_balance, 0) + $1, amount_due),
+          SET amount_paid = GREATEST(COALESCE(amount_paid, 0) - $1, 0),
               status = CASE
                 WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) = 0 THEN 'Unpaid'
                 WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) < amount_due THEN 'Partial'
@@ -1479,8 +1476,7 @@ router.put('/manual-payment/:paymentId', [
       if (newMonth && newYear) {
         await db.query(`
           UPDATE invoices
-          SET amount_paid        = COALESCE(amount_paid, 0) + $1,
-              outstanding_balance = GREATEST(COALESCE(outstanding_balance, amount_due) - $1, 0),
+          SET amount_paid = COALESCE(amount_paid, 0) + $1,
               status = CASE
                 WHEN COALESCE(amount_paid, 0) + $1 >= amount_due THEN 'Paid'
                 WHEN COALESCE(amount_paid, 0) + $1 > 0 THEN 'Partial'
@@ -1543,11 +1539,10 @@ router.delete('/manual-payment/:paymentId', [
       await db.query(`
         UPDATE invoices 
         SET amount_paid = GREATEST(COALESCE(amount_paid, 0) - $1, 0),
-            outstanding_balance = LEAST(COALESCE(outstanding_balance, 0) + $1, amount_due),
             status = CASE 
-              WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) >= amount_due THEN 'Paid'
-              WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) > 0 THEN 'Partial'
-              ELSE 'Unpaid'
+              WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) = 0 THEN 'Unpaid'
+              WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) < amount_due THEN 'Partial'
+              ELSE 'Paid'
             END
         WHERE student_id = $2 
           AND EXTRACT(MONTH FROM due_date) = $3 
