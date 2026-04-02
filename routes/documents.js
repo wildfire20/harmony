@@ -288,18 +288,6 @@ router.post('/upload', [
   upload.single('document')
 ], async (req, res) => {
   try {
-    console.log('=== DOCUMENT UPLOAD DEBUG ===');
-    console.log('Headers:', req.headers);
-    console.log('Request body:', req.body);
-    console.log('File received:', !!req.file);
-    if (req.file) {
-      console.log('File details:', {
-        originalname: req.file.originalname,
-        mimetype: req.file.mimetype,
-        size: req.file.size
-      });
-    }
-    
     if (!req.file) {
       console.log('❌ No file uploaded in request');
       return res.status(400).json({ 

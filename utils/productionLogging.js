@@ -14,7 +14,18 @@ if (isProduction || isRailway) {
   // Override console.log to be more selective in production
   console.log = function(...args) {
     // Only log if it's important (contains specific keywords)
-    const message = args.join(' ');
+    let message;
+    try {
+      message = args.map(a => {
+        if (a === null || a === undefined) return String(a);
+        if (typeof a === 'object') {
+          try { return JSON.stringify(a); } catch (_) { return '[Object]'; }
+        }
+        return String(a);
+      }).join(' ');
+    } catch (_) {
+      message = '';
+    }
     const isImportant = message.includes('ERROR') || 
                        message.includes('FAILED') || 
                        message.includes('SUCCESS') ||
