@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { parentApi } from './ParentPortal';
-import { FileText, Download, AlertCircle, FileSpreadsheet, FileImage, Presentation, File } from 'lucide-react';
+import { FileText, Download, Eye, AlertCircle, FileSpreadsheet, FileImage, Presentation, File } from 'lucide-react';
 
 const TYPE_LABELS = {
   homework:    'Homework',
@@ -60,6 +60,17 @@ const ParentDocuments = ({ child }) => {
     const token = localStorage.getItem('parentToken');
     const url = `/api/documents/download/${doc.id}?token=${encodeURIComponent(token)}`;
     window.open(url, '_blank');
+  };
+
+  const handleView = (doc) => {
+    const token = localStorage.getItem('parentToken');
+    const url = `/api/documents/view/${doc.id}?token=${encodeURIComponent(token)}`;
+    window.open(url, '_blank');
+  };
+
+  const isViewable = (name = '') => {
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
   };
 
   return (
@@ -137,13 +148,24 @@ const ParentDocuments = ({ child }) => {
                             <p className="text-gray-500 text-xs mt-0.5 line-clamp-2">{doc.description}</p>
                           )}
                         </div>
-                        <button
-                          onClick={() => handleDownload(doc)}
-                          className="shrink-0 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors"
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          Download
-                        </button>
+                        <div className="flex gap-2 shrink-0">
+                          {isViewable(doc.original_file_name) && (
+                            <button
+                              onClick={() => handleView(doc)}
+                              className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              View
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDownload(doc)}
+                            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Save
+                          </button>
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-2 mt-2 flex-wrap">

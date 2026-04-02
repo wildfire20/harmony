@@ -150,6 +150,16 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - **Database** – added `phone_number`, `must_change_password` columns to `users`; `parent_students` now allows multiple rows per parent (`uq_parent_student` unique on pair); new `parent_otps` table for OTP/reset tokens
 - **SMS** – Twilio used if `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` env vars are set; falls back to console log + admin-visible OTP
 
+## Push Notifications (April 2026)
+- **Web Push API** – parents receive real-time notifications (like WhatsApp) via browser/phone
+- **VAPID keys** stored as env vars (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_EMAIL`)
+- **Service Worker** at `/sw.js` handles push events and notification clicks
+- **Opt-in banner** shown in parent portal until parent enables; can be dismissed
+- **Auto-subscribe** re-detects existing subscription on portal load
+- **Triggers**: new announcement (everyone/students) → push; new document (everyone/parents) → push
+- **Dead subscription cleanup** – 410/404 responses auto-deactivate stale subscriptions
+- **`parent_push_subscriptions` table** – stores endpoint + JSONB subscription per parent
+
 ## Parent Portal (April 2026)
 - **Separate Parent Portal** at `/parent/login` — parents log in with email + password (completely separate from the main staff/student portal)
 - **Dashboard** — shows this week's attendance summary, recent grades, outstanding fee balance, and latest notices

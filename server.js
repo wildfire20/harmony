@@ -781,6 +781,20 @@ const startServer = async () => {
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS temp_password_plain VARCHAR(100)`);
       await db.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS description TEXT`);
 
+      // Push notification subscriptions for parents
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS parent_push_subscriptions (
+          id SERIAL PRIMARY KEY,
+          parent_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          endpoint TEXT NOT NULL,
+          subscription JSONB NOT NULL,
+          is_active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (endpoint)
+        )
+      `);
+
       // Parent-student link table (one parent → many students)
       await db.query(`
         CREATE TABLE IF NOT EXISTS parent_students (

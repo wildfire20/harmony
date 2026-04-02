@@ -475,6 +475,12 @@ router.post('/upload', [
 
     console.log('✅ Document uploaded successfully:', result.rows[0]);
 
+    const uploadedDoc = result.rows[0];
+    if (uploadedDoc.target_audience === 'parents' || uploadedDoc.target_audience === 'everyone') {
+      const { notifyNewDocument } = require('../services/pushNotification');
+      notifyNewDocument(uploadedDoc.title, uploadedDoc.document_type).catch(() => {});
+    }
+
     res.status(201).json({
       success: true,
       message: 'Document uploaded successfully to S3 cloud storage',

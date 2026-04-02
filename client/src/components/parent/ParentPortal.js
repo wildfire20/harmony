@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
   Home, CalendarDays, GraduationCap, Bell, CreditCard, FolderOpen,
-  LogOut, Menu, X, BookOpen, ChevronDown, ChevronRight, Users
+  LogOut, Menu, X, BookOpen, ChevronDown, ChevronRight, Users, BellRing
 } from 'lucide-react';
 import ParentDashboard from './ParentDashboard';
 import ParentAttendance from './ParentAttendance';
@@ -122,6 +122,64 @@ const ChildSwitcher = ({ children, selectedChild, onSelect }) => {
   );
 };
 
+// ─── Push Notification Hook ───────────────────────────────────────────────────
+const usePushNotifications = () => {
+  const [permission, setPermission] = useState(
+    typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
+  );
+  const [subscribed, setSubscribed] = useState(false);
+
+  const subscribe = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    try {
+      const keyRes = await fetch('/api/parent/vapid-key');
+      const { publicKey } = await keyRes.json();
+      if (!publicKey) return;
+
+      const reg = await navigator.serviceWorker.ready;
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) { setSubscribed(true); return; }
+
+      const perm = await Notification.requestPermission();
+      setPermission(perm);
+      if (perm !== 'granted') return;
+
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+
+      const token = localStorage.getItem('parentToken');
+      await fetch('/api/parent/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ subscription: sub }),
+      });
+      setSubscribed(true);
+    } catch (err) {
+      console.error('Push subscribe error:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker.ready.then(async (reg) => {
+      const sub = await reg.pushManager.getSubscription().catch(() => null);
+      if (sub) setSubscribed(true);
+    });
+  }, []);
+
+  return { permission, subscribed, subscribe };
+};
+
+const urlBase64ToUint8Array = (base64String) => {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+};
+
 // ─── Main Portal ─────────────────────────────────────────────────────────────
 const ParentPortal = () => {
   const navigate = useNavigate();
@@ -132,6 +190,10 @@ const ParentPortal = () => {
   );
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileChildOpen, setMobileChildOpen] = useState(false);
+  const [notifDismissed, setNotifDismissed] = useState(
+    () => localStorage.getItem('notifBannerDismissed') === '1'
+  );
+  const { permission, subscribed, subscribe } = usePushNotifications();
 
   useEffect(() => {
     if (!isAuthenticated) navigate('/parent/login');
@@ -262,6 +324,26 @@ const ParentPortal = () => {
             </div>
           )}
         </header>
+
+        {/* Push notification banner */}
+        {!subscribed && !notifDismissed && permission !== 'denied' && permission !== 'unsupported' && 'PushManager' in window && (
+          <div className="bg-blue-700 text-white px-4 py-2.5 flex items-center gap-3 justify-center text-sm">
+            <BellRing className="h-4 w-4 shrink-0 text-blue-200" />
+            <span className="text-blue-100">Get notified when new notices or documents are shared</span>
+            <button
+              onClick={subscribe}
+              className="ml-1 bg-white text-blue-700 font-semibold text-xs px-3 py-1 rounded-full hover:bg-blue-50 transition-colors shrink-0"
+            >
+              Enable
+            </button>
+            <button
+              onClick={() => { setNotifDismissed(true); localStorage.setItem('notifBannerDismissed', '1'); }}
+              className="text-blue-300 hover:text-white transition-colors shrink-0"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
 
         <div className="flex flex-1 max-w-5xl mx-auto w-full">
           {/* Sidebar (desktop) */}

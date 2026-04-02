@@ -232,10 +232,16 @@ router.post('/', [
 
     console.log('✅ Announcement created successfully:', result.rows[0]);
 
+    const ann = result.rows[0];
+    if (ann.target_audience === 'everyone' || ann.target_audience === 'students') {
+      const { notifyNewAnnouncement } = require('../services/pushNotification');
+      notifyNewAnnouncement(ann.title, ann.content).catch(() => {});
+    }
+
     res.status(201).json({
       success: true,
       message: 'Announcement created successfully',
-      announcement: result.rows[0]
+      announcement: ann
     });
 
   } catch (error) {

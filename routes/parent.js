@@ -242,6 +242,45 @@ router.get('/invoices', requireParent, async (req, res) => {
   }
 });
 
+// ─── GET /api/parent/vapid-key ───────────────────────────────────────────────
+router.get('/vapid-key', (req, res) => {
+  res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || null });
+});
+
+// ─── POST /api/parent/push/subscribe ─────────────────────────────────────────
+router.post('/push/subscribe', requireParent, async (req, res) => {
+  try {
+    const { subscription } = req.body;
+    if (!subscription || !subscription.endpoint) {
+      return res.status(400).json({ message: 'Invalid subscription object' });
+    }
+    await db.query(`
+      INSERT INTO parent_push_subscriptions (parent_id, endpoint, subscription, is_active)
+      VALUES ($1, $2, $3, true)
+      ON CONFLICT (endpoint) DO UPDATE
+        SET parent_id = $1, subscription = $3, is_active = true, updated_at = CURRENT_TIMESTAMP
+    `, [req.user.id, subscription.endpoint, JSON.stringify(subscription)]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Push subscribe error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ─── POST /api/parent/push/unsubscribe ───────────────────────────────────────
+router.post('/push/unsubscribe', requireParent, async (req, res) => {
+  try {
+    const { endpoint } = req.body;
+    if (endpoint) {
+      await db.query('UPDATE parent_push_subscriptions SET is_active = false WHERE endpoint = $1 AND parent_id = $2',
+        [endpoint, req.user.id]);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // ─── GET /api/parent/documents ───────────────────────────────────────────────
 router.get('/documents', requireParent, async (req, res) => {
   try {
