@@ -1,0 +1,24 @@
+The Main Goal
+We want to add a secure "Parent Portal" to the existing school management system. This portal is a dedicated space where parents can log in to stay completely up-to-date on their child's school life. It should be easy to use, mobile-friendly, and pull real-time information directly from what the teachers and administrators are already entering into the main system.
+
+Core Features & Functions for Parents
+When a parent logs in, they should have access to the following features:
+
+The Dashboard (The Home Screen): A quick, high-level summary of everything important. As soon as they log in, they should see any urgent school announcements, a quick glance at recent grades, and a summary of their child's attendance for the week.
+
+Academic Progress & Grades: A dedicated section where parents can view their child's academic performance. They should be able to see marks for individual assignments, test scores, and term report cards.
+
+Attendance Tracking: A clear log showing if their child was marked present, absent, or late on any given day.
+
+Notices & Communication: A message board or inbox area where parents can read general school announcements (like upcoming events or parent-teacher meetings) and any direct messages from their child's teachers.
+
+(Optional but useful) Financials/Fees: A billing section where parents can view their current balance, see invoice history for school fees, and check payment due dates.
+
+How It Works With the Main System
+Replit needs to understand how this portal talks to the system it already built:
+
+Linked Accounts: Every parent account must be securely linked to their specific child's student profile in the database. A parent should only be able to see data for their own child.
+
+Read-Only Access: For the most part, parents are just viewing information. The portal should "read" the data that the teachers and admins "write" into the main system. If a teacher updates a grade on their end, it should automatically and instantly update on the parent's portal.
+
+Shared Database: The portal doesn't need its own separate database. It should pull straight from the existing central database that the school management system is already using for students, classes, and attendance.

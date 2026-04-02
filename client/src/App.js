@@ -34,6 +34,8 @@ import PaymentDashboard from './components/payments/PaymentDashboard';
 import LandingPage from './components/public/LandingPage';
 import EnrollmentManagement from './components/admin/EnrollmentManagement';
 import AttendancePage from './components/attendance/AttendancePage';
+import ParentLogin from './components/parent/ParentLogin';
+import ParentPortal from './components/parent/ParentPortal';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -175,6 +177,10 @@ const AppContent = () => {
         } />
       </Route>
       
+      {/* Parent Portal – standalone, own layout */}
+      <Route path="/parent/login" element={<ParentLogin />} />
+      <Route path="/parent/*" element={<ParentPortal />} />
+
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

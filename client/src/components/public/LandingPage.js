@@ -57,8 +57,11 @@ const Header = () => {
           </nav>
 
           <div className="flex items-center gap-3">
+            <Link to="/parent/login" className="hidden sm:inline-flex px-5 py-2.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
+              Parent Portal
+            </Link>
             <Link to="/login" className="hidden sm:inline-flex px-5 py-2.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
-              Portal Login
+              Staff Login
             </Link>
             <a href="#enroll" className="hidden sm:inline-flex px-5 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-red-600 to-pink-300 rounded-lg hover:from-red-600 hover:to-pink-400 transition-all shadow-lg hover:shadow-xl">
               Apply Now
@@ -88,7 +91,8 @@ const Header = () => {
               <a href="#programs" className="px-4 py-3 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-red-600 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Programs</a>
               <a href="#enroll" className="px-4 py-3 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-red-600 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Enroll</a>
               <div className="flex gap-2 px-4 pt-3">
-                <Link to="/login" className="flex-1 py-3 text-sm font-medium text-center text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Portal Login</Link>
+                <Link to="/parent/login" className="flex-1 py-3 text-sm font-medium text-center text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">Parent Portal</Link>
+                <Link to="/login" className="flex-1 py-3 text-sm font-medium text-center text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Staff Login</Link>
                 <a href="#enroll" className="flex-1 py-3 text-sm font-medium text-center text-white bg-gradient-to-r from-red-600 to-pink-300 rounded-lg">Apply Now</a>
               </div>
             </nav>

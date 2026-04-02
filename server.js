@@ -45,6 +45,7 @@ const fixOwnershipRoutes = require('./routes/fix-ownership-api');
 const enrollmentRoutes = require('./routes/enrollments');
 const attendanceRoutes = require('./routes/attendance');
 const passwordRoutes = require('./routes/passwords');
+const parentRoutes = require('./routes/parent');
 
 // Import database
 const db = require('./config/database');
@@ -460,6 +461,7 @@ app.use('/api/downloads', require('./routes/downloads'));
 app.use('/api/enrollments', enrollmentRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/passwords', passwordRoutes);
+app.use('/api/parent', parentRoutes);
 app.use('/api', s3HealthRoutes);
 
 // Add migration endpoint for database setup
@@ -764,6 +766,35 @@ const startServer = async () => {
       console.warn('⚠️ Enhanced Payment System initialization failed:', enhancedPaymentError.message);
     }
     
+    // Parent portal schema
+    try {
+      // Update role constraint to include 'parent'
+      await db.query(`
+        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check
+      `);
+      await db.query(`
+        ALTER TABLE users ADD CONSTRAINT users_role_check
+        CHECK (role IN ('student','teacher','admin','super_admin','parent'))
+      `);
+      // Parent-student link table
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS parent_students (
+          id SERIAL PRIMARY KEY,
+          parent_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT uq_parent UNIQUE (parent_id)
+        )
+      `);
+      await db.query(`
+        CREATE INDEX IF NOT EXISTS idx_parent_students_parent ON parent_students(parent_id);
+        CREATE INDEX IF NOT EXISTS idx_parent_students_student ON parent_students(student_id);
+      `);
+      console.log('✅ Parent portal schema initialized');
+    } catch (parentError) {
+      console.warn('⚠️ Parent portal schema initialization failed:', parentError.message);
+    }
+
     // Note: quick-db-fix.js and fix-database-schema.js are legacy scripts
     // Schema is now managed via CREATE TABLE IF NOT EXISTS + ALTER TABLE ADD COLUMN IF NOT EXISTS above
     

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../common/ThemeProvider';
-import { Settings, Users, BarChart3, GraduationCap, ClipboardList, ArrowUpCircle, Key, DollarSign } from 'lucide-react';
+import { Settings, Users, BarChart3, GraduationCap, ClipboardList, ArrowUpCircle, Key, DollarSign, UserCheck } from 'lucide-react';
 import StudentManagement from './StudentManagement';
 import TeacherManagement from './TeacherManagement';
 import SystemSettings from './SystemSettings';
@@ -10,6 +10,7 @@ import EnrollmentManagement from './EnrollmentManagement';
 import GradePromotion from './GradePromotion';
 import PasswordManagement from './PasswordManagement';
 import ManualPayments from './ManualPayments';
+import ParentManagement from './ParentManagement';
 
 const AdminPanel = () => {
   const { user } = useAuth();
@@ -28,6 +29,7 @@ const AdminPanel = () => {
     { id: 'students', name: 'Student Management', icon: GraduationCap },
     { id: 'promotion', name: 'Grade Promotion', icon: ArrowUpCircle },
     { id: 'teachers', name: 'Teacher Management', icon: Users },
+    { id: 'parents', name: 'Parent Accounts', icon: UserCheck },
     { id: 'passwords', name: 'Passwords', icon: Key },
     { id: 'payments', name: 'Manual Payments', icon: DollarSign },
     { id: 'settings', name: 'System Settings', icon: Settings },
@@ -44,6 +46,8 @@ const AdminPanel = () => {
         return <GradePromotion />;
       case 'teachers':
         return <TeacherManagement />;
+      case 'parents':
+        return <ParentManagement />;
       case 'passwords':
         return <PasswordManagement />;
       case 'payments':

@@ -140,6 +140,18 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - **Custom Passwords** - Option to set custom passwords or auto-generate
 - **Copy to Clipboard** - Easy copy button for sharing passwords
 
+## Parent Portal (April 2026)
+- **Separate Parent Portal** at `/parent/login` — parents log in with email + password (completely separate from the main staff/student portal)
+- **Dashboard** — shows this week's attendance summary, recent grades, outstanding fee balance, and latest notices
+- **Attendance View** — full monthly attendance history with status breakdown (Present / Absent / Late / Excused), month/year filter
+- **Academic Progress** — graded submissions with scores, percentage bars, teacher feedback, and pending/overdue tasks
+- **Notices & Announcements** — school-wide and grade-specific announcements from teachers and admin, tap to expand
+- **Fees / Invoices** — full invoice history, payment status, outstanding balance, and FNB banking details with child's student number as reference
+- **Mobile-Friendly** — responsive layout with bottom navigation bar on mobile, sidebar on desktop
+- **Parent Account Management** — admins create parent accounts in Admin Panel → "Parent Accounts" tab; link each parent to their child by searching by name or student number
+- **Secure & Isolated** — parents can only see their own linked child's data; uses a separate `parent_students` link table and `parent` role in the database
+- **Landing Page** — "Parent Portal" button added to the public homepage navbar alongside "Staff Login"
+
 ## Recent Changes (March 2026)
 - **Weekly Attendance Report** - Admin can now view all grades' attendance for an entire week (Mon-Fri) in one view. Select start/end dates, navigate weeks with Previous/Next buttons. Shows daily attendance percentages per class with expandable student-by-student grids showing P/A/L/E status for each day. Weekly summary column per student.
 - **Payment System Schema Fix** - Fixed `payment_transactions` table schema mismatch between bank statement processing and manual payment features. Added missing columns (`recorded_by`, `payment_method`, `month`, `year`, `payment_date`, `reference`) with automatic migration. Fixed invoice update queries to use `due_date`-based month/year matching instead of non-existent `month`/`year` columns on `invoices` table. Disabled destructive `quick-db-fix.js` that was dropping and recreating tables on every startup.

@@ -234,6 +234,69 @@ router.put('/change-password', [
   }
 });
 
+// Parent login
+router.post('/login/parent', [
+  body('email').isEmail().withMessage('Valid email is required'),
+  body('password').notEmpty().withMessage('Password is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { email, password } = req.body;
+
+    const result = await db.query(`
+      SELECT u.id, u.email, u.password, u.first_name, u.last_name,
+             u.role, u.is_active
+      FROM users u
+      WHERE u.email = $1 AND u.role = 'parent'
+    `, [email]);
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    const user = result.rows[0];
+
+    if (!user.is_active) {
+      return res.status(401).json({ message: 'Account is deactivated' });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    // Fetch linked child
+    const childResult = await db.query(`
+      SELECT u.id, u.first_name, u.last_name, u.student_number,
+             g.name AS grade_name, c.name AS class_name
+      FROM parent_students ps
+      JOIN users u ON u.id = ps.student_id
+      LEFT JOIN grades g ON u.grade_id = g.id
+      LEFT JOIN classes c ON u.class_id = c.id
+      WHERE ps.parent_id = $1
+      LIMIT 1
+    `, [user.id]);
+
+    const token = generateToken(user);
+    const { password: _, ...userWithoutPassword } = user;
+
+    res.json({
+      message: 'Login successful',
+      token,
+      user: userWithoutPassword,
+      child: childResult.rows[0] || null,
+    });
+
+  } catch (error) {
+    console.error('Parent login error:', error);
+    res.status(500).json({ message: 'Server error during login' });
+  }
+});
+
 // Logout (client-side token removal)
 router.post('/logout', authenticate, (req, res) => {
   res.json({ message: 'Logout successful' });
