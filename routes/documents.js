@@ -561,6 +561,9 @@ router.get('/download/:id', authenticateFlexible, async (req, res) => {
       } else if (document.target_audience === 'staff' && ['teacher', 'admin', 'super_admin'].includes(user.role)) {
         hasAccess = true;
         console.log('✅ Staff audience access granted');
+      } else if (document.target_audience === 'parents' && user.role === 'parent') {
+        hasAccess = true;
+        console.log('✅ Parent audience access granted');
       }
     } else {
       // Class-specific documents (traditional teacher uploads)
@@ -701,6 +704,9 @@ router.get('/view/:id', authenticateFlexible, async (req, res) => {
       } else if (document.target_audience === 'staff' && ['teacher', 'admin', 'super_admin'].includes(user.role)) {
         hasAccess = true;
         console.log('✅ Staff audience access granted');
+      } else if (document.target_audience === 'parents' && user.role === 'parent') {
+        hasAccess = true;
+        console.log('✅ Parent audience access granted');
       }
     } else {
       // Class-specific documents (traditional teacher uploads)

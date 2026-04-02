@@ -109,7 +109,9 @@ router.get('/dashboard', requireParent, async (req, res) => {
       db.query(`
         SELECT id, title, content, created_at
         FROM announcements
-        WHERE is_active = true AND (grade_id IS NULL OR grade_id = $1)
+        WHERE is_active = true
+          AND target_audience IN ('everyone', 'students')
+          AND (grade_id IS NULL OR grade_id = $1)
         ORDER BY created_at DESC LIMIT 3
       `, [child.grade_id]),
     ]);
@@ -205,7 +207,9 @@ router.get('/announcements', requireParent, async (req, res) => {
       FROM announcements a
       JOIN users u ON a.created_by = u.id
       LEFT JOIN grades g ON a.grade_id = g.id
-      WHERE a.is_active=true AND (a.grade_id IS NULL OR a.grade_id=$1)
+      WHERE a.is_active = true
+        AND a.target_audience IN ('everyone', 'students')
+        AND (a.grade_id IS NULL OR a.grade_id = $1)
       ORDER BY a.created_at DESC LIMIT 50
     `, [child.grade_id]);
     res.json({ announcements: result.rows, child, children });
@@ -234,6 +238,30 @@ router.get('/invoices', requireParent, async (req, res) => {
     res.json({ invoices: result.rows, totals, child, children });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ message: err.message });
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ─── GET /api/parent/documents ───────────────────────────────────────────────
+router.get('/documents', requireParent, async (req, res) => {
+  try {
+    const child = await resolveChild(req.user.id, req.query.child_id);
+    const children = await getChildren(req.user.id);
+    const result = await db.query(`
+      SELECT d.id, d.title, d.description, d.document_type,
+             d.original_file_name, d.file_size, d.uploaded_at,
+             d.s3_key, d.s3_url, d.target_audience,
+             u.first_name||' '||u.last_name AS uploaded_by
+      FROM documents d
+      JOIN users u ON d.uploaded_by = u.id
+      WHERE d.is_active = true
+        AND d.target_audience IN ('everyone', 'parents')
+      ORDER BY d.uploaded_at DESC
+    `);
+    res.json({ documents: result.rows, child, children });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message });
+    console.error('Parent documents error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });

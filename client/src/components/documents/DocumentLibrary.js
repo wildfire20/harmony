@@ -563,6 +563,7 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
                   <option value="everyone">Everyone (All Users)</option>
                   <option value="student">Students Only</option>
                   <option value="staff">Staff Only (Teachers & Admins)</option>
+                  <option value="parents">Parents Only</option>
                 </select>
                 <p className="text-xs text-gray-500 mt-1">
                   Choose who can access this document
