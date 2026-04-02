@@ -25,6 +25,7 @@ const galleryImages = [
 
 const Header = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [portalMenuOpen, setPortalMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -32,6 +33,14 @@ const Header = () => {
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!portalMenuOpen) return;
+    const close = () => setPortalMenuOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [portalMenuOpen]);
 
   return (
     <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? 'bg-white shadow-lg' : 'bg-white/90 backdrop-blur-md'}`}>
@@ -57,12 +66,71 @@ const Header = () => {
           </nav>
 
           <div className="flex items-center gap-3">
-            <Link to="/parent/login" className="hidden sm:inline-flex px-5 py-2.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
-              Parent Portal
-            </Link>
-            <Link to="/login" className="hidden sm:inline-flex px-5 py-2.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
-              Staff Login
-            </Link>
+            {/* Portal Login dropdown */}
+            <div className="relative hidden sm:block" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => setPortalMenuOpen(!portalMenuOpen)}
+                className="flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Portal Login
+                <svg className={`w-4 h-4 transition-transform ${portalMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {portalMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden z-50">
+                  <div className="px-4 py-3 border-b border-gray-50">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Select your portal</p>
+                  </div>
+                  <Link
+                    to="/login?type=student"
+                    onClick={() => setPortalMenuOpen(false)}
+                    className="flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 transition-colors group"
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0 group-hover:bg-emerald-200 transition-colors">
+                      <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">Student Portal</p>
+                      <p className="text-xs text-gray-400">Access assignments & quizzes</p>
+                    </div>
+                  </Link>
+                  <Link
+                    to="/parent/login"
+                    onClick={() => setPortalMenuOpen(false)}
+                    className="flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 transition-colors group border-t border-gray-50"
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center shrink-0 group-hover:bg-blue-200 transition-colors">
+                      <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">Parent Portal</p>
+                      <p className="text-xs text-gray-400">Track your child's progress</p>
+                    </div>
+                  </Link>
+                  <Link
+                    to="/login"
+                    onClick={() => setPortalMenuOpen(false)}
+                    className="flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 transition-colors group border-t border-gray-50"
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center shrink-0 group-hover:bg-red-200 transition-colors">
+                      <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">Staff Portal</p>
+                      <p className="text-xs text-gray-400">Teachers & administration</p>
+                    </div>
+                  </Link>
+                </div>
+              )}
+            </div>
             <a href="#enroll" className="hidden sm:inline-flex px-5 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-red-600 to-pink-300 rounded-lg hover:from-red-600 hover:to-pink-400 transition-all shadow-lg hover:shadow-xl">
               Apply Now
             </a>
@@ -90,10 +158,58 @@ const Header = () => {
               <a href="#gallery" className="px-4 py-3 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-red-600 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Gallery</a>
               <a href="#programs" className="px-4 py-3 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-red-600 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Programs</a>
               <a href="#enroll" className="px-4 py-3 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-red-600 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Enroll</a>
-              <div className="flex gap-2 px-4 pt-3">
-                <Link to="/parent/login" className="flex-1 py-3 text-sm font-medium text-center text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">Parent Portal</Link>
-                <Link to="/login" className="flex-1 py-3 text-sm font-medium text-center text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Staff Login</Link>
-                <a href="#enroll" className="flex-1 py-3 text-sm font-medium text-center text-white bg-gradient-to-r from-red-600 to-pink-300 rounded-lg">Apply Now</a>
+              <div className="px-4 pt-3 pb-1">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Portal Login</p>
+                <div className="space-y-2">
+                  <Link
+                    to="/login?type=student"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-3 px-3 py-2.5 bg-emerald-50 rounded-xl hover:bg-emerald-100 transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+                      <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-800">Student Portal</p>
+                      <p className="text-xs text-emerald-600">Assignments & quizzes</p>
+                    </div>
+                  </Link>
+                  <Link
+                    to="/parent/login"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-3 px-3 py-2.5 bg-blue-50 rounded-xl hover:bg-blue-100 transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-blue-800">Parent Portal</p>
+                      <p className="text-xs text-blue-600">Track your child's progress</p>
+                    </div>
+                  </Link>
+                  <Link
+                    to="/login"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-3 px-3 py-2.5 bg-red-50 rounded-xl hover:bg-red-100 transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center shrink-0">
+                      <svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-red-800">Staff Portal</p>
+                      <p className="text-xs text-red-600">Teachers & administration</p>
+                    </div>
+                  </Link>
+                </div>
+              </div>
+              <div className="px-4 pt-3 pb-2">
+                <a href="#enroll" onClick={() => setMobileMenuOpen(false)} className="block w-full py-3 text-sm font-medium text-center text-white bg-gradient-to-r from-red-600 to-pink-300 rounded-xl">Apply Now</a>
               </div>
             </nav>
           </div>
