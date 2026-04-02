@@ -86,24 +86,21 @@ const initializeDocumentsTable = async () => {
     `);
 
     if (columnCheck.rows.length === 0) {
-      console.log('Adding target_audience column to documents table...');
-      
-      // Add the column
       await db.query(`ALTER TABLE documents ADD COLUMN target_audience VARCHAR(20) DEFAULT NULL`);
-      
-      // Add constraint
-      await db.query(`
-        ALTER TABLE documents ADD CONSTRAINT check_target_audience 
-        CHECK (target_audience IS NULL OR target_audience IN ('everyone', 'student', 'staff'))
-      `);
-      
-      // Add index
-      await db.query(`CREATE INDEX idx_documents_target_audience ON documents(target_audience)`);
-      
-      console.log('✅ Target audience column added to documents table');
-    } else {
-      console.log('✅ Target audience column already exists');
+      await db.query(`CREATE INDEX IF NOT EXISTS idx_documents_target_audience ON documents(target_audience)`);
     }
+
+    // Ensure s3 / original filename columns exist (added during S3 integration)
+    await db.query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS original_file_name VARCHAR(255)`);
+    await db.query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS s3_key TEXT`);
+    await db.query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS s3_url TEXT`);
+
+    // Recreate check_target_audience constraint to include 'parents'
+    await db.query(`ALTER TABLE documents DROP CONSTRAINT IF EXISTS check_target_audience`);
+    await db.query(`
+      ALTER TABLE documents ADD CONSTRAINT check_target_audience
+      CHECK (target_audience IS NULL OR target_audience IN ('everyone', 'student', 'staff', 'parents'))
+    `);
     
     console.log('Documents table initialized successfully');
   } catch (error) {
