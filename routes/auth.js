@@ -429,7 +429,7 @@ router.post('/parent/reset-password', [
     // Update password
     const hashed = await bcrypt.hash(new_password, 12);
     const updateResult = await db.query(`
-      UPDATE users SET password=$1, must_change_password=false, updated_at=NOW()
+      UPDATE users SET password=$1, must_change_password=false, temp_password_plain=NULL, updated_at=NOW()
       WHERE (phone_number=$2 OR phone_number=$3) AND role='parent'
       RETURNING id
     `, [hashed, normalized, rawPhone]);

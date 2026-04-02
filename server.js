@@ -775,9 +775,10 @@ const startServer = async () => {
         CHECK (role IN ('student','teacher','admin','super_admin','parent'))
       `);
 
-      // Add phone_number and must_change_password columns to users
+      // Add phone_number, must_change_password, temp_password_plain columns to users
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30)`);
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false`);
+      await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS temp_password_plain VARCHAR(100)`);
 
       // Parent-student link table (one parent → many students)
       await db.query(`

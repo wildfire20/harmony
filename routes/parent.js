@@ -247,7 +247,7 @@ router.post('/change-password', requireParent, async (req, res) => {
   try {
     const hashed = await bcrypt.hash(new_password, 12);
     await db.query(
-      `UPDATE users SET password=$1, must_change_password=false, updated_at=NOW() WHERE id=$2`,
+      `UPDATE users SET password=$1, must_change_password=false, temp_password_plain=NULL, updated_at=NOW() WHERE id=$2`,
       [hashed, req.user.id]
     );
     res.json({ success: true, message: 'Password updated successfully' });
@@ -359,10 +359,10 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
       const hashed = await bcrypt.hash(tempPassword, 12);
 
       const userResult = await db.query(`
-        INSERT INTO users (first_name, last_name, phone_number, email, password, role, is_active, must_change_password)
-        VALUES ($1, $2, $3, $4, $5, 'parent', true, true)
+        INSERT INTO users (first_name, last_name, phone_number, email, password, role, is_active, must_change_password, temp_password_plain)
+        VALUES ($1, $2, $3, $4, $5, 'parent', true, true, $6)
         RETURNING id, first_name, last_name, phone_number, role, created_at
-      `, [first_name, last_name, normalizedPhone, email || null, hashed]);
+      `, [first_name, last_name, normalizedPhone, email || null, hashed, tempPassword]);
 
       parentId = userResult.rows[0].id;
     }
@@ -466,11 +466,49 @@ router.post('/admin/reset-password/:parentId', requireAdmin, async (req, res) =>
     const tempPassword = generateTempPassword();
     const hashed = await bcrypt.hash(tempPassword, 12);
     await db.query(
-      `UPDATE users SET password=$1, must_change_password=true, updated_at=NOW() WHERE id=$2 AND role='parent'`,
-      [hashed, req.params.parentId]
+      `UPDATE users SET password=$1, must_change_password=true, temp_password_plain=$2, updated_at=NOW() WHERE id=$3 AND role='parent'`,
+      [hashed, tempPassword, req.params.parentId]
     );
     res.json({ success: true, tempPassword });
   } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET /api/parent/welcome-password – public endpoint, no auth required
+// Returns temp password if phone matches an account that hasn't changed it yet
+router.get('/welcome-password', async (req, res) => {
+  const rawPhone = (req.query.phone || '').trim();
+  if (!rawPhone) return res.status(400).json({ message: 'Phone number is required' });
+  const normalized = rawPhone.replace(/[\s\-().+]/g, '').replace(/^0/, '27');
+
+  try {
+    const result = await db.query(`
+      SELECT first_name, last_name, temp_password_plain, must_change_password
+      FROM users
+      WHERE (phone_number=$1 OR phone_number=$2) AND role='parent' AND is_active=true
+      LIMIT 1
+    `, [normalized, rawPhone]);
+
+    if (result.rows.length === 0) {
+      return res.json({ found: false });
+    }
+
+    const user = result.rows[0];
+
+    if (!user.must_change_password || !user.temp_password_plain) {
+      // Account found but password already changed — don't reveal anything
+      return res.json({ found: true, already_set: true });
+    }
+
+    res.json({
+      found: true,
+      already_set: false,
+      first_name: user.first_name,
+      temp_password: user.temp_password_plain,
+    });
+  } catch (err) {
+    console.error('Welcome password error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });

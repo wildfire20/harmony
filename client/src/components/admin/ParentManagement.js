@@ -3,7 +3,7 @@ import api from '../../services/api';
 import toast from 'react-hot-toast';
 import {
   UserPlus, Trash2, Edit2, Search, Users, AlertCircle, X,
-  RefreshCw, Phone, Copy, Eye, EyeOff, RotateCcw, Plus, Minus
+  RefreshCw, Phone, Copy, RotateCcw, Plus, Minus, Share2, Link2
 } from 'lucide-react';
 
 const ParentManagement = () => {
@@ -219,6 +219,45 @@ const ParentManagement = () => {
         </div>
       </div>
 
+      {/* Shareable welcome link info */}
+      {(() => {
+        const welcomeUrl = `${window.location.origin}/parent/welcome`;
+        return (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-start gap-3">
+            <div className="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center shrink-0">
+              <Share2 className="h-4 w-4 text-emerald-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-emerald-800 font-semibold text-sm">Share this link with parents</p>
+              <p className="text-emerald-700 text-xs mt-0.5 mb-2">
+                Post this in your school WhatsApp group. Parents enter their phone number to receive their temporary password — no staff involvement needed.
+              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <code className="bg-white border border-emerald-200 rounded-lg px-3 py-1.5 text-sm font-mono text-emerald-800 break-all">
+                  {welcomeUrl}
+                </code>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(welcomeUrl); toast.success('Link copied!'); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 transition-colors shrink-0"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy Link
+                </button>
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(`Welcome to Harmony Learning Institute's Parent Portal!\n\nUse this link to get your login password:\n${welcomeUrl}\n\nEnter your phone number and your temporary password will appear on screen.`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors shrink-0"
+                >
+                  <Share2 className="h-3.5 w-3.5" />
+                  Share on WhatsApp
+                </a>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Search */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -233,23 +272,11 @@ const ParentManagement = () => {
 
       {/* Temp password result panel */}
       {tempPassResult && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
-          <div className="flex items-start justify-between gap-3">
+        <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5">
+          <div className="flex items-start justify-between gap-3 mb-4">
             <div>
-              <p className="font-bold text-amber-800 mb-1">Share these details with the parent</p>
-              <p className="text-amber-700 text-sm mb-3">The parent must change their password on first login.</p>
-              <div className="space-y-2">
-                <div className="flex items-center gap-3">
-                  <span className="text-amber-600 text-sm w-24">Phone:</span>
-                  <code className="bg-white border border-amber-200 rounded-lg px-3 py-1.5 font-mono text-sm">{tempPassResult.phone}</code>
-                  <button onClick={() => copyToClipboard(tempPassResult.phone)} className="p-1.5 text-amber-600 hover:bg-amber-100 rounded-lg"><Copy className="h-4 w-4" /></button>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-amber-600 text-sm w-24">Temp Pass:</span>
-                  <code className="bg-white border border-amber-200 rounded-lg px-3 py-1.5 font-mono text-sm font-bold tracking-wide">{tempPassResult.password}</code>
-                  <button onClick={() => copyToClipboard(tempPassResult.password)} className="p-1.5 text-amber-600 hover:bg-amber-100 rounded-lg"><Copy className="h-4 w-4" /></button>
-                </div>
-              </div>
+              <p className="font-bold text-amber-800 text-base">Parent account created!</p>
+              <p className="text-amber-700 text-sm">The parent can get their password in two ways:</p>
             </div>
             <button
               onClick={() => { setTempPassResult(null); setShowForm(false); }}
@@ -257,6 +284,40 @@ const ParentManagement = () => {
             >
               <X className="h-5 w-5" />
             </button>
+          </div>
+
+          {/* Option 1: Welcome link */}
+          <div className="bg-white border border-amber-200 rounded-xl p-3 mb-3">
+            <p className="text-amber-800 text-xs font-semibold mb-1.5 uppercase tracking-wide">Option 1 – Share the welcome link (recommended)</p>
+            <p className="text-amber-700 text-xs mb-2">The parent visits this link, enters their phone number, and sees their password themselves:</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <code className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 text-xs font-mono text-amber-800 break-all flex-1">
+                {window.location.origin}/parent/welcome
+              </code>
+              <button
+                onClick={() => copyToClipboard(`${window.location.origin}/parent/welcome`)}
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700 shrink-0"
+              >
+                <Copy className="h-3 w-3" /> Copy
+              </button>
+            </div>
+          </div>
+
+          {/* Option 2: Manual */}
+          <div className="bg-white border border-amber-200 rounded-xl p-3">
+            <p className="text-amber-800 text-xs font-semibold mb-1.5 uppercase tracking-wide">Option 2 – Tell them directly</p>
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <span className="text-amber-600 text-xs w-20 shrink-0">Phone:</span>
+                <code className="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1 font-mono text-sm flex-1">{tempPassResult.phone}</code>
+                <button onClick={() => copyToClipboard(tempPassResult.phone)} className="p-1.5 text-amber-600 hover:bg-amber-100 rounded-lg shrink-0"><Copy className="h-3.5 w-3.5" /></button>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-amber-600 text-xs w-20 shrink-0">Password:</span>
+                <code className="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1 font-mono text-sm font-bold tracking-wide flex-1">{tempPassResult.password}</code>
+                <button onClick={() => copyToClipboard(tempPassResult.password)} className="p-1.5 text-amber-600 hover:bg-amber-100 rounded-lg shrink-0"><Copy className="h-3.5 w-3.5" /></button>
+              </div>
+            </div>
           </div>
         </div>
       )}

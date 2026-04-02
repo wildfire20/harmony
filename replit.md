@@ -145,7 +145,8 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - **Multiple Children** – one phone number can link to many students; portal shows a child-switcher dropdown/tabs in the header
 - **First-Time Login Flow** – admin creates parent → system auto-generates a temporary password → parent forced to set a new one on first login
 - **Forgot Password (OTP)** – 3-step flow: enter phone → receive 6-digit code (SMS via Twilio if configured, otherwise code shown to admin) → enter new password
-- **Admin Tools** – "Sync from Enrollments" button auto-creates parent accounts from approved enrollment records using the `parent_phone` field; admin can also reset passwords (shows new temp password in UI)
+- **Self-Service Welcome Page** – `/parent/welcome` — a public page that can be shared via WhatsApp group; parent enters their phone number and sees their temporary password on screen without needing to contact staff; password is wiped from the page once they set their own
+- **Admin Tools** – "Sync from Enrollments" button auto-creates parent accounts from approved enrollment records using the `parent_phone` field; admin can also reset passwords (shows new temp password in UI); admin panel shows shareable welcome link with one-click copy and WhatsApp share button
 - **Database** – added `phone_number`, `must_change_password` columns to `users`; `parent_students` now allows multiple rows per parent (`uq_parent_student` unique on pair); new `parent_otps` table for OTP/reset tokens
 - **SMS** – Twilio used if `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` env vars are set; falls back to console log + admin-visible OTP
 
