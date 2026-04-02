@@ -769,27 +769,52 @@ const startServer = async () => {
     // Parent portal schema
     try {
       // Update role constraint to include 'parent'
-      await db.query(`
-        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check
-      `);
+      await db.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
       await db.query(`
         ALTER TABLE users ADD CONSTRAINT users_role_check
         CHECK (role IN ('student','teacher','admin','super_admin','parent'))
       `);
-      // Parent-student link table
+
+      // Add phone_number and must_change_password columns to users
+      await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30)`);
+      await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false`);
+
+      // Parent-student link table (one parent → many students)
       await db.query(`
         CREATE TABLE IF NOT EXISTS parent_students (
           id SERIAL PRIMARY KEY,
           parent_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          CONSTRAINT uq_parent UNIQUE (parent_id)
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      // Drop old single-child unique constraint, add multi-child one
+      await db.query(`ALTER TABLE parent_students DROP CONSTRAINT IF EXISTS uq_parent`);
       await db.query(`
-        CREATE INDEX IF NOT EXISTS idx_parent_students_parent ON parent_students(parent_id);
+        DO $$ BEGIN
+          ALTER TABLE parent_students ADD CONSTRAINT uq_parent_student UNIQUE (parent_id, student_id);
+        EXCEPTION WHEN duplicate_table THEN NULL;
+        END $$;
+      `);
+      await db.query(`
+        CREATE INDEX IF NOT EXISTS idx_parent_students_parent  ON parent_students(parent_id);
         CREATE INDEX IF NOT EXISTS idx_parent_students_student ON parent_students(student_id);
       `);
+
+      // OTP / reset token table
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS parent_otps (
+          id SERIAL PRIMARY KEY,
+          phone_number VARCHAR(30) NOT NULL,
+          otp_code VARCHAR(200) NOT NULL,
+          expires_at TIMESTAMP NOT NULL,
+          used BOOLEAN DEFAULT false,
+          is_reset_token BOOLEAN DEFAULT false,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await db.query(`CREATE INDEX IF NOT EXISTS idx_parent_otps_phone ON parent_otps(phone_number)`);
+
       console.log('✅ Parent portal schema initialized');
     } catch (parentError) {
       console.warn('⚠️ Parent portal schema initialization failed:', parentError.message);

@@ -140,6 +140,15 @@ A school management system for Harmony Learning Institute. This is a full-stack 
 - **Custom Passwords** - Option to set custom passwords or auto-generate
 - **Copy to Clipboard** - Easy copy button for sharing passwords
 
+## Parent Portal Auth System (April 2026 – Redesign)
+- **Phone Number Login** – parents log in with their mobile number (no email required); normalizes SA numbers (0xx → 27xx)
+- **Multiple Children** – one phone number can link to many students; portal shows a child-switcher dropdown/tabs in the header
+- **First-Time Login Flow** – admin creates parent → system auto-generates a temporary password → parent forced to set a new one on first login
+- **Forgot Password (OTP)** – 3-step flow: enter phone → receive 6-digit code (SMS via Twilio if configured, otherwise code shown to admin) → enter new password
+- **Admin Tools** – "Sync from Enrollments" button auto-creates parent accounts from approved enrollment records using the `parent_phone` field; admin can also reset passwords (shows new temp password in UI)
+- **Database** – added `phone_number`, `must_change_password` columns to `users`; `parent_students` now allows multiple rows per parent (`uq_parent_student` unique on pair); new `parent_otps` table for OTP/reset tokens
+- **SMS** – Twilio used if `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` env vars are set; falls back to console log + admin-visible OTP
+
 ## Parent Portal (April 2026)
 - **Separate Parent Portal** at `/parent/login` — parents log in with email + password (completely separate from the main staff/student portal)
 - **Dashboard** — shows this week's attendance summary, recent grades, outstanding fee balance, and latest notices

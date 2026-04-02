@@ -36,6 +36,8 @@ import EnrollmentManagement from './components/admin/EnrollmentManagement';
 import AttendancePage from './components/attendance/AttendancePage';
 import ParentLogin from './components/parent/ParentLogin';
 import ParentPortal from './components/parent/ParentPortal';
+import ParentForgotPassword from './components/parent/ParentForgotPassword';
+import ParentForceChangePassword from './components/parent/ParentForceChangePassword';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -178,8 +180,10 @@ const AppContent = () => {
       </Route>
       
       {/* Parent Portal – standalone, own layout */}
-      <Route path="/parent/login" element={<ParentLogin />} />
-      <Route path="/parent/*" element={<ParentPortal />} />
+      <Route path="/parent/login"           element={<ParentLogin />} />
+      <Route path="/parent/forgot-password" element={<ParentForgotPassword />} />
+      <Route path="/parent/change-password" element={<ParentForceChangePassword />} />
+      <Route path="/parent/*"               element={<ParentPortal />} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
