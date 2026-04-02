@@ -326,11 +326,11 @@ router.post('/upload', [
         });
       }
       
-      const validAudiences = ['everyone', 'student', 'staff'];
+      const validAudiences = ['everyone', 'student', 'staff', 'parents'];
       if (!validAudiences.includes(target_audience)) {
         return res.status(400).json({ 
           success: false,
-          message: 'Invalid target audience. Must be: everyone, student, or staff' 
+          message: 'Invalid target audience. Must be: everyone, student, staff, or parents' 
         });
       }
     } else {
