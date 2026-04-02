@@ -183,6 +183,8 @@ router.get('/grade/:gradeId/class/:classId', [
           (d.target_audience = 'student' AND $3 = 'student')
           OR
           (d.target_audience = 'staff' AND $3 IN ('teacher', 'admin', 'super_admin'))
+          OR
+          (d.target_audience = 'parents' AND $3 IN ('admin', 'super_admin'))
         )
       ORDER BY d.document_type, d.uploaded_at DESC
     `;
@@ -217,6 +219,8 @@ router.get('/grade/:gradeId/class/:classId', [
             (d.target_audience = 'student' AND $3 = 'student')
             OR
             (d.target_audience = 'staff' AND $3 IN ('teacher', 'admin', 'super_admin'))
+            OR
+            (d.target_audience = 'parents' AND $3 IN ('admin', 'super_admin'))
           )
         ORDER BY d.document_type, d.created_at DESC
       `;
