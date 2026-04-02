@@ -779,6 +779,7 @@ const startServer = async () => {
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30)`);
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false`);
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS temp_password_plain VARCHAR(100)`);
+      await db.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS description TEXT`);
 
       // Parent-student link table (one parent → many students)
       await db.query(`

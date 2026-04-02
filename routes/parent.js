@@ -221,7 +221,8 @@ router.get('/invoices', requireParent, async (req, res) => {
     const child = await resolveChild(req.user.id, req.query.child_id);
     const children = await getChildren(req.user.id);
     const result = await db.query(`
-      SELECT id, amount_due, amount_paid, outstanding_balance, status, due_date, description, reference_number
+      SELECT id, amount_due, amount_paid, outstanding_balance, status, due_date,
+             COALESCE(description, '') AS description, reference_number
       FROM invoices WHERE student_id=$1 ORDER BY due_date DESC
     `, [child.id]);
     const totals = result.rows.reduce((acc, inv) => {
