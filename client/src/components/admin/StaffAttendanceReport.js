@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, MapPin, LogOut, Clock, RefreshCw, Loader, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Users, MapPin, LogOut, Clock, RefreshCw, Loader, AlertCircle, Download, Calendar } from 'lucide-react';
 import { useTheme } from '../common/ThemeProvider';
+
+// Return the Monday of the current week in YYYY-MM-DD
+const getWeekStart = () => {
+  const d = new Date();
+  const day = d.getDay(); // 0=Sun
+  const diff = day === 0 ? -6 : 1 - day; // adjust to Monday
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().split('T')[0];
+};
+
+// Return today in YYYY-MM-DD
+const getToday = () => new Date().toISOString().split('T')[0];
 
 const REFRESH_MS = 30000;
 
@@ -52,6 +64,12 @@ const StaffAttendanceReport = () => {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
 
+  // Export state
+  const [exportStart, setExportStart] = useState(getWeekStart);
+  const [exportEnd, setExportEnd] = useState(getToday);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
+
   const fetchReport = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     setError('');
@@ -78,6 +96,39 @@ const StaffAttendanceReport = () => {
     const interval = setInterval(() => fetchReport(true), REFRESH_MS);
     return () => clearInterval(interval);
   }, [fetchReport]);
+
+  const handleExport = async () => {
+    if (!exportStart || !exportEnd) {
+      setExportError('Please select a start and end date');
+      return;
+    }
+    if (exportStart > exportEnd) {
+      setExportError('Start date must be before end date');
+      return;
+    }
+    setExportError('');
+    setExporting(true);
+    try {
+      const url = `/api/staff-attendance/export?start_date=${exportStart}&end_date=${exportEnd}`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.message || 'Export failed');
+      }
+      const blob = await res.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `Staff_Attendance_${exportStart}_to_${exportEnd}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+    } catch (e) {
+      setExportError(e.message || 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const card = isDark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100';
   const textPrimary = isDark ? 'text-white' : 'text-gray-900';
@@ -163,6 +214,69 @@ const StaffAttendanceReport = () => {
           ))}
         </div>
       )}
+
+      {/* Export panel */}
+      <div className={`rounded-2xl border p-5 ${card}`}>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 bg-gradient-to-br from-green-500 to-green-600 rounded-xl">
+            <Download className="w-4 h-4 text-white" />
+          </div>
+          <h3 className={`font-semibold ${textPrimary}`}>Export to Excel</h3>
+        </div>
+
+        <div className="flex flex-wrap gap-3 items-end">
+          <div className="flex-1 min-w-36">
+            <label className={`block text-xs font-medium mb-1 ${textSecondary}`}>From</label>
+            <input
+              type="date"
+              value={exportStart}
+              onChange={e => setExportStart(e.target.value)}
+              className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-green-500 ${
+                isDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'
+              }`}
+            />
+          </div>
+          <div className="flex-1 min-w-36">
+            <label className={`block text-xs font-medium mb-1 ${textSecondary}`}>To</label>
+            <input
+              type="date"
+              value={exportEnd}
+              onChange={e => setExportEnd(e.target.value)}
+              className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-green-500 ${
+                isDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'
+              }`}
+            />
+          </div>
+
+          {/* Quick shortcuts */}
+          <div className="flex gap-2 flex-wrap">
+            {[
+              { label: 'This Week', fn: () => { setExportStart(getWeekStart()); setExportEnd(getToday()); } },
+              { label: 'Last 7 Days', fn: () => { const d = new Date(); d.setDate(d.getDate() - 6); setExportStart(d.toISOString().split('T')[0]); setExportEnd(getToday()); } },
+              { label: 'This Month', fn: () => { const d = new Date(); setExportStart(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`); setExportEnd(getToday()); } },
+            ].map(s => (
+              <button key={s.label} onClick={s.fn}
+                className={`px-3 py-2 rounded-xl border text-xs font-medium transition-colors ${
+                  isDark ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                }`}
+              >{s.label}</button>
+            ))}
+          </div>
+
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-60 shadow-lg shadow-green-600/25"
+          >
+            {exporting ? <Loader className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {exporting ? 'Generating…' : 'Download Excel'}
+          </button>
+        </div>
+
+        {exportError && (
+          <p className="mt-2 text-red-500 text-xs">{exportError}</p>
+        )}
+      </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 items-center">
