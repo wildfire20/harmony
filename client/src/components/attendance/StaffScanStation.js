@@ -111,7 +111,6 @@ const StaffScanStation = () => {
       <input
         ref={inputRef}
         className="absolute opacity-0 w-0 h-0 pointer-events-none"
-        onKeyDown={handleKeyDown}
         onChange={() => {}}
         value=""
         autoFocus
