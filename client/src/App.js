@@ -39,6 +39,7 @@ import ParentPortal from './components/parent/ParentPortal';
 import ParentForgotPassword from './components/parent/ParentForgotPassword';
 import ParentForceChangePassword from './components/parent/ParentForceChangePassword';
 import ParentWelcome from './components/parent/ParentWelcome';
+import StaffScanStation from './components/attendance/StaffScanStation';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -180,6 +181,9 @@ const AppContent = () => {
         } />
       </Route>
       
+      {/* Staff Scan Station — standalone full-screen kiosk, no layout wrapper */}
+      <Route path="/staff-scan" element={<StaffScanStation />} />
+
       {/* Parent Portal – standalone, own layout */}
       <Route path="/parent/welcome"         element={<ParentWelcome />} />
       <Route path="/parent/login"           element={<ParentLogin />} />

@@ -46,6 +46,7 @@ const enrollmentRoutes = require('./routes/enrollments');
 const attendanceRoutes = require('./routes/attendance');
 const passwordRoutes = require('./routes/passwords');
 const parentRoutes = require('./routes/parent');
+const staffAttendanceRoutes = require('./routes/staffAttendance');
 
 // Import database
 const db = require('./config/database');
@@ -459,6 +460,7 @@ app.use('/api/enrollments', enrollmentRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/passwords', passwordRoutes);
 app.use('/api/parent', parentRoutes);
+app.use('/api/staff-attendance', staffAttendanceRoutes);
 app.use('/api', s3HealthRoutes);
 
 // Add migration endpoint for database setup
@@ -712,6 +714,33 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
+// Initialize staff attendance tables
+const initializeStaffAttendanceTables = async () => {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS staff_cards (
+      id SERIAL PRIMARY KEY,
+      card_id VARCHAR(100) UNIQUE NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      assigned_by INTEGER REFERENCES users(id),
+      UNIQUE(user_id)
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS staff_attendance_logs (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      log_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      time_in TIMESTAMP,
+      time_out TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, log_date)
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_sal_user_date ON staff_attendance_logs(user_id, log_date)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_sal_date ON staff_attendance_logs(log_date)`);
+};
+
 // Initialize database and start server with resilient error handling
 const startServer = async () => {
   // Start the HTTP server first
@@ -831,6 +860,13 @@ const startServer = async () => {
       console.log('✅ Parent portal schema initialized');
     } catch (parentError) {
       console.warn('⚠️ Parent portal schema initialization failed:', parentError.message);
+    }
+
+    try {
+      await initializeStaffAttendanceTables();
+      console.log('✅ Staff attendance tables initialized');
+    } catch (staffAttendanceError) {
+      console.warn('⚠️ Staff attendance tables initialization failed:', staffAttendanceError.message);
     }
 
     // Note: quick-db-fix.js and fix-database-schema.js are legacy scripts
