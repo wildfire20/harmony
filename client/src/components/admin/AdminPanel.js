@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../common/ThemeProvider';
-import { Settings, Users, BarChart3, GraduationCap, ClipboardList, ArrowUpCircle, Key, DollarSign, UserCheck, ScanLine, Receipt, Tag } from 'lucide-react';
+import { Settings, Users, BarChart3, GraduationCap, ClipboardList, ArrowUpCircle, Key, DollarSign, UserCheck, ScanLine, Receipt, Tag, BadgeDollarSign } from 'lucide-react';
 import StudentManagement from './StudentManagement';
 import TeacherManagement from './TeacherManagement';
 import SystemSettings from './SystemSettings';
@@ -14,6 +14,7 @@ import ParentManagement from './ParentManagement';
 import StaffAttendance from './StaffAttendance';
 import PendingPayments from './PendingPayments';
 import StudentFeeAssignment from './StudentFeeAssignment';
+import ServicePricingAdmin from './ServicePricingAdmin';
 
 const AdminPanel = () => {
   const { user } = useAuth();
@@ -37,6 +38,7 @@ const AdminPanel = () => {
     { id: 'payments', name: 'Manual Payments', icon: DollarSign },
     { id: 'staff-attendance', name: 'Staff Attendance', icon: ScanLine },
     { id: 'pending-payments', name: 'Pending Payments', icon: Receipt },
+    { id: 'service-pricing', name: 'Service Pricing', icon: BadgeDollarSign },
     { id: 'one-off-fees', name: 'One-Off Fees', icon: Tag },
     { id: 'settings', name: 'System Settings', icon: Settings },
     { id: 'reports', name: 'Reports', icon: BarChart3 },
@@ -62,6 +64,8 @@ const AdminPanel = () => {
         return <StaffAttendance />;
       case 'pending-payments':
         return <PendingPayments />;
+      case 'service-pricing':
+        return <ServicePricingAdmin />;
       case 'one-off-fees':
         return <StudentFeeAssignment />;
       case 'settings':

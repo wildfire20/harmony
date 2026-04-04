@@ -49,6 +49,7 @@ const parentRoutes = require('./routes/parent');
 const staffAttendanceRoutes = require('./routes/staffAttendance');
 const paymentProofsRoutes = require('./routes/paymentProofs');
 const studentFeesRoutes = require('./routes/studentFees');
+const servicePricesRoutes = require('./routes/servicePrices');
 
 // Import database
 const db = require('./config/database');
@@ -465,6 +466,7 @@ app.use('/api/parent', parentRoutes);
 app.use('/api/staff-attendance', staffAttendanceRoutes);
 app.use('/api/payment-proofs', paymentProofsRoutes);
 app.use('/api/student-fees', studentFeesRoutes);
+app.use('/api/service-prices', servicePricesRoutes);
 app.use('/api', s3HealthRoutes);
 
 // Add migration endpoint for database setup
@@ -930,7 +932,36 @@ const startServer = async () => {
       await db.query(`CREATE INDEX IF NOT EXISTS idx_sfa_student ON student_fee_assignments(student_id)`);
       await db.query(`CREATE INDEX IF NOT EXISTS idx_sfa_fee ON student_fee_assignments(fee_id)`);
 
-      console.log('✅ Enrollment flags, pending payments, and one-off fees initialized');
+      // Service pricing table
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS service_prices (
+          id SERIAL PRIMARY KEY,
+          service_key VARCHAR(50) UNIQUE NOT NULL,
+          label VARCHAR(100) NOT NULL,
+          description TEXT,
+          amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+          display_order INTEGER DEFAULT 99,
+          updated_by INTEGER REFERENCES users(id),
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Seed default services if not already present
+      const defaultServices = [
+        { key: 'tuition',   label: 'Monthly Tuition',   desc: 'Base monthly school fee',        order: 1 },
+        { key: 'boarding',  label: 'Boarding Fee',       desc: 'Monthly boarding & accommodation',order: 2 },
+        { key: 'transport', label: 'Transport Fee',      desc: 'Monthly school transport',        order: 3 },
+        { key: 'aftercare', label: 'Aftercare Fee',      desc: 'Monthly aftercare programme',     order: 4 },
+      ];
+      for (const s of defaultServices) {
+        await db.query(`
+          INSERT INTO service_prices (service_key, label, description, amount, display_order)
+          VALUES ($1, $2, $3, 0, $4)
+          ON CONFLICT (service_key) DO NOTHING
+        `, [s.key, s.label, s.desc, s.order]);
+      }
+
+      console.log('✅ Enrollment flags, pending payments, one-off fees, and service prices initialized');
     } catch (billingError) {
       console.warn('⚠️ Billing extension initialization failed:', billingError.message);
     }

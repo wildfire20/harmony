@@ -36,8 +36,21 @@ export default function ParentPaymentProof({ child }) {
   const [file, setFile] = useState(null);
   const [oneOffFees, setOneOffFees] = useState([]);
   const [selectedFees, setSelectedFees] = useState([]);
+  const [servicePrices, setServicePrices] = useState([]);
+  const [selectedServices, setSelectedServices] = useState([]);
 
   const fileRef = useRef();
+
+  // Which service keys apply to this child
+  const applicableServiceKeys = ['tuition'].concat([
+    child?.is_boarder    ? 'boarding'  : null,
+    child?.uses_transport ? 'transport' : null,
+    child?.uses_aftercare ? 'aftercare' : null,
+  ].filter(Boolean));
+
+  const applicableServices = servicePrices.filter(
+    p => applicableServiceKeys.includes(p.service_key) && parseFloat(p.amount) > 0
+  );
 
   const loadSubmissions = () => {
     setLoading(true);
@@ -51,20 +64,42 @@ export default function ParentPaymentProof({ child }) {
 
   useEffect(() => {
     loadSubmissions();
-    // Load one-off fees for this child
     const suffix = child?.id ? `?child_id=${child.id}` : '';
     parentApi(`/student-fees/for-child${suffix}`)
       .then(d => setOneOffFees(d.fees || []))
       .catch(() => {});
+    // Load service prices
+    const token = localStorage.getItem('parentToken');
+    fetch('/api/service-prices', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setServicePrices(d.prices || []))
+      .catch(() => {});
   }, [child?.id]);
+
+  // Recalculate total from both selected services and one-off fees
+  const recalcTotal = (services, fees) => {
+    const serviceTotal = services.reduce((s, p) => s + parseFloat(p.amount), 0);
+    const feeTotal = fees.reduce((s, f) => s + parseFloat(f.amount), 0);
+    const total = serviceTotal + feeTotal;
+    if (total > 0) setAmount(total.toFixed(2));
+  };
+
+  const toggleService = (price) => {
+    setSelectedServices(prev => {
+      const exists = prev.find(p => p.service_key === price.service_key);
+      const updated = exists
+        ? prev.filter(p => p.service_key !== price.service_key)
+        : [...prev, price];
+      recalcTotal(updated, selectedFees);
+      return updated;
+    });
+  };
 
   const toggleFee = (fee) => {
     setSelectedFees(prev => {
       const exists = prev.find(f => f.id === fee.id);
       const updated = exists ? prev.filter(f => f.id !== fee.id) : [...prev, fee];
-      // Auto-update amount to sum of selected fees
-      const total = updated.reduce((s, f) => s + parseFloat(f.amount), 0);
-      if (total > 0) setAmount(total.toFixed(2));
+      recalcTotal(selectedServices, updated);
       return updated;
     });
   };
@@ -96,7 +131,8 @@ export default function ParentPaymentProof({ child }) {
       if (!res.ok) throw new Error(data.message || 'Submission failed');
 
       setSuccess('Your proof of payment has been submitted! The admin will review it shortly.');
-      setAmount(''); setReference(''); setNotes(''); setFile(null); setSelectedFees([]);
+      setAmount(''); setReference(''); setNotes(''); setFile(null);
+      setSelectedFees([]); setSelectedServices([]);
       setView('list');
       loadSubmissions();
     } catch (err) {
@@ -173,6 +209,41 @@ export default function ParentPaymentProof({ child }) {
               })}
             </div>
           </div>
+
+          {/* Monthly service rates */}
+          {applicableServices.length > 0 && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-700">Monthly Service Rates</p>
+                <p className="text-xs text-gray-400 mt-0.5">Tick the services you are paying for this month</p>
+              </div>
+              <div className="space-y-2">
+                {applicableServices.map(price => {
+                  const checked = selectedServices.some(s => s.service_key === price.service_key);
+                  return (
+                    <label key={price.service_key} className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleService(price)}
+                        className="w-4 h-4 accent-blue-600"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-700">{price.label}</p>
+                        {price.description && <p className="text-xs text-gray-400">{price.description}</p>}
+                      </div>
+                      <span className="text-sm font-bold text-blue-600 shrink-0">{R(price.amount)}<span className="text-gray-400 font-normal text-xs">/mo</span></span>
+                    </label>
+                  );
+                })}
+              </div>
+              {selectedServices.length > 0 && (
+                <div className="bg-blue-50 rounded-xl px-3 py-2 text-xs text-blue-700 font-medium">
+                  Services subtotal: {R(selectedServices.reduce((s, p) => s + parseFloat(p.amount), 0))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* One-off fees (optional) */}
           {oneOffFees.length > 0 && (
