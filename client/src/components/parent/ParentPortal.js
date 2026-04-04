@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
   Home, CalendarDays, GraduationCap, Bell, CreditCard, FolderOpen,
-  LogOut, Menu, X, BookOpen, ChevronDown, ChevronRight, Users, BellRing, Receipt
+  LogOut, Menu, X, BookOpen, ChevronDown, ChevronRight, Users, BellRing
 } from 'lucide-react';
 import ParentDashboard from './ParentDashboard';
 import ParentAttendance from './ParentAttendance';
@@ -10,7 +10,6 @@ import ParentGrades from './ParentGrades';
 import ParentAnnouncements from './ParentAnnouncements';
 import ParentInvoices from './ParentInvoices';
 import ParentDocuments from './ParentDocuments';
-import ParentPaymentProof from './ParentPaymentProof';
 
 const NAV = [
   { path: '/parent/dashboard',      label: 'Home',        icon: Home },
@@ -19,7 +18,6 @@ const NAV = [
   { path: '/parent/announcements',  label: 'Notices',     icon: Bell },
   { path: '/parent/documents',      label: 'Documents',   icon: FolderOpen },
   { path: '/parent/invoices',       label: 'Fees',        icon: CreditCard },
-  { path: '/parent/payment-proof',  label: 'Pay',         icon: Receipt },
 ];
 
 // ─── Auth helper ─────────────────────────────────────────────────────────────
@@ -376,7 +374,7 @@ const ParentPortal = () => {
               <Route path="announcements" element={<ParentAnnouncements child={selectedChild} />} />
               <Route path="documents"       element={<ParentDocuments     child={selectedChild} />} />
               <Route path="invoices"        element={<ParentInvoices      child={selectedChild} />} />
-              <Route path="payment-proof"   element={<ParentPaymentProof  child={selectedChild} />} />
+              <Route path="payment-proof"   element={<Navigate to="/parent/invoices" replace />} />
             </Routes>
           </main>
         </div>

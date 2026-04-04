@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { parentApi } from './ParentPortal';
 import {
   Upload, CheckCircle, Clock, XCircle, AlertCircle,
   ChevronLeft, Receipt, CreditCard, Banknote, Smartphone, Building2
@@ -21,7 +20,7 @@ const STATUS_STYLE = {
 const R = (n) => `R ${Number(n || 0).toFixed(2)}`;
 const fmt = (d) => d ? new Date(d).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
-export default function ParentPaymentProof({ child }) {
+export default function ParentPaymentProof({ child, embedded = false }) {
   const [view, setView] = useState('list'); // 'list' | 'form'
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -52,11 +51,16 @@ export default function ParentPaymentProof({ child }) {
     p => applicableServiceKeys.includes(p.service_key) && parseFloat(p.amount) > 0
   );
 
+  const authFetch = (url) => {
+    const token = localStorage.getItem('parentToken');
+    return fetch(url, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
+  };
+
   const loadSubmissions = () => {
     setLoading(true);
     setError(null);
     const suffix = child?.id ? `?child_id=${child.id}` : '';
-    parentApi(`/payment-proofs/my${suffix}`)
+    authFetch(`/api/payment-proofs/my${suffix}`)
       .then(d => setSubmissions(d.submissions || []))
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
@@ -65,13 +69,10 @@ export default function ParentPaymentProof({ child }) {
   useEffect(() => {
     loadSubmissions();
     const suffix = child?.id ? `?child_id=${child.id}` : '';
-    parentApi(`/student-fees/for-child${suffix}`)
+    authFetch(`/api/student-fees/for-child${suffix}`)
       .then(d => setOneOffFees(d.fees || []))
       .catch(() => {});
-    // Load service prices
-    const token = localStorage.getItem('parentToken');
-    fetch('/api/service-prices', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
+    authFetch('/api/service-prices')
       .then(d => setServicePrices(d.prices || []))
       .catch(() => {});
   }, [child?.id]);
@@ -144,29 +145,48 @@ export default function ParentPaymentProof({ child }) {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Proof of Payment</h1>
-          {child && (
-            <p className="text-gray-500 text-sm mt-1">{child.first_name} {child.last_name} &bull; {child.student_number}</p>
+      {!embedded && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Proof of Payment</h1>
+            {child && (
+              <p className="text-gray-500 text-sm mt-1">{child.first_name} {child.last_name} &bull; {child.student_number}</p>
+            )}
+          </div>
+          {view === 'list' ? (
+            <button
+              onClick={() => { setView('form'); setSuccess(null); setError(null); }}
+              className="flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-xl active:scale-95 transition-transform"
+            >
+              <Upload className="h-4 w-4" /> Submit Proof
+            </button>
+          ) : (
+            <button
+              onClick={() => setView('list')}
+              className="flex items-center gap-2 text-gray-500 text-sm font-medium"
+            >
+              <ChevronLeft className="h-4 w-4" /> Back
+            </button>
           )}
         </div>
-        {view === 'list' ? (
-          <button
-            onClick={() => { setView('form'); setSuccess(null); setError(null); }}
-            className="flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-xl active:scale-95 transition-transform"
-          >
-            <Upload className="h-4 w-4" /> Submit Proof
-          </button>
-        ) : (
-          <button
-            onClick={() => setView('list')}
-            className="flex items-center gap-2 text-gray-500 text-sm font-medium"
-          >
-            <ChevronLeft className="h-4 w-4" /> Back
-          </button>
-        )}
-      </div>
+      )}
+
+      {embedded && view === 'list' && (
+        <button
+          onClick={() => { setView('form'); setSuccess(null); setError(null); }}
+          className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white text-sm font-semibold px-4 py-3 rounded-2xl active:scale-95 transition-transform"
+        >
+          <Upload className="h-4 w-4" /> Submit New Proof of Payment
+        </button>
+      )}
+      {embedded && view === 'form' && (
+        <button
+          onClick={() => setView('list')}
+          className="flex items-center gap-2 text-gray-500 text-sm font-medium"
+        >
+          <ChevronLeft className="h-4 w-4" /> Back to submissions
+        </button>
+      )}
 
       {success && (
         <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-4 text-sm">

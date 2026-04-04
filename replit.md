@@ -24,6 +24,7 @@ The application is built with a Node.js/Express.js backend and a React 18 fronte
 - **Grade Promotion System**: Allows for single or bulk promotion of students between grades, resetting class assignments post-promotion, and excluding archived students.
 - **Student & Teacher Archive System**: Functionality to mark students and teachers as inactive, with bulk archiving, reason tracking, and restore options. Separate views for active and archived users.
 - **Password Management System**: Admin portal for viewing, generating (kid-friendly passwords like "HappyLion42"), resetting, and setting custom passwords for students and teachers.
+- **Parent Portal Navigation**: 6-item bottom nav (Home, Attendance, Grades, Notices, Documents, Fees). "Pay" is merged into the Fees screen as a second tab ("Invoices" | "Submit Proof"). Visiting `/parent/payment-proof` redirects to `/parent/invoices`.
 - **Parent Portal Authentication (April 2026 Redesign)**:
     - **Phone Number Login**: Parents log in using mobile numbers (SA numbers normalized to 27xx format).
     - **Multiple Children Support**: A single phone number can link to multiple students.
