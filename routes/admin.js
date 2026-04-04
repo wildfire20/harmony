@@ -511,6 +511,9 @@ router.get('/students', [
     const result = await db.query(`
       SELECT u.id, u.student_number, u.first_name, u.last_name, u.email, 
              u.grade_id, u.class_id, u.is_active, u.created_at,
+             COALESCE(u.is_boarder, false) AS is_boarder,
+             COALESCE(u.uses_transport, false) AS uses_transport,
+             COALESCE(u.uses_aftercare, false) AS uses_aftercare,
              g.name as grade_name, c.name as class_name
       FROM users u
       LEFT JOIN grades g ON u.grade_id = g.id
@@ -686,7 +689,8 @@ router.put('/students/:id', [
     }
 
     const { id } = req.params;
-    const { first_name, last_name, grade_id, class_id, is_active } = req.body;
+    const { first_name, last_name, grade_id, class_id, is_active,
+            is_boarder, uses_transport, uses_aftercare } = req.body;
 
     const updateFields = [];
     const params = [];
@@ -722,6 +726,24 @@ router.put('/students/:id', [
       params.push(is_active);
     }
 
+    if (is_boarder !== undefined) {
+      paramCount++;
+      updateFields.push(`is_boarder = $${paramCount}`);
+      params.push(Boolean(is_boarder));
+    }
+
+    if (uses_transport !== undefined) {
+      paramCount++;
+      updateFields.push(`uses_transport = $${paramCount}`);
+      params.push(Boolean(uses_transport));
+    }
+
+    if (uses_aftercare !== undefined) {
+      paramCount++;
+      updateFields.push(`uses_aftercare = $${paramCount}`);
+      params.push(Boolean(uses_aftercare));
+    }
+
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'No fields to update' });
     }
@@ -734,7 +756,8 @@ router.put('/students/:id', [
       UPDATE users 
       SET ${updateFields.join(', ')}
       WHERE id = $${paramCount} AND role = 'student'
-      RETURNING id, student_number, first_name, last_name, grade_id, class_id, is_active
+      RETURNING id, student_number, first_name, last_name, grade_id, class_id, is_active,
+                is_boarder, uses_transport, uses_aftercare
     `, params);
 
     if (result.rows.length === 0) {

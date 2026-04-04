@@ -41,6 +41,12 @@ The application is built with a Node.js/Express.js backend and a React 18 fronte
     - **Scanning Station**: A dedicated public-facing kiosk for staff to scan in/out, recording time stamps.
     - **In/Out Logic**: Tracks first scan as "Time In" and second as "Time Out" for the day.
     - **Daily Report**: Admin dashboard showing real-time staff status (On-Site, Signed-Out, Not Arrived) with auto-refresh and search/filter capabilities.
+- **Proof of Payment & Dynamic Billing (April 2026)**:
+    - **Proof of Payment (Parent Portal)**: `/parent/payment-proof` — parents select method (EFT/ATM/Cash/Online), enter amount, optionally check one-off fees, and upload receipt (image/PDF). Submissions tracked in `pending_payments` table; parents see status history.
+    - **Admin Pending Payments**: Admin Panel → "Pending Payments" tab — lists all submissions with filters, receipt viewer, and Approve/Reject with optional note. Approval auto-applies payment to oldest unpaid invoice(s) and creates payment_transactions record.
+    - **Student Enrollment Flags**: `users` table extended with `is_boarder`, `uses_transport`, `uses_aftercare` boolean columns. Admin can toggle these via checkboxes in the Student Management inline edit form.
+    - **Dynamic Parent Billing**: Parent Fees screen shows service badges (Boarding, Transport, Aftercare) only when the child's flags are enabled.
+    - **One-Off Fees**: Admin Panel → "One-Off Fees" tab — admins create fees (e.g., "Grade 4 Zoo Trip") with name/amount/description/grade/due date. System auto-assigns to all active students in that grade. Parents see their child's assigned fees as optional checkboxes in the Submit Proof form.
 
 ## External Dependencies
 - **Database**: PostgreSQL

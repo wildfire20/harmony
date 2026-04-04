@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { parentApi } from './ParentPortal';
-import { CreditCard, AlertCircle, CheckCircle, Clock, TrendingDown } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { CreditCard, AlertCircle, CheckCircle, Clock, TrendingDown, Upload, Bed, Bus, Sunset } from 'lucide-react';
 
 const STATUS_CONFIG = {
   Paid:      { label: 'Paid',     color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
@@ -12,6 +13,7 @@ const STATUS_CONFIG = {
 const R = (n) => `R ${Number(n || 0).toFixed(2)}`;
 
 const ParentInvoices = ({ child }) => {
+  const navigate = useNavigate();
   const [invoices, setInvoices] = useState([]);
   const [totals, setTotals] = useState({ totalDue: 0, totalPaid: 0, outstanding: 0 });
   const [loading, setLoading] = useState(true);
@@ -48,6 +50,39 @@ const ParentInvoices = ({ child }) => {
           <p className="text-lg font-bold mt-0.5">{R(totals.outstanding)}</p>
         </div>
       </div>
+
+      {/* Enrolled services */}
+      {child && (child.is_boarder || child.uses_transport || child.uses_aftercare) && (
+        <div className="bg-purple-50 border border-purple-100 rounded-2xl p-4">
+          <p className="text-purple-800 font-semibold text-sm mb-2">Enrolled Services</p>
+          <div className="flex flex-wrap gap-2">
+            {child.is_boarder && (
+              <span className="flex items-center gap-1.5 bg-purple-100 text-purple-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+                <Bed className="h-3.5 w-3.5" /> Boarding
+              </span>
+            )}
+            {child.uses_transport && (
+              <span className="flex items-center gap-1.5 bg-blue-100 text-blue-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+                <Bus className="h-3.5 w-3.5" /> Transport
+              </span>
+            )}
+            {child.uses_aftercare && (
+              <span className="flex items-center gap-1.5 bg-amber-100 text-amber-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+                <Sunset className="h-3.5 w-3.5" /> Aftercare
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Submit proof of payment */}
+      <button
+        onClick={() => navigate('/parent/payment-proof')}
+        className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white font-semibold py-3 rounded-2xl text-sm active:scale-95 transition-transform"
+      >
+        <Upload className="h-4 w-4" />
+        Submit Proof of Payment
+      </button>
 
       {/* Banking details */}
       <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">

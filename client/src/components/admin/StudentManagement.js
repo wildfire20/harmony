@@ -217,7 +217,10 @@ const StudentManagement = () => {
       last_name: student.last_name,
       student_number: student.student_number,
       grade_id: student.grade_id,
-      class_id: student.class_id
+      class_id: student.class_id,
+      is_boarder: student.is_boarder || false,
+      uses_transport: student.uses_transport || false,
+      uses_aftercare: student.uses_aftercare || false,
     });
   };
 
@@ -605,6 +608,26 @@ const StudentManagement = () => {
                                     <option key={cls.id} value={cls.id}>{cls.name}</option>
                                   ))}
                                 </select>
+                              </div>
+                            </div>
+                            {/* Enrollment Flags */}
+                            <div>
+                              <p className="text-sm font-semibold text-gray-700 mb-2">Services &amp; Enrollment Flags</p>
+                              <div className="flex flex-wrap gap-4">
+                                {[
+                                  { field: 'is_boarder', label: 'Boarding' },
+                                  { field: 'uses_transport', label: 'Transport' },
+                                  { field: 'uses_aftercare', label: 'Aftercare' },
+                                ].map(({ field, label }) => (
+                                  <label key={field} className="flex items-center gap-2 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      {...register(field)}
+                                      className="w-4 h-4 accent-blue-600"
+                                    />
+                                    <span className="text-sm text-gray-700">{label}</span>
+                                  </label>
+                                ))}
                               </div>
                             </div>
                             <div className="flex space-x-3">

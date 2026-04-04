@@ -30,7 +30,10 @@ async function getChildren(parentId) {
   const result = await db.query(`
     SELECT u.id, u.first_name, u.last_name, u.student_number,
            g.name AS grade_name, c.name AS class_name,
-           u.grade_id, u.class_id
+           u.grade_id, u.class_id,
+           COALESCE(u.is_boarder, false) AS is_boarder,
+           COALESCE(u.uses_transport, false) AS uses_transport,
+           COALESCE(u.uses_aftercare, false) AS uses_aftercare
     FROM parent_students ps
     JOIN users u  ON u.id  = ps.student_id
     LEFT JOIN grades g  ON g.id = u.grade_id
