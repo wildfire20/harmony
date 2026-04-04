@@ -199,6 +199,27 @@ const ParentPortal = () => {
     if (!isAuthenticated) navigate('/parent/login');
   }, [isAuthenticated, navigate]);
 
+  // Refresh children data from the server so enrollment flag changes are reflected immediately
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const token = localStorage.getItem('parentToken');
+    fetch('/api/parent/me', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const freshChildren = data.children || [];
+        localStorage.setItem('parentChildren', JSON.stringify(freshChildren));
+        // Update selectedChild with fresh data that includes up-to-date enrollment flags
+        setSelectedChild(prev => {
+          const refreshed = freshChildren.find(c => c.id === (prev?.id || freshChildren[0]?.id));
+          const updated = refreshed || prev;
+          localStorage.setItem('parentChild', JSON.stringify(updated));
+          return updated;
+        });
+      })
+      .catch(() => {});
+  }, [isAuthenticated]);
+
   if (!isAuthenticated) return null;
 
   const handleSelectChild = (child) => {

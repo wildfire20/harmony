@@ -65,6 +65,40 @@ router.post('/', requireAdmin, async (req, res) => {
       }
     }
 
+    // Get grade name for announcement
+    let gradeName = null;
+    let studentIds = [];
+    if (grade_id) {
+      const gradeRes = await db.query('SELECT name FROM grades WHERE id=$1', [grade_id]);
+      gradeName = gradeRes.rows[0]?.name || null;
+      const studentRes = await db.query(
+        `SELECT id FROM users WHERE role='student' AND grade_id=$1 AND is_active=true`, [grade_id]
+      );
+      studentIds = studentRes.rows.map(r => r.id);
+    }
+
+    // Auto-create announcement for this fee
+    try {
+      const annTitle = `New Fee: ${name}${gradeName ? ` (${gradeName})` : ''}`;
+      const annBody = [
+        description || '',
+        `Amount: R ${parseFloat(amount).toFixed(2)}`,
+        due_date ? `Due: ${new Date(due_date).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })}` : '',
+        'Please submit proof of payment via the Fees screen.'
+      ].filter(Boolean).join('\n');
+
+      await db.query(`
+        INSERT INTO announcements (title, content, priority, grade_id, class_id, target_audience, created_by)
+        VALUES ($1, $2, 'high', $3, NULL, 'students', $4)
+      `, [annTitle, annBody, grade_id || null, req.user.id]);
+
+      // Fire push notification to affected parents
+      const { notifyNewFee } = require('../services/pushNotification');
+      notifyNewFee(name, amount, gradeName, studentIds).catch(() => {});
+    } catch (notifyErr) {
+      console.warn('Fee notification/announcement error:', notifyErr.message);
+    }
+
     res.status(201).json({ message: `Fee created and assigned to ${assignedCount} student(s)`, fee });
   } catch (err) {
     console.error('Create fee error:', err);
