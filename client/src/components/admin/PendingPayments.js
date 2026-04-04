@@ -34,6 +34,27 @@ export default function PendingPayments() {
   const [actionLoading, setActionLoading] = useState(false);
   const [adminNote, setAdminNote] = useState('');
   const [feedback, setFeedback] = useState(null);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+
+  const viewReceipt = async (id, fileName) => {
+    setReceiptLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE}/payment-proofs/${id}/receipt`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Could not load receipt');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, '_blank');
+      // Revoke the blob URL after the new tab has had time to load it
+      if (win) setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err) {
+      setFeedback({ type: 'error', message: `Could not open receipt: ${err.message}` });
+    } finally {
+      setReceiptLoading(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -209,15 +230,14 @@ export default function PendingPayments() {
 
               {/* Receipt */}
               {selected.receipt_file_name && (
-                <a
-                  href={`/api/payment-proofs/${selected.id}/receipt`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-2 text-sm text-blue-600 font-medium bg-blue-50 border border-blue-100 rounded-xl p-3 hover:bg-blue-100 transition-colors"
+                <button
+                  onClick={() => viewReceipt(selected.id, selected.receipt_file_name)}
+                  disabled={receiptLoading}
+                  className="w-full flex items-center gap-2 text-sm text-blue-600 font-medium bg-blue-50 border border-blue-100 rounded-xl p-3 hover:bg-blue-100 transition-colors disabled:opacity-60"
                 >
-                  <Eye className="h-4 w-4" />
-                  View Receipt: {selected.receipt_file_name}
-                </a>
+                  <Eye className="h-4 w-4 shrink-0" />
+                  {receiptLoading ? 'Opening…' : `View Receipt: ${selected.receipt_file_name}`}
+                </button>
               )}
 
               {/* If already reviewed */}
