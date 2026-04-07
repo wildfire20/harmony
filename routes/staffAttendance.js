@@ -215,6 +215,23 @@ router.delete('/cards/:userId', [authenticate, authorize('admin', 'super_admin')
   }
 });
 
+// GET /api/staff-attendance/all-staff — every active staff member (any card status)
+router.get('/all-staff', [authenticate, authorize('admin', 'super_admin')], async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT u.id, u.first_name, u.last_name, u.role, u.job_title, u.email, sc.card_id
+       FROM users u
+       LEFT JOIN staff_cards sc ON sc.user_id = u.id
+       WHERE u.role IN ('teacher', 'admin', 'super_admin', 'non_teaching_staff') AND u.is_active = true
+       ORDER BY u.role, u.last_name, u.first_name`
+    );
+    return res.json({ success: true, staff: result.rows });
+  } catch (err) {
+    console.error('All-staff error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/staff-attendance/unassigned — staff without a card
 router.get('/unassigned', [authenticate, authorize('admin', 'super_admin')], async (req, res) => {
   try {

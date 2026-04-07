@@ -36,15 +36,13 @@ const StaffCardAssignment = () => {
       setLoading(true);
       const [cardsRes, staffRes] = await Promise.all([
         fetch('/api/staff-attendance/cards', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/admin/teachers', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/staff-attendance/all-staff', { headers: { Authorization: `Bearer ${token}` } }),
       ]);
       const cardsData = await cardsRes.json();
       const staffData = await staffRes.json();
 
       if (cardsData.success) setAssignments(cardsData.cards);
-
-      const users = staffData.teachers || staffData.users || staffData || [];
-      setAllStaff(Array.isArray(users) ? users : []);
+      if (staffData.success) setAllStaff(staffData.staff);
     } catch {
       showToast('Failed to load data', 'error');
     } finally {
@@ -193,7 +191,7 @@ const StaffCardAssignment = () => {
               <option value="">Select staff member…</option>
               {allStaff.map(s => (
                 <option key={s.id} value={s.id}>
-                  {s.first_name} {s.last_name} ({roleLabel(s.role)})
+                  {s.first_name} {s.last_name} ({s.role === 'non_teaching_staff' ? s.job_title || 'Support Staff' : roleLabel(s.role)})
                 </option>
               ))}
             </select>
