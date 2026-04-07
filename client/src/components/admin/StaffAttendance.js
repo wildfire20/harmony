@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { CreditCard, BarChart2 } from 'lucide-react';
+import { CreditCard, BarChart2, Users } from 'lucide-react';
 import { useTheme } from '../common/ThemeProvider';
 import StaffCardAssignment from './StaffCardAssignment';
 import StaffAttendanceReport from './StaffAttendanceReport';
+import NonTeachingStaffManager from './NonTeachingStaffManager';
 
 const VIEWS = [
   { id: 'report', label: "Today's Report", icon: BarChart2 },
   { id: 'cards', label: 'Card Management', icon: CreditCard },
+  { id: 'support', label: 'Support Staff', icon: Users },
 ];
 
 const StaffAttendance = () => {
@@ -16,7 +18,6 @@ const StaffAttendance = () => {
 
   return (
     <div>
-      {/* Sub-navigation */}
       <div className={`flex gap-1 p-1 rounded-2xl mb-6 w-fit ${isDark ? 'bg-gray-800' : 'bg-gray-100'}`}>
         {VIEWS.map(v => {
           const Icon = v.icon;
@@ -42,6 +43,7 @@ const StaffAttendance = () => {
 
       {view === 'report' && <StaffAttendanceReport />}
       {view === 'cards' && <StaffCardAssignment />}
+      {view === 'support' && <NonTeachingStaffManager />}
     </div>
   );
 };

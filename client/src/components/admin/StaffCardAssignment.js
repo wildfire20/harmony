@@ -2,6 +2,12 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { CreditCard, UserCheck, Trash2, Search, CheckCircle, AlertCircle, Loader, ScanLine, ExternalLink } from 'lucide-react';
 import { useTheme } from '../common/ThemeProvider';
 
+const roleLabel = (role) => {
+  if (role === 'non_teaching_staff') return 'Support Staff';
+  if (role === 'super_admin') return 'Super Admin';
+  return role ? role.charAt(0).toUpperCase() + role.slice(1) : '';
+};
+
 const StaffCardAssignment = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
@@ -187,7 +193,7 @@ const StaffCardAssignment = () => {
               <option value="">Select staff member…</option>
               {allStaff.map(s => (
                 <option key={s.id} value={s.id}>
-                  {s.first_name} {s.last_name} ({s.role})
+                  {s.first_name} {s.last_name} ({roleLabel(s.role)})
                 </option>
               ))}
             </select>
@@ -278,7 +284,7 @@ const StaffCardAssignment = () => {
                     {a.first_name} {a.last_name}
                   </p>
                   <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} truncate`}>
-                    {a.role} · {a.email}
+                    {roleLabel(a.role)} · {a.email}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

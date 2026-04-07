@@ -745,6 +745,15 @@ const initializeStaffAttendanceTables = async () => {
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_sal_user_date ON staff_attendance_logs(user_id, log_date)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_sal_date ON staff_attendance_logs(log_date)`);
+
+  // Extend role constraint to include non_teaching_staff
+  await db.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+  await db.query(`
+    ALTER TABLE users ADD CONSTRAINT users_role_check
+      CHECK (role = ANY (ARRAY['student','teacher','admin','super_admin','parent','non_teaching_staff']))
+  `);
+  // Add job_title column for non-teaching staff position labels
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title VARCHAR(100)`);
 };
 
 // Initialize database and start server with resilient error handling

@@ -1,7 +1,23 @@
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+
+const STAFF_ROLES = `'teacher','admin','super_admin','non_teaching_staff'`;
+
+const roleLabel = (role) => {
+  if (role === 'non_teaching_staff') return 'Support Staff';
+  if (role === 'super_admin') return 'Super Admin';
+  return role.charAt(0).toUpperCase() + role.slice(1);
+};
+
+const generatePassword = () => {
+  const adj = ['Happy','Brave','Swift','Bright','Calm','Kind','Bold','Wise'];
+  const nouns = ['Lion','Eagle','River','Stone','Tree','Star','Moon','Wind'];
+  const num = Math.floor(10 + Math.random() * 90);
+  return adj[Math.floor(Math.random() * adj.length)] + nouns[Math.floor(Math.random() * nouns.length)] + num;
+};
 
 // POST /api/staff-attendance/scan — PUBLIC (kiosk use)
 router.post('/scan', async (req, res) => {
@@ -104,7 +120,7 @@ router.get('/today', [authenticate, authorize('admin', 'super_admin')], async (r
        FROM users u
        LEFT JOIN staff_cards sc ON sc.user_id = u.id
        LEFT JOIN staff_attendance_logs sal ON sal.user_id = u.id AND sal.log_date = $1
-       WHERE u.role IN ('teacher', 'admin', 'super_admin') AND u.is_active = true
+       WHERE u.role IN ('teacher', 'admin', 'super_admin', 'non_teaching_staff') AND u.is_active = true
        ORDER BY
          CASE
            WHEN sal.time_in IS NOT NULL AND sal.time_out IS NULL THEN 1
@@ -206,7 +222,7 @@ router.get('/unassigned', [authenticate, authorize('admin', 'super_admin')], asy
       `SELECT u.id, u.first_name, u.last_name, u.role, u.email
        FROM users u
        LEFT JOIN staff_cards sc ON sc.user_id = u.id
-       WHERE u.role IN ('teacher', 'admin', 'super_admin') AND u.is_active = true AND sc.user_id IS NULL
+       WHERE u.role IN ('teacher', 'admin', 'super_admin', 'non_teaching_staff') AND u.is_active = true AND sc.user_id IS NULL
        ORDER BY u.last_name, u.first_name`
     );
     return res.json({ success: true, staff: result.rows });
@@ -230,7 +246,7 @@ router.get('/export', [authenticate, authorize('admin', 'super_admin')], async (
       `SELECT u.id, u.first_name, u.last_name, u.role, u.email, sc.card_id
        FROM users u
        LEFT JOIN staff_cards sc ON sc.user_id = u.id
-       WHERE u.role IN ('teacher', 'admin', 'super_admin') AND u.is_active = true
+       WHERE u.role IN ('teacher', 'admin', 'super_admin', 'non_teaching_staff') AND u.is_active = true
        ORDER BY u.last_name, u.first_name`
     );
 
@@ -399,7 +415,7 @@ router.get('/export', [authenticate, authorize('admin', 'super_admin')], async (
 
       // Role
       const roleCell = ws.getCell(dataRow, 2);
-      roleCell.value = staff.role.charAt(0).toUpperCase() + staff.role.slice(1);
+      roleCell.value = roleLabel(staff.role);
       roleCell.font = { size: 10 };
       roleCell.fill = rowBg;
       roleCell.alignment = { horizontal: 'center' };
@@ -502,6 +518,111 @@ router.get('/export', [authenticate, authorize('admin', 'super_admin')], async (
     if (!res.headersSent) {
       res.status(500).json({ success: false, message: 'Server error generating export' });
     }
+  }
+});
+
+// ─── Non-Teaching Staff Management ───────────────────────────────────────────
+
+// GET /api/staff-attendance/non-teaching — list all non-teaching staff
+router.get('/non-teaching', [authenticate, authorize('admin', 'super_admin')], async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT u.id, u.first_name, u.last_name, u.job_title, u.phone_number, u.email, u.is_active,
+              sc.card_id, u.created_at
+       FROM users u
+       LEFT JOIN staff_cards sc ON sc.user_id = u.id
+       WHERE u.role = 'non_teaching_staff'
+       ORDER BY u.is_active DESC, u.last_name, u.first_name`
+    );
+    return res.json({ success: true, staff: result.rows });
+  } catch (err) {
+    console.error('Non-teaching list error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/staff-attendance/non-teaching — create a non-teaching staff member
+router.post('/non-teaching', [authenticate, authorize('admin', 'super_admin')], async (req, res) => {
+  try {
+    const { first_name, last_name, job_title, phone_number, email } = req.body;
+    if (!first_name || !last_name || !job_title) {
+      return res.status(400).json({ success: false, message: 'First name, last name, and job title are required' });
+    }
+
+    // Check email uniqueness if provided
+    if (email) {
+      const emailCheck = await db.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+      if (emailCheck.rows.length > 0) {
+        return res.status(409).json({ success: false, message: 'A user with this email already exists' });
+      }
+    }
+
+    const plainPassword = generatePassword();
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+    // Build a unique username-style email if none provided
+    const resolvedEmail = email
+      ? email.toLowerCase().trim()
+      : `${first_name.toLowerCase()}.${last_name.toLowerCase()}.${Date.now()}@staff.harmonylearning.internal`;
+
+    const result = await db.query(
+      `INSERT INTO users (first_name, last_name, email, password, role, job_title, phone_number, is_active)
+       VALUES ($1, $2, $3, $4, 'non_teaching_staff', $5, $6, true)
+       RETURNING id, first_name, last_name, job_title, phone_number, email, is_active, created_at`,
+      [first_name.trim(), last_name.trim(), resolvedEmail, hashedPassword, job_title.trim(), phone_number || null]
+    );
+
+    return res.json({
+      success: true,
+      message: `${first_name} ${last_name} created successfully`,
+      staff: result.rows[0],
+      temp_password: plainPassword,
+    });
+  } catch (err) {
+    console.error('Create non-teaching staff error:', err);
+    return res.status(500).json({ success: false, message: 'Server error creating staff member' });
+  }
+});
+
+// PUT /api/staff-attendance/non-teaching/:id — update a non-teaching staff member
+router.put('/non-teaching/:id', [authenticate, authorize('admin', 'super_admin')], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { first_name, last_name, job_title, phone_number, email } = req.body;
+    if (!first_name || !last_name || !job_title) {
+      return res.status(400).json({ success: false, message: 'First name, last name, and job title are required' });
+    }
+
+    // Verify target is non_teaching_staff
+    const check = await db.query(`SELECT id FROM users WHERE id=$1 AND role='non_teaching_staff'`, [id]);
+    if (!check.rows.length) return res.status(404).json({ success: false, message: 'Staff member not found' });
+
+    const result = await db.query(
+      `UPDATE users SET first_name=$1, last_name=$2, job_title=$3, phone_number=$4, updated_at=CURRENT_TIMESTAMP
+       WHERE id=$5
+       RETURNING id, first_name, last_name, job_title, phone_number, email, is_active`,
+      [first_name.trim(), last_name.trim(), job_title.trim(), phone_number || null, id]
+    );
+    return res.json({ success: true, message: 'Staff member updated', staff: result.rows[0] });
+  } catch (err) {
+    console.error('Update non-teaching staff error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// PATCH /api/staff-attendance/non-teaching/:id/toggle — activate/deactivate
+router.patch('/non-teaching/:id/toggle', [authenticate, authorize('admin', 'super_admin')], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const check = await db.query(`SELECT id, is_active FROM users WHERE id=$1 AND role='non_teaching_staff'`, [id]);
+    if (!check.rows.length) return res.status(404).json({ success: false, message: 'Staff member not found' });
+
+    const newActive = !check.rows[0].is_active;
+    await db.query(`UPDATE users SET is_active=$1 WHERE id=$2`, [newActive, id]);
+    return res.json({ success: true, is_active: newActive, message: newActive ? 'Staff member activated' : 'Staff member deactivated' });
+  } catch (err) {
+    console.error('Toggle non-teaching staff error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 

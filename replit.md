@@ -38,10 +38,11 @@ The application is built with a Node.js/Express.js backend and a React 18 fronte
     - A Service Worker (`/sw.js`) handles push events and notification clicks.
     - Opt-in banner for parents, auto-subscription detection, and cleanup of dead subscriptions.
 - **Staff Attendance Module (April 2026)**:
-    - **Card Assignment**: Admin panel allows assigning RFID/barcode card IDs to staff members.
+    - **Card Assignment**: Admin panel allows assigning RFID/barcode card IDs to staff members (teachers, admins, support staff).
     - **Scanning Station**: A dedicated public-facing kiosk for staff to scan in/out, recording time stamps.
     - **In/Out Logic**: Tracks first scan as "Time In" and second as "Time Out" for the day.
     - **Daily Report**: Admin dashboard showing real-time staff status (On-Site, Signed-Out, Not Arrived) with auto-refresh and search/filter capabilities.
+    - **Support Staff (Non-Teaching)**: A dedicated "Support Staff" tab in Staff Attendance allows admins to create and manage non-teaching staff (e.g., security guards, janitors, cooks). Role stored as `non_teaching_staff`; `job_title` column on `users` table holds their position. These staff appear on the daily report and can be assigned cards for kiosk sign-in/out. A temporary password is auto-generated on creation.
 - **Proof of Payment & Dynamic Billing (April 2026)**:
     - **Proof of Payment (Parent Portal)**: `/parent/payment-proof` — parents select method (EFT/ATM/Cash/Online), enter amount, optionally check one-off fees, and upload receipt (image/PDF). Submissions tracked in `pending_payments` table; parents see status history.
     - **Admin Pending Payments**: Admin Panel → "Pending Payments" tab — lists all submissions with filters, receipt viewer, and Approve/Reject with optional note. Approval auto-applies payment to oldest unpaid invoice(s) and creates payment_transactions record.
