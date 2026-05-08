@@ -30,7 +30,7 @@ import Quizzes from './components/quizzes/Quizzes';
 import UserManagement from './components/users/UserManagement';
 import Analytics from './components/analytics/Analytics';
 import DebugPage from './components/debug/DebugPage';
-import PaymentDashboard from './components/payments/PaymentDashboard';
+import PaymentsHub from './components/payments/PaymentsHub';
 import LandingPage from './components/public/LandingPage';
 import EnrollmentManagement from './components/admin/EnrollmentManagement';
 import AttendancePage from './components/attendance/AttendancePage';
@@ -164,7 +164,7 @@ const AppContent = () => {
         
         <Route path="payments" element={
           <ProtectedRoute roles={['admin', 'super_admin']}>
-            <PaymentDashboard />
+            <PaymentsHub />
           </ProtectedRoute>
         } />
         

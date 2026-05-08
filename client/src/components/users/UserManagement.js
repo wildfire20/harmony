@@ -1,9 +1,17 @@
-import React from 'react';
-import { Users, Plus, Filter, UserPlus } from 'lucide-react';
+import React, { useState } from 'react';
+import { GraduationCap, Users, UserCheck, Key, ArrowUpCircle } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../common/ThemeProvider';
+import StudentManagement from '../admin/StudentManagement';
+import TeacherManagement from '../admin/TeacherManagement';
+import ParentManagement from '../admin/ParentManagement';
+import GradePromotion from '../admin/GradePromotion';
+import PasswordManagement from '../admin/PasswordManagement';
 
 const UserManagement = () => {
+  const { user } = useAuth();
   const { theme } = useTheme();
+  const [activeTab, setActiveTab] = useState('students');
 
   const isDark = theme === 'dark';
   const cardBg = isDark ? 'bg-gray-900' : 'bg-white';
@@ -11,46 +19,51 @@ const UserManagement = () => {
   const textPrimary = isDark ? 'text-white' : 'text-gray-900';
   const textSecondary = isDark ? 'text-gray-400' : 'text-gray-600';
 
+  const tabs = [
+    { id: 'students',   label: 'Students',        icon: GraduationCap },
+    { id: 'teachers',   label: 'Teachers',         icon: Users },
+    { id: 'parents',    label: 'Parent Accounts',  icon: UserCheck },
+    { id: 'promotion',  label: 'Grade Promotion',  icon: ArrowUpCircle },
+    { id: 'passwords',  label: 'Passwords',        icon: Key },
+  ];
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-xl shadow-lg shadow-indigo-500/25">
-            <Users className="h-6 w-6 text-white" />
-          </div>
-          <h1 className={`text-2xl font-bold ${textPrimary}`}>User Management</h1>
+      <div className="flex items-center gap-3">
+        <div className="p-2.5 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-xl shadow-lg shadow-indigo-500/25">
+          <Users className="h-6 w-6 text-white" />
         </div>
-        <div className="flex gap-3">
-          <button className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border ${cardBorder} ${textPrimary} font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors`}>
-            <Filter className="h-4 w-4" />
-            <span>Filter</span>
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-medium shadow-lg shadow-emerald-500/25 hover:shadow-xl transition-all">
-            <UserPlus className="h-4 w-4" />
-            <span>Add User</span>
-          </button>
+        <div>
+          <h1 className={`text-2xl font-bold ${textPrimary}`}>Users</h1>
+          <p className={`text-sm ${textSecondary}`}>Manage students, teachers, parents and access</p>
         </div>
       </div>
 
-      <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} overflow-hidden`}>
-        <div className="text-center py-16 px-6">
-          <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-full w-fit mx-auto mb-4">
-            <Users className="h-12 w-12 text-gray-400" />
-          </div>
-          <h3 className={`text-lg font-semibold ${textPrimary} mb-2`}>User Management Available in Admin Panel</h3>
-          <p className={`${textSecondary} mb-6 max-w-md mx-auto`}>
-            For now, user management features are available in the Admin Panel. 
-            A dedicated user management page is coming soon.
-          </p>
-          <button 
-            onClick={() => window.location.href = '/admin'}
-            className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-medium shadow-lg shadow-emerald-500/25 hover:shadow-xl transition-all"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Go to Admin Panel</span>
-          </button>
-        </div>
+      <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-1.5`}>
+        <nav className="flex flex-wrap gap-1">
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                activeTab === id
+                  ? 'bg-gradient-to-r from-indigo-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/25'
+                  : `${textSecondary} hover:bg-gray-100 dark:hover:bg-gray-800`
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              <span className="hidden sm:inline">{label}</span>
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      <div>
+        {activeTab === 'students'  && <StudentManagement />}
+        {activeTab === 'teachers'  && <TeacherManagement />}
+        {activeTab === 'parents'   && <ParentManagement />}
+        {activeTab === 'promotion' && <GradePromotion />}
+        {activeTab === 'passwords' && <PasswordManagement />}
       </div>
     </div>
   );

@@ -1,20 +1,9 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../common/ThemeProvider';
-import { Settings, Users, BarChart3, GraduationCap, ClipboardList, ArrowUpCircle, Key, DollarSign, UserCheck, ScanLine, Receipt, Tag, BadgeDollarSign } from 'lucide-react';
-import StudentManagement from './StudentManagement';
-import TeacherManagement from './TeacherManagement';
+import { Settings, BarChart3, ClipboardList, GraduationCap, Users, DollarSign, ScanLine, UserCheck, Key, ArrowUpCircle } from 'lucide-react';
 import SystemSettings from './SystemSettings';
-import AdminReports from './AdminReports';
 import EnrollmentManagement from './EnrollmentManagement';
-import GradePromotion from './GradePromotion';
-import PasswordManagement from './PasswordManagement';
-import ManualPayments from './ManualPayments';
-import ParentManagement from './ParentManagement';
-import StaffAttendance from './StaffAttendance';
-import PendingPayments from './PendingPayments';
-import StudentFeeAssignment from './StudentFeeAssignment';
-import ServicePricingAdmin from './ServicePricingAdmin';
 
 const AdminPanel = () => {
   const { user } = useAuth();
@@ -28,106 +17,91 @@ const AdminPanel = () => {
   const textSecondary = isDark ? 'text-gray-400' : 'text-gray-600';
 
   const tabs = [
-    { id: 'overview', name: 'Overview', icon: BarChart3 },
-    { id: 'enrollments', name: 'Enrollments', icon: ClipboardList },
-    { id: 'students', name: 'Student Management', icon: GraduationCap },
-    { id: 'promotion', name: 'Grade Promotion', icon: ArrowUpCircle },
-    { id: 'teachers', name: 'Teacher Management', icon: Users },
-    { id: 'parents', name: 'Parent Accounts', icon: UserCheck },
-    { id: 'passwords', name: 'Passwords', icon: Key },
-    { id: 'payments', name: 'Manual Payments', icon: DollarSign },
-    { id: 'staff-attendance', name: 'Staff Attendance', icon: ScanLine },
-    { id: 'pending-payments', name: 'Pending Payments', icon: Receipt },
-    { id: 'service-pricing', name: 'Service Pricing', icon: BadgeDollarSign },
-    { id: 'one-off-fees', name: 'One-Off Fees', icon: Tag },
-    { id: 'settings', name: 'System Settings', icon: Settings },
-    { id: 'reports', name: 'Reports', icon: BarChart3 },
+    { id: 'overview',     name: 'Overview',        icon: BarChart3 },
+    { id: 'enrollments',  name: 'Enrollments',     icon: ClipboardList },
+    { id: 'settings',     name: 'System Settings', icon: Settings },
+  ];
+
+  const overviewCards = [
+    {
+      title: 'Users',
+      description: 'Manage students, teachers, parents, passwords and grade promotions.',
+      gradient: 'from-indigo-500 to-indigo-600',
+      shadow: 'shadow-indigo-500/25',
+      icon: Users,
+      href: '/users',
+    },
+    {
+      title: 'Payments',
+      description: 'Invoices, manual payments, pending approvals, service pricing and one-off fees.',
+      gradient: 'from-emerald-500 to-emerald-600',
+      shadow: 'shadow-emerald-500/25',
+      icon: DollarSign,
+      href: '/payments',
+    },
+    {
+      title: 'Attendance',
+      description: 'Student attendance registers, reports and staff attendance tracking.',
+      gradient: 'from-green-500 to-green-600',
+      shadow: 'shadow-green-500/25',
+      icon: ScanLine,
+      href: '/attendance',
+    },
+    {
+      title: 'Analytics & Reports',
+      description: 'View system statistics, generate school reports and export data.',
+      gradient: 'from-purple-500 to-purple-600',
+      shadow: 'shadow-purple-500/25',
+      icon: BarChart3,
+      href: '/analytics',
+    },
+    {
+      title: 'Enrollments',
+      description: 'Review and manage new enrollment applications from the public form.',
+      gradient: 'from-orange-500 to-orange-600',
+      shadow: 'shadow-orange-500/25',
+      icon: ClipboardList,
+      action: () => setActiveTab('enrollments'),
+    },
+    {
+      title: 'System Settings',
+      description: 'Configure grades, classes and other system-wide settings.',
+      gradient: 'from-gray-500 to-gray-600',
+      shadow: 'shadow-gray-500/25',
+      icon: Settings,
+      action: () => setActiveTab('settings'),
+    },
   ];
 
   const renderTabContent = () => {
     switch (activeTab) {
       case 'enrollments':
         return <EnrollmentManagement />;
-      case 'students':
-        return <StudentManagement />;
-      case 'promotion':
-        return <GradePromotion />;
-      case 'teachers':
-        return <TeacherManagement />;
-      case 'parents':
-        return <ParentManagement />;
-      case 'passwords':
-        return <PasswordManagement />;
-      case 'payments':
-        return <ManualPayments />;
-      case 'staff-attendance':
-        return <StaffAttendance />;
-      case 'pending-payments':
-        return <PendingPayments />;
-      case 'service-pricing':
-        return <ServicePricingAdmin />;
-      case 'one-off-fees':
-        return <StudentFeeAssignment />;
       case 'settings':
         return <SystemSettings />;
-      case 'reports':
-        return <AdminReports />;
       default:
         return (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-6 hover:shadow-lg transition-all duration-200`}>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2.5 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl">
-                  <GraduationCap className="h-6 w-6 text-white" />
-                </div>
-                <h2 className={`text-lg font-semibold ${textPrimary}`}>Student Management</h2>
-              </div>
-              <p className={`${textSecondary} text-sm mb-5`}>
-                Add, edit, and manage student accounts and class assignments.
-              </p>
-              <button 
-                onClick={() => setActiveTab('students')}
-                className="w-full py-2.5 px-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium shadow-lg shadow-blue-500/25 hover:shadow-xl transition-all"
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {overviewCards.map(({ title, description, gradient, shadow, icon: Icon, href, action }) => (
+              <div
+                key={title}
+                className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-6 hover:shadow-lg transition-all duration-200`}
               >
-                Manage Students
-              </button>
-            </div>
-
-            <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-6 hover:shadow-lg transition-all duration-200`}>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2.5 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl">
-                  <Settings className="h-6 w-6 text-white" />
+                <div className="flex items-center gap-3 mb-4">
+                  <div className={`p-2.5 bg-gradient-to-br ${gradient} rounded-xl`}>
+                    <Icon className="h-6 w-6 text-white" />
+                  </div>
+                  <h2 className={`text-lg font-semibold ${textPrimary}`}>{title}</h2>
                 </div>
-                <h2 className={`text-lg font-semibold ${textPrimary}`}>System Settings</h2>
+                <p className={`${textSecondary} text-sm mb-5`}>{description}</p>
+                <button
+                  onClick={action ?? (() => (window.location.href = href))}
+                  className={`w-full py-2.5 px-4 bg-gradient-to-r ${gradient} text-white rounded-xl font-medium shadow-lg ${shadow} hover:shadow-xl transition-all`}
+                >
+                  Go to {title}
+                </button>
               </div>
-              <p className={`${textSecondary} text-sm mb-5`}>
-                Configure system settings, grades, and class structures.
-              </p>
-              <button 
-                onClick={() => setActiveTab('settings')}
-                className="w-full py-2.5 px-4 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-medium shadow-lg shadow-emerald-500/25 hover:shadow-xl transition-all"
-              >
-                System Settings
-              </button>
-            </div>
-
-            <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-6 hover:shadow-lg transition-all duration-200`}>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2.5 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl">
-                  <BarChart3 className="h-6 w-6 text-white" />
-                </div>
-                <h2 className={`text-lg font-semibold ${textPrimary}`}>Reports</h2>
-              </div>
-              <p className={`${textSecondary} text-sm mb-5`}>
-                View system statistics and generate reports.
-              </p>
-              <button 
-                onClick={() => setActiveTab('reports')}
-                className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl font-medium shadow-lg shadow-purple-500/25 hover:shadow-xl transition-all"
-              >
-                View Reports
-              </button>
-            </div>
+            ))}
           </div>
         );
     }
@@ -135,18 +109,18 @@ const AdminPanel = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-gradient-to-br from-red-500 to-red-600 rounded-xl shadow-lg shadow-red-500/25">
             <Settings className="h-6 w-6 text-white" />
           </div>
-          <h1 className={`text-2xl font-bold ${textPrimary}`}>Admin Panel</h1>
+          <div>
+            <h1 className={`text-2xl font-bold ${textPrimary}`}>Admin Panel</h1>
+            <p className={`text-sm ${textSecondary}`}>Welcome, {user?.first_name}</p>
+          </div>
         </div>
-        <p className={textSecondary}>Welcome, {user?.first_name}</p>
       </div>
 
-      {/* Tab Navigation */}
       <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-1.5`}>
         <nav className="flex flex-wrap gap-1">
           {tabs.map((tab) => {
@@ -157,7 +131,7 @@ const AdminPanel = () => {
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
                   activeTab === tab.id
-                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/25'
+                    ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg shadow-red-500/25'
                     : `${textSecondary} hover:bg-gray-100 dark:hover:bg-gray-800`
                 }`}
               >
@@ -169,10 +143,7 @@ const AdminPanel = () => {
         </nav>
       </div>
 
-      {/* Tab Content */}
-      <div>
-        {renderTabContent()}
-      </div>
+      <div>{renderTabContent()}</div>
     </div>
   );
 };

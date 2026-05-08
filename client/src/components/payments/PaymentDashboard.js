@@ -336,58 +336,48 @@ const PaymentDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Payment Dashboard</h1>
-              <p className="text-gray-600">Manage student invoices and payment processing</p>
-            </div>
-            <div className="flex space-x-3">
-              <button
-                onClick={() => setShowGenerateModal(true)}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Generate Invoices
-              </button>
-              <button
-                onClick={() => setShowUploadModal(true)}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
-              >
-                <Upload className="h-4 w-4 mr-2" />
-                Upload Bank Statement
-              </button>
-              <button
-                onClick={handleExportCSV}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export CSV
-              </button>
-              <button
-                onClick={handleCleanupPreEnrollment}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-orange-500 hover:bg-orange-600"
-                title="Remove invoices generated before a student's enrollment month"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Remove Ghost Invoices
-              </button>
-              <button
-                onClick={handleClearAllInvoices}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Clear All Invoices
-              </button>
-            </div>
-          </div>
-        </div>
+    <div className="space-y-6">
+      {/* Action toolbar */}
+      <div className="flex flex-wrap gap-3">
+        <button
+          onClick={() => setShowGenerateModal(true)}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Generate Invoices
+        </button>
+        <button
+          onClick={() => setShowUploadModal(true)}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+        >
+          <Upload className="h-4 w-4 mr-2" />
+          Upload Bank Statement
+        </button>
+        <button
+          onClick={handleExportCSV}
+          className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+        >
+          <Download className="h-4 w-4 mr-2" />
+          Export CSV
+        </button>
+        <button
+          onClick={handleCleanupPreEnrollment}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-orange-500 hover:bg-orange-600"
+          title="Remove invoices generated before a student's enrollment month"
+        >
+          <Trash2 className="h-4 w-4 mr-2" />
+          Remove Ghost Invoices
+        </button>
+        <button
+          onClick={handleClearAllInvoices}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
+        >
+          <Trash2 className="h-4 w-4 mr-2" />
+          Clear All Invoices
+        </button>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div>
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow p-6">

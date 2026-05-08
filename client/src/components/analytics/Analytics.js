@@ -14,11 +14,12 @@ import {
   LineChart,
   Line
 } from 'recharts';
-import { BarChart3, RefreshCw } from 'lucide-react';
+import { BarChart3, RefreshCw, FileBarChart2 } from 'lucide-react';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../common/ThemeProvider';
 import LoadingSpinner from '../common/LoadingSpinner';
+import AdminReports from '../admin/AdminReports';
 
 const Analytics = () => {
   const { user } = useAuth();
@@ -27,6 +28,7 @@ const Analytics = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [period, setPeriod] = useState(30);
+  const [activeView, setActiveView] = useState('dashboard');
 
   const isDark = theme === 'dark';
   const cardBg = isDark ? 'bg-gray-900' : 'bg-white';
@@ -373,6 +375,8 @@ const Analytics = () => {
     );
   }
 
+  const isAdminUser = user.role === 'admin' || user.role === 'super_admin';
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -381,32 +385,68 @@ const Analytics = () => {
           <div className="p-2.5 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg shadow-purple-500/25">
             <BarChart3 className="h-6 w-6 text-white" />
           </div>
-          <h1 className={`text-2xl font-bold ${textPrimary}`}>Analytics Dashboard</h1>
+          <div>
+            <h1 className={`text-2xl font-bold ${textPrimary}`}>Analytics</h1>
+            <p className={`text-sm ${textSecondary}`}>Data insights and school reports</p>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <select 
-            value={period} 
-            onChange={(e) => setPeriod(parseInt(e.target.value))}
-            className={`px-4 py-2.5 rounded-xl border ${cardBorder} ${cardBg} ${textPrimary} text-sm font-medium focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all`}
-          >
-            <option value={7}>Last 7 days</option>
-            <option value={30}>Last 30 days</option>
-            <option value={90}>Last 90 days</option>
-            <option value={365}>Last year</option>
-          </select>
-          <button
-            onClick={fetchAnalytics}
-            className={`p-2.5 rounded-xl border ${cardBorder} ${textSecondary} hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors`}
-          >
-            <RefreshCw className="h-5 w-5" />
-          </button>
-        </div>
+        {activeView === 'dashboard' && (
+          <div className="flex items-center gap-3">
+            <select
+              value={period}
+              onChange={(e) => setPeriod(parseInt(e.target.value))}
+              className={`px-4 py-2.5 rounded-xl border ${cardBorder} ${cardBg} ${textPrimary} text-sm font-medium focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all`}
+            >
+              <option value={7}>Last 7 days</option>
+              <option value={30}>Last 30 days</option>
+              <option value={90}>Last 90 days</option>
+              <option value={365}>Last year</option>
+            </select>
+            <button
+              onClick={fetchAnalytics}
+              className={`p-2.5 rounded-xl border ${cardBorder} ${textSecondary} hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors`}
+            >
+              <RefreshCw className="h-5 w-5" />
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Analytics Content */}
-      {user.role === 'student' && renderStudentAnalytics()}
-      {user.role === 'teacher' && renderTeacherAnalytics()}
-      {(user.role === 'admin' || user.role === 'super_admin') && renderAdminAnalytics()}
+      {/* Tab switcher — admin only */}
+      {isAdminUser && (
+        <div className={`${cardBg} rounded-2xl shadow-sm border ${cardBorder} p-1.5`}>
+          <nav className="flex flex-wrap gap-1">
+            {[
+              { id: 'dashboard', label: 'Analytics Dashboard', icon: BarChart3 },
+              { id: 'reports',   label: 'School Reports',      icon: FileBarChart2 },
+            ].map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setActiveView(id)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                  activeView === id
+                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-lg shadow-purple-500/25'
+                    : `${textSecondary} hover:bg-gray-100 dark:hover:bg-gray-800`
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                <span className="hidden sm:inline">{label}</span>
+              </button>
+            ))}
+          </nav>
+        </div>
+      )}
+
+      {/* Content */}
+      {activeView === 'reports' && isAdminUser ? (
+        <AdminReports />
+      ) : (
+        <>
+          {user.role === 'student' && renderStudentAnalytics()}
+          {user.role === 'teacher' && renderTeacherAnalytics()}
+          {isAdminUser && renderAdminAnalytics()}
+        </>
+      )}
     </div>
   );
 };
