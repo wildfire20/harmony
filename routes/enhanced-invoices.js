@@ -838,9 +838,9 @@ router.get('/student-payment-history/:studentNumber', [
     const { studentNumber } = req.params;
     const { format } = req.query; // 'json' or 'excel'
     
-    // Find the student
+    // Find the student (include created_at as enrollment date)
     const studentResult = await db.query(`
-      SELECT u.id, u.first_name, u.last_name, u.student_number
+      SELECT u.id, u.first_name, u.last_name, u.student_number, u.created_at
       FROM users u
       WHERE u.student_number ILIKE $1 OR u.student_number ILIKE $2
       LIMIT 1
@@ -961,6 +961,19 @@ router.get('/student-payment-history/:studentNumber', [
       }
     });
     
+    // Filter out months before the student's enrollment date
+    // A student enrolled in April should not show Jan/Feb/Mar as "Unpaid"
+    if (student.created_at) {
+      const enrollDate = new Date(student.created_at);
+      const enrollYear = enrollDate.getFullYear();
+      const enrollMonth = enrollDate.getMonth() + 1; // 1-based
+      monthlyHistory.splice(0, monthlyHistory.length,
+        ...monthlyHistory.filter(m =>
+          m.year > enrollYear || (m.year === enrollYear && m.monthNumber >= enrollMonth)
+        )
+      );
+    }
+
     // Sort by year and month
     monthlyHistory.sort((a, b) => {
       if (a.year !== b.year) return a.year - b.year;

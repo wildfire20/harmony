@@ -220,6 +220,49 @@ const PaymentDashboard = () => {
     }
   };
 
+  const handleCleanupPreEnrollment = async () => {
+    try {
+      // Dry run first — show the admin what will be deleted
+      const preview = await fetch('/api/invoices/cleanup-pre-enrollment', {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const previewData = await preview.json();
+
+      if (!previewData.success) throw new Error(previewData.message);
+
+      if (previewData.invoices.length === 0) {
+        toast.success('No pre-enrollment invoices found — everything is clean!');
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `Found ${previewData.invoices.length} unpaid invoice(s) created before each student's enrollment month.\n\n` +
+        `These are ghost invoices for students who enrolled mid-year.\n\nClick OK to permanently delete them.`
+      );
+      if (!confirmed) return;
+
+      setLoading(true);
+      const del = await fetch('/api/invoices/cleanup-pre-enrollment?confirm=true', {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const delData = await del.json();
+
+      if (delData.success) {
+        toast.success(`Removed ${delData.deleted} pre-enrollment invoice(s).`);
+        fetchInvoices();
+      } else {
+        throw new Error(delData.message || 'Cleanup failed');
+      }
+    } catch (error) {
+      console.error('Cleanup error:', error);
+      toast.error(error.message || 'Cleanup failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleClearAllInvoices = async () => {
     if (!window.confirm('Are you sure you want to clear ALL invoices and payment data? This action cannot be undone.')) {
       return;
@@ -323,6 +366,14 @@ const PaymentDashboard = () => {
               >
                 <Download className="h-4 w-4 mr-2" />
                 Export CSV
+              </button>
+              <button
+                onClick={handleCleanupPreEnrollment}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-orange-500 hover:bg-orange-600"
+                title="Remove invoices generated before a student's enrollment month"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Remove Ghost Invoices
               </button>
               <button
                 onClick={handleClearAllInvoices}

@@ -54,15 +54,17 @@ router.post('/generate-monthly', [
 
     console.log('Generating monthly invoices:', { month, year, amountDue });
 
-    // Get all active students from users table
+    // Get active students enrolled ON OR BEFORE this invoice month
+    // Students who enrolled after this month should not receive an invoice for it
     const studentsResult = await db.query(`
       SELECT u.id, u.student_number, u.first_name, u.last_name, u.grade_id, u.class_id
       FROM users u
       WHERE u.role = 'student' AND u.is_active = true
-    `);
+        AND (EXTRACT(YEAR FROM u.created_at) * 12 + EXTRACT(MONTH FROM u.created_at)) <= ($2 * 12 + $1)
+    `, [month, year]);
 
     const students = studentsResult.rows;
-    console.log(`Found ${students.length} active students`);
+    console.log(`Found ${students.length} active students enrolled by ${month}/${year}`);
 
     if (students.length === 0) {
       return res.status(400).json({ message: 'No active students found' });
@@ -1238,6 +1240,76 @@ router.post('/migrate-database', [
       message: 'Database migration failed',
       error: error.message
     });
+  }
+});
+
+// ─── DELETE pre-enrollment invoices ──────────────────────────────────────────
+// Removes invoices that were created for months BEFORE a student's enrollment
+// date (their created_at month). These are "ghost" invoices that should never
+// have existed for mid-year enrollees.
+router.delete('/cleanup-pre-enrollment', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    // Dry run by default; pass ?confirm=true to actually delete
+    const dryRun = req.query.confirm !== 'true';
+
+    const previewResult = await db.query(`
+      SELECT
+        i.id,
+        i.student_number,
+        u.first_name,
+        u.last_name,
+        i.due_date,
+        i.status,
+        i.amount_due,
+        i.amount_paid,
+        DATE_TRUNC('month', u.created_at) AS enrollment_month
+      FROM invoices i
+      JOIN users u ON i.student_id = u.id
+      WHERE u.role = 'student'
+        AND i.due_date < DATE_TRUNC('month', u.created_at)
+        AND i.amount_paid = 0
+      ORDER BY u.last_name, u.first_name, i.due_date
+    `);
+
+    if (dryRun) {
+      return res.json({
+        success: true,
+        dryRun: true,
+        message: `Found ${previewResult.rows.length} pre-enrollment invoices that can be deleted. Add ?confirm=true to proceed.`,
+        invoices: previewResult.rows
+      });
+    }
+
+    // Only delete invoices with zero payment (never touched)
+    const deleteResult = await db.query(`
+      DELETE FROM invoices
+      WHERE id IN (
+        SELECT i.id
+        FROM invoices i
+        JOIN users u ON i.student_id = u.id
+        WHERE u.role = 'student'
+          AND i.due_date < DATE_TRUNC('month', u.created_at)
+          AND i.amount_paid = 0
+      )
+      RETURNING id, student_number, due_date
+    `);
+
+    console.log(`Admin ${req.user.email} deleted ${deleteResult.rows.length} pre-enrollment invoices`);
+
+    res.json({
+      success: true,
+      dryRun: false,
+      deleted: deleteResult.rows.length,
+      message: `Successfully deleted ${deleteResult.rows.length} pre-enrollment invoices (unpaid only).`,
+      deletedInvoices: deleteResult.rows
+    });
+
+  } catch (error) {
+    console.error('Cleanup pre-enrollment invoices error:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 

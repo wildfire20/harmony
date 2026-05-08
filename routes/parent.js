@@ -230,7 +230,10 @@ router.get('/invoices', requireParent, async (req, res) => {
     const result = await db.query(`
       SELECT id, amount_due, amount_paid, outstanding_balance, status, due_date,
              COALESCE(description, '') AS description, reference_number
-      FROM invoices WHERE student_id=$1 ORDER BY due_date DESC
+      FROM invoices
+      WHERE student_id=$1
+        AND due_date >= DATE_TRUNC('month', (SELECT created_at FROM users WHERE id=$1))
+      ORDER BY due_date DESC
     `, [child.id]);
     const totals = result.rows.reduce((acc, inv) => {
       acc.totalDue    += parseFloat(inv.amount_due)           || 0;
