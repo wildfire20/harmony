@@ -1584,4 +1584,92 @@ async function logUploadActivity(filename, userId, parseResult, results) {
   }
 }
 
+/**
+ * Allocate an unmatched payment directly to a student from the results screen
+ */
+router.post('/allocate-unmatched', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { student_id, amount, date, description } = req.body;
+    if (!student_id || !amount || parseFloat(amount) <= 0) {
+      return res.status(400).json({ success: false, message: 'student_id and amount are required' });
+    }
+
+    const studentResult = await db.query(
+      'SELECT id, first_name, last_name, student_number FROM users WHERE id = $1 AND role = $2 AND is_active = true',
+      [student_id, 'student']
+    );
+    if (studentResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+    const student = studentResult.rows[0];
+    const adminId = req.user.id;
+    let remaining = parseFloat(amount);
+
+    // Apply to oldest unpaid/partial invoices first
+    const invoices = await db.query(`
+      SELECT id, amount_due, amount_paid, outstanding_balance
+      FROM invoices
+      WHERE student_id = $1 AND status IN ('Unpaid', 'Partial')
+      ORDER BY due_date ASC
+    `, [student_id]);
+
+    const txIds = [];
+    for (const inv of invoices.rows) {
+      if (remaining <= 0) break;
+      const outstanding = parseFloat(inv.outstanding_balance);
+      const toApply = Math.min(remaining, outstanding);
+      const newPaid = parseFloat(inv.amount_paid) + toApply;
+      const newStatus = newPaid >= parseFloat(inv.amount_due)
+        ? (newPaid > parseFloat(inv.amount_due) ? 'Overpaid' : 'Paid')
+        : 'Partial';
+
+      await db.query(
+        'UPDATE invoices SET amount_paid=$1, status=$2, updated_at=CURRENT_TIMESTAMP WHERE id=$3',
+        [newPaid.toFixed(2), newStatus, inv.id]
+      );
+
+      const tx = await db.query(`
+        INSERT INTO payment_transactions
+          (invoice_id, student_id, amount, payment_date, transaction_date, payment_method, description, status, recorded_by, student_number)
+        VALUES ($1, $2, $3, $4, $4, 'bank_statement', $5, 'Matched', $6, $7)
+        RETURNING id
+      `, [
+        inv.id, student_id, toApply.toFixed(2),
+        date || new Date().toISOString().split('T')[0],
+        description || 'Allocated from unmatched bank statement payment',
+        adminId, student.student_number || ''
+      ]);
+      txIds.push(tx.rows[0].id);
+      remaining -= toApply;
+    }
+
+    // Any remaining amount — unmatched overpayment
+    if (remaining > 0.009) {
+      await db.query(`
+        INSERT INTO payment_transactions
+          (student_id, amount, payment_date, transaction_date, payment_method, description, status, recorded_by, student_number)
+        VALUES ($1, $2, $3, $3, 'bank_statement', $4, 'Unmatched', $5, $6)
+      `, [
+        student_id, remaining.toFixed(2),
+        date || new Date().toISOString().split('T')[0],
+        description || 'Overpayment from unmatched bank statement payment',
+        adminId, student.student_number || ''
+      ]);
+    }
+
+    console.log(`✅ Unmatched payment allocated: R${amount} → ${student.first_name} ${student.last_name}`);
+    return res.json({
+      success: true,
+      message: `R${parseFloat(amount).toFixed(2)} allocated to ${student.first_name} ${student.last_name}`,
+      student: { id: student.id, name: `${student.first_name} ${student.last_name}`, studentNumber: student.student_number }
+    });
+  } catch (error) {
+    console.error('Allocate unmatched error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to allocate payment', error: error.message });
+  }
+});
+
 module.exports = router;

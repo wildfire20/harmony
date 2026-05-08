@@ -632,8 +632,8 @@ router.get('/statistics', [
 ], async (req, res) => {
   try {
     const stats = await Promise.all([
-      db.query("SELECT COUNT(*) as total_students FROM users WHERE role = 'student'"),
-      db.query("SELECT COUNT(*) as total_teachers FROM users WHERE role = 'teacher'"),
+      db.query("SELECT COUNT(*) as total_students FROM users WHERE role = 'student' AND is_active = true"),
+      db.query("SELECT COUNT(*) as total_teachers FROM users WHERE role = 'teacher' AND is_active = true"),
       db.query("SELECT COUNT(*) as total_classes FROM classes WHERE is_active = true"),
       db.query("SELECT COUNT(*) as total_tasks FROM tasks WHERE is_active = true"),
       db.query("SELECT COUNT(*) as total_announcements FROM announcements WHERE is_active = true"),
@@ -641,7 +641,7 @@ router.get('/statistics', [
       db.query(`
         SELECT g.name as grade_name, COUNT(u.id) as student_count
         FROM grades g
-        LEFT JOIN users u ON g.id = u.grade_id AND u.role = 'student'
+        LEFT JOIN users u ON g.id = u.grade_id AND u.role = 'student' AND u.is_active = true
         GROUP BY g.id, g.name
         ORDER BY g.name
       `),

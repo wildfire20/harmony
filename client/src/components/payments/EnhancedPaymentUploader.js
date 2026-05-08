@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 
 const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
@@ -11,6 +11,91 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
   const [savedMappings, setSavedMappings] = useState([]);
   const [processing, setProcessing] = useState(false);
   const [uploadResults, setUploadResults] = useState(null);
+
+  // Inline allocation state
+  const [unmatchedList, setUnmatchedList] = useState([]); // local copy we can mutate
+  const [allocatingIdx, setAllocatingIdx] = useState(null);
+  const [studentQuery, setStudentQuery] = useState('');
+  const [studentResults, setStudentResults] = useState([]);
+  const [studentSearching, setStudentSearching] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [allocating, setAllocating] = useState(false);
+  const searchTimeout = useRef(null);
+
+  // When results arrive, seed unmatchedList
+  useEffect(() => {
+    if (uploadResults?.results?.unmatched) {
+      setUnmatchedList(
+        uploadResults.results.unmatched.map(tx => ({ ...tx, _allocated: false, _allocatedTo: null }))
+      );
+    }
+  }, [uploadResults]);
+
+  const searchStudents = useCallback(async (q) => {
+    if (!q || q.length < 2) { setStudentResults([]); return; }
+    setStudentSearching(true);
+    try {
+      const r = await fetch(`/api/enhanced-invoices/search-students?q=${encodeURIComponent(q)}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const d = await r.json();
+      if (d.success) setStudentResults(d.students);
+    } finally {
+      setStudentSearching(false);
+    }
+  }, [token]);
+
+  const handleStudentQueryChange = (val) => {
+    setStudentQuery(val);
+    setSelectedStudent(null);
+    clearTimeout(searchTimeout.current);
+    searchTimeout.current = setTimeout(() => searchStudents(val), 300);
+  };
+
+  const openAllocate = (idx) => {
+    setAllocatingIdx(idx);
+    setStudentQuery('');
+    setStudentResults([]);
+    setSelectedStudent(null);
+  };
+
+  const cancelAllocate = () => {
+    setAllocatingIdx(null);
+    setStudentQuery('');
+    setStudentResults([]);
+    setSelectedStudent(null);
+  };
+
+  const handleAllocate = async (tx, idx) => {
+    if (!selectedStudent) { toast.error('Please select a student first'); return; }
+    setAllocating(true);
+    try {
+      const r = await fetch('/api/enhanced-invoices/allocate-unmatched', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          student_id: selectedStudent.id,
+          amount: tx.amount,
+          date: tx.date,
+          description: tx.description || tx.reference
+        })
+      });
+      const d = await r.json();
+      if (d.success) {
+        toast.success(d.message);
+        setUnmatchedList(prev => prev.map((item, i) =>
+          i === idx ? { ...item, _allocated: true, _allocatedTo: d.student.name } : item
+        ));
+        cancelAllocate();
+      } else {
+        toast.error(d.message || 'Allocation failed');
+      }
+    } catch {
+      toast.error('Network error during allocation');
+    } finally {
+      setAllocating(false);
+    }
+  };
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
@@ -591,34 +676,106 @@ const EnhancedPaymentUploader = ({ token, onUploadComplete }) => {
         </div>
       </div>
 
-      {/* Unmatched Transactions — show full list so admin can act */}
-      {uploadResults?.results?.unmatched?.length > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <h4 className="text-sm font-semibold text-red-800 mb-1">
-            ⚠️ {uploadResults.results.unmatched.length} Unmatched Payment{uploadResults.results.unmatched.length > 1 ? 's' : ''} — Action Required
-          </h4>
-          <p className="text-xs text-red-700 mb-3">
-            These payments could not be linked to any student. Parents likely used an incorrect reference (their name, child's name, or grade instead of the HAR number). Use <strong>Manual Payment Entry</strong> to allocate them individually.
-          </p>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-xs">
-              <thead>
-                <tr className="border-b border-red-200">
-                  <th className="text-left py-1 pr-3 text-red-700 font-medium">Date</th>
-                  <th className="text-left py-1 pr-3 text-red-700 font-medium">Amount</th>
-                  <th className="text-left py-1 pr-3 text-red-700 font-medium">Description / Reference Used</th>
-                </tr>
-              </thead>
-              <tbody>
-                {uploadResults.results.unmatched.map((tx, idx) => (
-                  <tr key={idx} className="border-b border-red-100">
-                    <td className="py-1 pr-3 text-gray-700 whitespace-nowrap">{tx.date}</td>
-                    <td className="py-1 pr-3 font-medium text-red-700 whitespace-nowrap">R {parseFloat(tx.amount).toFixed(2)}</td>
-                    <td className="py-1 text-gray-600">{tx.description || tx.reference}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* Unmatched Transactions — inline allocation */}
+      {unmatchedList.length > 0 && (
+        <div className="border border-red-200 rounded-lg overflow-hidden">
+          <div className="bg-red-50 px-4 py-3 border-b border-red-200 flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold text-red-800">
+                ⚠️ {unmatchedList.filter(t => !t._allocated).length} of {unmatchedList.length} Unmatched Payment{unmatchedList.length > 1 ? 's' : ''} — Action Required
+              </h4>
+              <p className="text-xs text-red-700 mt-0.5">
+                Click <strong>Allocate</strong> on each row to assign it to the correct student right now.
+              </p>
+            </div>
+          </div>
+
+          <div className="divide-y divide-red-100 bg-white">
+            {unmatchedList.map((tx, idx) => (
+              <div key={idx} className={`px-4 py-3 ${tx._allocated ? 'opacity-60 bg-green-50' : ''}`}>
+                {/* Main row */}
+                <div className="flex items-start gap-3 flex-wrap">
+                  <div className="text-xs text-gray-500 whitespace-nowrap pt-0.5 w-24 flex-shrink-0">{tx.date}</div>
+                  <div className="text-sm font-bold text-red-700 whitespace-nowrap pt-0.5 w-24 flex-shrink-0">
+                    R {parseFloat(tx.amount).toFixed(2)}
+                  </div>
+                  <div className="text-xs text-gray-600 flex-1 pt-0.5 min-w-0 break-words">
+                    {tx.description || tx.reference}
+                  </div>
+                  <div className="flex-shrink-0">
+                    {tx._allocated ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-100 border border-green-200 px-2 py-1 rounded-full">
+                        ✓ {tx._allocatedTo}
+                      </span>
+                    ) : allocatingIdx === idx ? (
+                      <button
+                        onClick={cancelAllocate}
+                        className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded border border-gray-200"
+                      >
+                        Cancel
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => openAllocate(idx)}
+                        className="text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        Allocate
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Inline allocation panel */}
+                {allocatingIdx === idx && !tx._allocated && (
+                  <div className="mt-3 ml-0 pl-0 border-t border-red-100 pt-3">
+                    <p className="text-xs text-gray-500 mb-2">Search for the student this payment belongs to:</p>
+                    <div className="relative">
+                      <input
+                        autoFocus
+                        type="text"
+                        value={studentQuery}
+                        onChange={e => handleStudentQueryChange(e.target.value)}
+                        placeholder="Type student name or HAR number…"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      {studentSearching && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">Searching…</div>
+                      )}
+                      {studentResults.length > 0 && !selectedStudent && (
+                        <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-44 overflow-y-auto">
+                          {studentResults.map(s => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => { setSelectedStudent(s); setStudentQuery(`${s.fullName} (${s.studentNumber})`); setStudentResults([]); }}
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 border-b border-gray-100 last:border-0"
+                            >
+                              <span className="font-medium">{s.fullName}</span>
+                              <span className="text-gray-400 ml-2 text-xs">{s.studentNumber}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {selectedStudent && (
+                      <div className="mt-2 flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+                          Selected: <strong>{selectedStudent.fullName}</strong> ({selectedStudent.studentNumber})
+                        </span>
+                        <button
+                          onClick={() => handleAllocate(tx, idx)}
+                          disabled={allocating}
+                          className="text-xs font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-60 px-3 py-1.5 rounded-lg transition-colors"
+                        >
+                          {allocating ? 'Applying…' : `Apply R${parseFloat(tx.amount).toFixed(2)} to ${selectedStudent.fullName}`}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}
