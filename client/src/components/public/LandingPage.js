@@ -1016,7 +1016,7 @@ const AutoM8PromoSection = () => (
           </svg>
         </a>
         <a
-          href="mailto:info@auto-m8.co.za"
+          href="mailto:autom8streamlining@gmail.com"
           className="inline-flex items-center gap-2 px-8 py-4 bg-white/10 border border-white/20 text-white font-semibold rounded-xl hover:bg-white/20 transition-all duration-200 text-base"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
