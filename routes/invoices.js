@@ -1313,4 +1313,43 @@ router.delete('/cleanup-pre-enrollment', [
   }
 });
 
+// ─── DELETE single invoice by ID ─────────────────────────────────────────────
+// Safety: only deletes if amount_paid = 0 (never touched by a real payment)
+router.delete('/:id', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Verify the invoice exists and has no payments
+    const check = await db.query(
+      `SELECT i.id, i.student_number, i.due_date, i.amount_paid, i.status
+       FROM invoices i
+       WHERE i.id = $1`,
+      [id]
+    );
+
+    if (check.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+
+    const invoice = check.rows[0];
+    if (parseFloat(invoice.amount_paid) > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete an invoice that has payments recorded against it'
+      });
+    }
+
+    await db.query('DELETE FROM invoices WHERE id = $1', [id]);
+
+    console.log(`Admin ${req.user.email} deleted invoice ${id} (${invoice.student_number}, due: ${invoice.due_date})`);
+
+    res.json({ success: true, message: 'Invoice deleted successfully' });
+  } catch (error) {
+    console.error('Delete single invoice error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;

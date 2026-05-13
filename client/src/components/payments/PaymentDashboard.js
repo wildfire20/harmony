@@ -54,6 +54,12 @@ const PaymentDashboard = () => {
     amountDue: ''
   });
 
+  // Ghost invoice modal states
+  const [showGhostModal, setShowGhostModal] = useState(false);
+  const [ghostInvoices, setGhostInvoices] = useState([]);
+  const [ghostModalLoading, setGhostModalLoading] = useState(false);
+  const [removingGhostId, setRemovingGhostId] = useState(null);
+
   // Check if user is admin
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
 
@@ -222,7 +228,10 @@ const PaymentDashboard = () => {
 
   const handleCleanupPreEnrollment = async () => {
     try {
-      // Dry run first — show the admin what will be deleted
+      setGhostModalLoading(true);
+      setShowGhostModal(true);
+      setGhostInvoices([]);
+
       const preview = await fetch('/api/invoices/cleanup-pre-enrollment', {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -231,35 +240,35 @@ const PaymentDashboard = () => {
 
       if (!previewData.success) throw new Error(previewData.message);
 
-      if (previewData.invoices.length === 0) {
-        toast.success('No pre-enrollment invoices found — everything is clean!');
-        return;
-      }
+      setGhostInvoices(previewData.invoices || []);
+    } catch (error) {
+      console.error('Ghost invoice fetch error:', error);
+      toast.error(error.message || 'Failed to fetch ghost invoices');
+      setShowGhostModal(false);
+    } finally {
+      setGhostModalLoading(false);
+    }
+  };
 
-      const confirmed = window.confirm(
-        `Found ${previewData.invoices.length} unpaid invoice(s) created before each student's enrollment month.\n\n` +
-        `These are ghost invoices for students who enrolled mid-year.\n\nClick OK to permanently delete them.`
-      );
-      if (!confirmed) return;
-
-      setLoading(true);
-      const del = await fetch('/api/invoices/cleanup-pre-enrollment?confirm=true', {
+  const handleRemoveSingleGhostInvoice = async (invoiceId) => {
+    if (!window.confirm('Remove this ghost invoice? This cannot be undone.')) return;
+    try {
+      setRemovingGhostId(invoiceId);
+      const res = await fetch(`/api/invoices/${invoiceId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const delData = await del.json();
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message);
 
-      if (delData.success) {
-        toast.success(`Removed ${delData.deleted} pre-enrollment invoice(s).`);
-        fetchInvoices();
-      } else {
-        throw new Error(delData.message || 'Cleanup failed');
-      }
+      setGhostInvoices(prev => prev.filter(inv => inv.id !== invoiceId));
+      toast.success('Invoice removed');
+      fetchInvoices();
     } catch (error) {
-      console.error('Cleanup error:', error);
-      toast.error(error.message || 'Cleanup failed');
+      console.error('Remove ghost invoice error:', error);
+      toast.error(error.message || 'Failed to remove invoice');
     } finally {
-      setLoading(false);
+      setRemovingGhostId(null);
     }
   };
 
@@ -707,6 +716,68 @@ const PaymentDashboard = () => {
                   {uploadLoading ? 'Generating...' : 'Generate Invoices'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ghost Invoice Modal */}
+      {showGhostModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b">
+              <h3 className="text-lg font-medium text-gray-900">Ghost Invoices</h3>
+              <button
+                onClick={() => setShowGhostModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1">
+              {ghostModalLoading ? (
+                <div className="flex justify-center py-8">
+                  <LoadingSpinner />
+                </div>
+              ) : ghostInvoices.length === 0 ? (
+                <div className="text-center py-8 text-green-700 font-medium">
+                  No ghost invoices found — everything is clean!
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-500 mb-4">
+                    {ghostInvoices.length} unpaid invoice(s) found that were created before each student's enrollment month. Remove them one at a time below.
+                  </p>
+                  <div className="divide-y divide-gray-100">
+                    {ghostInvoices.map(inv => (
+                      <div key={inv.id} className="flex items-center justify-between py-3">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">
+                            {inv.first_name} {inv.last_name}
+                            <span className="ml-2 text-xs text-gray-400">({inv.student_number})</span>
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            Invoice month: {new Date(inv.due_date).toLocaleString('default', { month: 'long', year: 'numeric' })}
+                            {' · '}Enrolled: {new Date(inv.enrollment_month).toLocaleString('default', { month: 'long', year: 'numeric' })}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            Amount: R{parseFloat(inv.amount_due).toFixed(2)} · Status: {inv.status}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveSingleGhostInvoice(inv.id)}
+                          disabled={removingGhostId === inv.id}
+                          className="ml-4 flex-shrink-0 inline-flex items-center px-3 py-1.5 text-xs font-medium rounded text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Trash2 className="h-3 w-3 mr-1" />
+                          {removingGhostId === inv.id ? 'Removing…' : 'Remove'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
