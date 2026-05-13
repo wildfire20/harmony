@@ -987,57 +987,127 @@ const WhatsAppButton = () => {
 };
 
 const AutoM8PromoSection = () => (
-  <section className="bg-gradient-to-r from-gray-900 via-blue-950 to-gray-900 py-16 px-4">
-    <div className="max-w-5xl mx-auto text-center">
-      <div className="inline-flex items-center gap-2 bg-blue-500/20 border border-blue-500/30 text-blue-300 text-xs font-semibold uppercase tracking-widest px-4 py-2 rounded-full mb-6">
-        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15M14.25 3.104c.251.023.501.05.75.082M19.8 15l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.607L5 14.5m14.8.5l-1.093 6.57c-.073.44-.41.776-.85.776H6.143c-.44 0-.777-.335-.85-.776L4.2 15" />
-        </svg>
-        Built by AutoM8
+  <section
+    className="relative z-10 -mt-8 bg-[#0b1120] rounded-t-[2.5rem] overflow-hidden"
+    style={{ boxShadow: '0 -8px 40px rgba(0,0,0,0.35)' }}
+  >
+    {/* Giant wordmark — the defining negative-footer element */}
+    <div className="overflow-hidden px-6 pt-10 pb-0 select-none pointer-events-none">
+      <p className="text-[clamp(4rem,14vw,11rem)] font-black leading-none tracking-tighter text-white/[0.06] text-center whitespace-nowrap">
+        AutoM8
+      </p>
+    </div>
+
+    {/* Main content — sits on top of the ghost wordmark */}
+    <div className="max-w-5xl mx-auto px-6 -mt-10 pb-14">
+
+      {/* Badge */}
+      <div className="flex justify-center mb-6">
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-blue-400 border border-blue-500/30 bg-blue-500/10 px-3.5 py-1.5 rounded-full">
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15M14.25 3.104c.251.023.501.05.75.082M19.8 15l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.607L5 14.5m14.8.5l-1.093 6.57c-.073.44-.41.776-.85.776H6.143c-.44 0-.777-.335-.85-.776L4.2 15" />
+          </svg>
+          Built by AutoM8
+        </span>
       </div>
 
-      <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4 leading-tight">
-        Want a system like this<br className="hidden sm:block" /> for your school or business?
-      </h2>
-      <p className="text-gray-400 text-lg mb-8 max-w-2xl mx-auto">
-        The platform powering Harmony Learning Institute was designed and built by <span className="text-blue-400 font-medium">AutoM8</span> — a South African software company specialising in custom web applications, school management systems, and business automation.
-      </p>
+      {/* Two-column layout: headline+CTA left, services right */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-start">
 
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-12">
+        {/* Left — headline and buttons */}
+        <div>
+          <h2 className="text-3xl sm:text-4xl font-bold text-white leading-tight mb-4">
+            Want a system like this for your school or business?
+          </h2>
+          <p className="text-gray-400 text-base leading-relaxed mb-8">
+            This platform was designed and built by{' '}
+            <a href="https://auto-m8.co.za/" target="_blank" rel="noopener noreferrer"
+               className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
+              AutoM8
+            </a>{' '}
+            — a South African software company specialising in custom web applications,
+            school management systems, and business automation.
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <a
+              href="https://auto-m8.co.za/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition-colors duration-200 text-sm"
+            >
+              Visit AutoM8
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+              </svg>
+            </a>
+            <a
+              href="mailto:autom8streamlining@gmail.com"
+              className="inline-flex items-center justify-center gap-2 px-6 py-3 border border-white/20 text-white font-semibold rounded-lg hover:bg-white/10 transition-colors duration-200 text-sm"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+              </svg>
+              Get in Touch
+            </a>
+          </div>
+        </div>
+
+        {/* Right — service list */}
+        <div className="grid grid-cols-1 gap-px bg-white/10 rounded-xl overflow-hidden border border-white/10">
+          {[
+            {
+              icon: (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />
+                </svg>
+              ),
+              title: 'School Management',
+              desc: 'Attendance, grades, payments, parent portals and more.',
+            },
+            {
+              icon: (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12a7.5 7.5 0 0015 0m-15 0a7.5 7.5 0 1115 0m-15 0H3m16.5 0H21m-1.5 0H12m-8.457 3.077l1.41-.513m14.095-5.13l1.41-.513M5.106 17.785l1.15-.964m11.49-9.642l1.149-.964M7.501 19.795l.75-1.3m7.5-12.99l.75-1.3m-6.063 16.658l.26-1.477m2.605-14.772l.26-1.477m0 17.726l-.26-1.477M10.698 4.614l-.26-1.477M16.5 19.794l-.75-1.299M7.5 4.205L12 12m6.894 5.785l-1.149-.964M6.256 7.178l-1.15-.964m15.352 8.864l-1.41-.513M4.954 9.435l-1.41-.514M12.002 12l-3.75 6.495" />
+                </svg>
+              ),
+              title: 'Business Automation',
+              desc: 'Custom workflows that save your team hours every week.',
+            },
+            {
+              icon: (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5a17.92 17.92 0 00-8.716-2.247m0 0A9.015 9.015 0 003 12c0-1.605.42-3.113 1.157-4.418" />
+                </svg>
+              ),
+              title: 'Web Applications',
+              desc: 'From landing pages to full-stack systems, built to scale.',
+            },
+          ].map(({ icon, title, desc }) => (
+            <div key={title} className="flex items-start gap-4 p-5 bg-white/[0.03] hover:bg-white/[0.06] transition-colors">
+              <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-blue-500/15 text-blue-400 flex items-center justify-center mt-0.5">
+                {icon}
+              </div>
+              <div>
+                <p className="text-white font-semibold text-sm mb-0.5">{title}</p>
+                <p className="text-gray-500 text-sm leading-relaxed">{desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Bottom bar */}
+      <div className="mt-12 pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-600">
+        <p>© {new Date().getFullYear()} AutoM8. All rights reserved.</p>
         <a
           href="https://auto-m8.co.za/"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:from-blue-500 hover:to-blue-400 transition-all duration-200 text-base"
+          className="text-gray-600 hover:text-gray-400 transition-colors"
         >
-          Visit AutoM8
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-          </svg>
+          auto-m8.co.za
         </a>
-        <a
-          href="mailto:autom8streamlining@gmail.com"
-          className="inline-flex items-center gap-2 px-8 py-4 bg-white/10 border border-white/20 text-white font-semibold rounded-xl hover:bg-white/20 transition-all duration-200 text-base"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
-          </svg>
-          Get in Touch
-        </a>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-3xl mx-auto text-left">
-        {[
-          { icon: '🏫', title: 'School Management', desc: 'Attendance, grades, payments, parent portals and more — all in one platform.' },
-          { icon: '⚙️', title: 'Business Automation', desc: 'Custom workflows and tools that save your team hours of manual work every week.' },
-          { icon: '🌐', title: 'Web Applications', desc: 'From landing pages to full-stack systems — built to scale with your organisation.' },
-        ].map(({ icon, title, desc }) => (
-          <div key={title} className="bg-white/5 border border-white/10 rounded-xl p-5">
-            <div className="text-2xl mb-3">{icon}</div>
-            <h3 className="text-white font-semibold mb-2">{title}</h3>
-            <p className="text-gray-400 text-sm leading-relaxed">{desc}</p>
-          </div>
-        ))}
       </div>
     </div>
   </section>
