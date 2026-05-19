@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, MapPin, LogOut, Clock, RefreshCw, Loader, AlertCircle, Download, Calendar } from 'lucide-react';
+import { Users, MapPin, LogOut, Clock, RefreshCw, Loader, AlertCircle, Download, Calendar, ClipboardEdit, X } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useTheme } from '../common/ThemeProvider';
 
 // Return the Monday of the current week in YYYY-MM-DD
@@ -70,6 +71,11 @@ const StaffAttendanceReport = () => {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
 
+  // Manual entry modal state
+  const [manualTarget, setManualTarget] = useState(null); // staff row object
+  const [manualForm, setManualForm] = useState({ time_in: '', time_out: '', notes: '' });
+  const [manualSaving, setManualSaving] = useState(false);
+
   const fetchReport = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     setError('');
@@ -130,6 +136,52 @@ const StaffAttendanceReport = () => {
     }
   };
 
+  const openManualModal = (staffRow) => {
+    // Pre-fill times if they already have a scan record
+    const toHHMM = (ts) => {
+      if (!ts) return '';
+      return new Date(ts).toLocaleTimeString('en-ZA', {
+        hour: '2-digit', minute: '2-digit', hour12: false,
+        timeZone: 'Africa/Johannesburg'
+      });
+    };
+    setManualForm({
+      time_in: toHHMM(staffRow.time_in),
+      time_out: toHHMM(staffRow.time_out),
+      notes: '',
+    });
+    setManualTarget(staffRow);
+  };
+
+  const handleManualEntry = async () => {
+    if (!manualForm.notes.trim()) {
+      toast.error('A note is required for manual entries');
+      return;
+    }
+    setManualSaving(true);
+    try {
+      const res = await fetch('/api/staff-attendance/manual-entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          user_id: manualTarget.id,
+          time_in: manualForm.time_in || undefined,
+          time_out: manualForm.time_out || undefined,
+          notes: manualForm.notes,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.message);
+      toast.success('Attendance entry recorded');
+      setManualTarget(null);
+      fetchReport(true);
+    } catch (err) {
+      toast.error(err.message || 'Failed to save entry');
+    } finally {
+      setManualSaving(false);
+    }
+  };
+
   const card = isDark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-100';
   const textPrimary = isDark ? 'text-white' : 'text-gray-900';
   const textSecondary = isDark ? 'text-gray-400' : 'text-gray-500';
@@ -161,6 +213,7 @@ const StaffAttendanceReport = () => {
   }
 
   return (
+    <>
     <div className="space-y-6">
 
       {/* Date & refresh header */}
@@ -312,11 +365,12 @@ const StaffAttendanceReport = () => {
         <div className={`hidden md:grid grid-cols-12 gap-3 px-5 py-3 text-xs font-semibold uppercase tracking-wide ${
           isDark ? 'bg-gray-800/60 text-gray-400 border-b border-gray-800' : 'bg-gray-50 text-gray-500 border-b border-gray-100'
         }`}>
-          <div className="col-span-4">Staff Member</div>
+          <div className="col-span-3">Staff Member</div>
           <div className="col-span-2">Role</div>
           <div className="col-span-2">Status</div>
           <div className="col-span-2">Time In</div>
           <div className="col-span-2">Time Out</div>
+          <div className="col-span-1">Action</div>
         </div>
 
         {filteredStaff.length === 0 ? (
@@ -337,7 +391,7 @@ const StaffAttendanceReport = () => {
                   } transition-colors`}
                 >
                   {/* Name */}
-                  <div className="col-span-2 md:col-span-4 flex items-center gap-3">
+                  <div className="col-span-2 md:col-span-3 flex items-center gap-3">
                     <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${
                       isDark ? 'bg-blue-900 text-blue-300' : 'bg-blue-100 text-blue-700'
                     }`}>
@@ -346,6 +400,11 @@ const StaffAttendanceReport = () => {
                     <div className="min-w-0">
                       <p className={`font-medium text-sm truncate ${textPrimary}`}>{s.first_name} {s.last_name}</p>
                       <p className={`text-xs truncate md:hidden ${textSecondary}`}>{s.role}</p>
+                      {s.notes && (
+                        <p className={`text-xs truncate mt-0.5 italic ${isDark ? 'text-amber-400' : 'text-amber-600'}`} title={s.notes}>
+                          📝 {s.notes}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -369,7 +428,7 @@ const StaffAttendanceReport = () => {
                   </div>
 
                   {/* Time Out */}
-                  <div className={`col-span-2 md:col-span-2 text-sm font-mono ${
+                  <div className={`col-span-1 md:col-span-2 text-sm font-mono ${
                     s.time_out ? textPrimary : textSecondary
                   }`}>
                     <span className={`md:hidden text-xs ${textSecondary}`}>Out: </span>
@@ -380,6 +439,21 @@ const StaffAttendanceReport = () => {
                       }`}>No card</span>
                     )}
                   </div>
+
+                  {/* Manual entry action */}
+                  <div className="col-span-1 md:col-span-1 flex justify-end md:justify-center">
+                    <button
+                      onClick={() => openManualModal(s)}
+                      title="Manual attendance entry"
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        isDark
+                          ? 'text-gray-500 hover:text-blue-400 hover:bg-blue-900/30'
+                          : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'
+                      }`}
+                    >
+                      <ClipboardEdit className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -389,6 +463,94 @@ const StaffAttendanceReport = () => {
 
       <p className={`text-xs text-center ${textSecondary}`}>Auto-refreshes every 30 seconds</p>
     </div>
+
+    {/* Manual Entry Modal */}
+    {manualTarget && (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className={`w-full max-w-md rounded-2xl shadow-2xl ${isDark ? 'bg-gray-900 border border-gray-700' : 'bg-white'}`}>
+          {/* Header */}
+          <div className={`flex items-center justify-between px-6 py-4 border-b ${isDark ? 'border-gray-700' : 'border-gray-100'}`}>
+            <div>
+              <h3 className={`font-semibold ${textPrimary}`}>Manual Attendance Entry</h3>
+              <p className={`text-xs mt-0.5 ${textSecondary}`}>
+                {manualTarget.first_name} {manualTarget.last_name}
+              </p>
+            </div>
+            <button
+              onClick={() => setManualTarget(null)}
+              className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-gray-800 text-gray-400' : 'hover:bg-gray-100 text-gray-500'}`}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="px-6 py-5 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={`block text-xs font-medium mb-1 ${textSecondary}`}>Time In</label>
+                <input
+                  type="time"
+                  value={manualForm.time_in}
+                  onChange={e => setManualForm(f => ({ ...f, time_in: e.target.value }))}
+                  className={`w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    isDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className={`block text-xs font-medium mb-1 ${textSecondary}`}>Time Out</label>
+                <input
+                  type="time"
+                  value={manualForm.time_out}
+                  onChange={e => setManualForm(f => ({ ...f, time_out: e.target.value }))}
+                  className={`w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    isDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'
+                  }`}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className={`block text-xs font-medium mb-1 ${textSecondary}`}>
+                Note <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                rows={3}
+                placeholder="e.g. Sick leave, family emergency, forgot to scan…"
+                value={manualForm.notes}
+                onChange={e => setManualForm(f => ({ ...f, notes: e.target.value }))}
+                className={`w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none ${
+                  isDark ? 'bg-gray-800 border-gray-700 text-white placeholder-gray-500' : 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400'
+                }`}
+              />
+              <p className={`text-xs mt-1 ${textSecondary}`}>Required — explain the reason for this manual entry.</p>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className={`flex gap-3 px-6 py-4 border-t ${isDark ? 'border-gray-700' : 'border-gray-100'}`}>
+            <button
+              onClick={() => setManualTarget(null)}
+              className={`flex-1 py-2.5 rounded-xl border text-sm font-medium transition-colors ${
+                isDark ? 'border-gray-700 text-gray-300 hover:bg-gray-800' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleManualEntry}
+              disabled={manualSaving || !manualForm.notes.trim()}
+              className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {manualSaving ? <Loader className="w-4 h-4 animate-spin" /> : <ClipboardEdit className="w-4 h-4" />}
+              {manualSaving ? 'Saving…' : 'Save Entry'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 

@@ -112,6 +112,7 @@ router.get('/today', [authenticate, authorize('admin', 'super_admin')], async (r
          sc.card_id,
          sal.time_in,
          sal.time_out,
+         sal.notes,
          CASE
            WHEN sal.time_in IS NOT NULL AND sal.time_out IS NULL THEN 'on-site'
            WHEN sal.time_in IS NOT NULL AND sal.time_out IS NOT NULL THEN 'signed-out'
@@ -145,6 +146,56 @@ router.get('/today', [authenticate, authorize('admin', 'super_admin')], async (r
   } catch (err) {
     console.error('Today report error:', err);
     return res.status(500).json({ success: false, message: 'Server error fetching report' });
+  }
+});
+
+// POST /api/staff-attendance/manual-entry — admin manually records sign-in/out with a note
+router.post('/manual-entry', [authenticate, authorize('admin', 'super_admin')], async (req, res) => {
+  try {
+    const { user_id, log_date, time_in, time_out, notes } = req.body;
+
+    if (!user_id) return res.status(400).json({ success: false, message: 'user_id is required' });
+    if (!notes || !notes.trim()) return res.status(400).json({ success: false, message: 'A note is required for manual entries' });
+
+    const date = log_date || new Date().toISOString().split('T')[0];
+
+    // Verify the user is an active staff member
+    const staffCheck = await db.query(
+      `SELECT id, first_name, last_name FROM users WHERE id = $1 AND role IN ('teacher','admin','super_admin','non_teaching_staff') AND is_active = true`,
+      [user_id]
+    );
+    if (staffCheck.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Staff member not found' });
+    }
+
+    // Build the timestamp strings — combine log_date with the HH:MM times provided
+    const makeTs = (hhmm) => {
+      if (!hhmm) return null;
+      return `${date}T${hhmm}:00+02:00`; // South Africa UTC+2
+    };
+
+    const tsIn  = makeTs(time_in);
+    const tsOut = makeTs(time_out);
+
+    // Upsert: create or update today's log for this staff member
+    await db.query(
+      `INSERT INTO staff_attendance_logs (user_id, log_date, time_in, time_out, notes)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (user_id, log_date)
+       DO UPDATE SET
+         time_in  = COALESCE(EXCLUDED.time_in,  staff_attendance_logs.time_in),
+         time_out = COALESCE(EXCLUDED.time_out, staff_attendance_logs.time_out),
+         notes    = EXCLUDED.notes`,
+      [user_id, date, tsIn, tsOut, notes.trim()]
+    );
+
+    const staff = staffCheck.rows[0];
+    console.log(`Admin ${req.user.email} made manual entry for ${staff.first_name} ${staff.last_name} on ${date}: in=${time_in||'—'} out=${time_out||'—'} note="${notes.trim()}"`);
+
+    return res.json({ success: true, message: 'Attendance entry recorded' });
+  } catch (err) {
+    console.error('Manual entry error:', err);
+    return res.status(500).json({ success: false, message: 'Server error recording manual entry' });
   }
 });
 
@@ -295,7 +346,11 @@ router.get('/export', [authenticate, authorize('admin', 'super_admin')], async (
 
     const fmtTime = (ts) => {
       if (!ts) return '';
-      return new Date(ts).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false });
+      // Always format in South Africa time (UTC+2) regardless of server timezone
+      return new Date(ts).toLocaleTimeString('en-ZA', {
+        hour: '2-digit', minute: '2-digit', hour12: false,
+        timeZone: 'Africa/Johannesburg'
+      });
     };
 
     const fmtDayHeader = (dateStr) => {
