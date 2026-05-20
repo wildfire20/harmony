@@ -739,10 +739,13 @@ const initializeStaffAttendanceTables = async () => {
       log_date DATE NOT NULL DEFAULT CURRENT_DATE,
       time_in TIMESTAMP,
       time_out TIMESTAMP,
+      notes TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_id, log_date)
     )
   `);
+  // Migration: add notes column to existing installs that pre-date this feature
+  await db.query(`ALTER TABLE staff_attendance_logs ADD COLUMN IF NOT EXISTS notes TEXT`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_sal_user_date ON staff_attendance_logs(user_id, log_date)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_sal_date ON staff_attendance_logs(log_date)`);
 
