@@ -1104,7 +1104,7 @@ router.get('/student-payment-history/:studentNumber', [
       worksheet.getCell(`B${bankingRow + 3}`).value = 'CHEQUE';
       
       worksheet.getCell(`A${bankingRow + 4}`).value = 'Account Number:';
-      worksheet.getCell(`B${bankingRow + 4}`).value = '63053202265';
+      worksheet.getCell(`B${bankingRow + 4}`).value = '63035320265';
       worksheet.getCell(`B${bankingRow + 4}`).font = { bold: true, size: 12 };
       
       worksheet.getCell(`A${bankingRow + 5}`).value = 'Branch Code:';

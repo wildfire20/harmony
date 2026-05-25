@@ -123,7 +123,7 @@ const ParentInvoices = ({ child }) => {
             <div className="space-y-1 text-xs text-blue-700">
               <p><span className="font-medium">Bank:</span> First National Bank (FNB)</p>
               <p><span className="font-medium">Account Holder:</span> Harmony Learning Institute</p>
-              <p><span className="font-medium">Account Number:</span> 63053202265</p>
+              <p><span className="font-medium">Account Number:</span> 63035320265</p>
               <p><span className="font-medium">Branch Code:</span> 210755</p>
               <p><span className="font-medium">Account Type:</span> Cheque</p>
               <p className="mt-2 text-blue-600 font-semibold">
