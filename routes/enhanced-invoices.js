@@ -838,9 +838,12 @@ router.get('/student-payment-history/:studentNumber', [
     const { studentNumber } = req.params;
     const { format } = req.query; // 'json' or 'excel'
     
-    // Find the student (include created_at as enrollment date)
+    // Find the student (include created_at as enrollment date and service flags)
     const studentResult = await db.query(`
-      SELECT u.id, u.first_name, u.last_name, u.student_number, u.created_at
+      SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade, u.created_at,
+             COALESCE(u.is_boarder, false)       AS is_boarder,
+             COALESCE(u.uses_transport, false)   AS uses_transport,
+             COALESCE(u.uses_aftercare, false)   AS uses_aftercare
       FROM users u
       WHERE u.student_number ILIKE $1 OR u.student_number ILIKE $2
       LIMIT 1
@@ -854,6 +857,15 @@ router.get('/student-payment-history/:studentNumber', [
     }
     
     const student = studentResult.rows[0];
+
+    // Fetch service prices so we can show boarding/transport/aftercare amounts in the export
+    const servicePricesResult = await db.query(
+      `SELECT service_key, label, amount FROM service_prices ORDER BY display_order`
+    );
+    const servicePrices = {};
+    servicePricesResult.rows.forEach(r => {
+      servicePrices[r.service_key] = { label: r.label, amount: parseFloat(r.amount) || 0 };
+    });
     
     // Get all invoices for this student (match by student_id OR student_number for compatibility)
     const invoicesResult = await db.query(`
@@ -1062,9 +1074,47 @@ router.get('/student-payment-history/:studentNumber', [
       
       worksheet.mergeCells(`A${studentInfoRow + 2}:G${studentInfoRow + 2}`);
       worksheet.getCell(`A${studentInfoRow + 2}`).value = `Report Generated: ${new Date().toLocaleDateString('en-ZA')}`;
-      
+
+      // --- Fee Structure section ---
+      // Build list of applicable services for this student
+      const applicableServices = [];
+      if (servicePrices['tuition']) {
+        applicableServices.push({ label: servicePrices['tuition'].label || 'Monthly Tuition', amount: servicePrices['tuition'].amount });
+      }
+      if (student.is_boarder && servicePrices['boarding']) {
+        applicableServices.push({ label: servicePrices['boarding'].label || 'Boarding Fee', amount: servicePrices['boarding'].amount });
+      }
+      if (student.uses_transport && servicePrices['transport']) {
+        applicableServices.push({ label: servicePrices['transport'].label || 'Transport Fee', amount: servicePrices['transport'].amount });
+      }
+      if (student.uses_aftercare && servicePrices['aftercare']) {
+        applicableServices.push({ label: servicePrices['aftercare'].label || 'Aftercare Fee', amount: servicePrices['aftercare'].amount });
+      }
+      const monthlyTotal = applicableServices.reduce((s, f) => s + f.amount, 0);
+
+      const feeStructureRow = studentInfoRow + 4;
+      worksheet.getCell(`A${feeStructureRow}`).value = 'FEE STRUCTURE';
+      worksheet.getCell(`A${feeStructureRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
+
+      applicableServices.forEach((svc, i) => {
+        const r = feeStructureRow + 1 + i;
+        worksheet.getCell(`A${r}`).value = `${svc.label}:`;
+        worksheet.getCell(`B${r}`).value = svc.amount;
+        worksheet.getCell(`B${r}`).numFmt = 'R #,##0.00';
+      });
+
+      const totalFeeRow = feeStructureRow + 1 + applicableServices.length;
+      worksheet.getCell(`A${totalFeeRow}`).value = 'Monthly Total:';
+      worksheet.getCell(`A${totalFeeRow}`).font = { bold: true };
+      worksheet.getCell(`B${totalFeeRow}`).value = monthlyTotal;
+      worksheet.getCell(`B${totalFeeRow}`).numFmt = 'R #,##0.00';
+      worksheet.getCell(`B${totalFeeRow}`).font = { bold: true, color: { argb: 'FF1E40AF' } };
+
+      // Gap before summary
+      const feeStructureHeight = 1 + applicableServices.length + 1; // header + service rows + total row
+
       // Summary section
-      const summaryRow = studentInfoRow + 4;
+      const summaryRow = feeStructureRow + feeStructureHeight + 2;
       worksheet.getCell(`A${summaryRow}`).value = 'PAYMENT SUMMARY';
       worksheet.getCell(`A${summaryRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
       

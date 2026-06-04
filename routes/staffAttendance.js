@@ -168,10 +168,17 @@ router.post('/manual-entry', [authenticate, authorize('admin', 'super_admin')], 
       return res.status(404).json({ success: false, message: 'Staff member not found' });
     }
 
-    // Build the timestamp strings — combine log_date with the HH:MM times provided
+    // Build the timestamp strings — combine log_date with the HH:MM times provided.
+    // PostgreSQL TIMESTAMP WITHOUT TIME ZONE ignores timezone offsets on input and
+    // stores the value as-is. The pg driver then returns it treated as UTC, which
+    // makes the browser (SAST = UTC+2) display it 2 hours ahead. To match how NOW()
+    // works, we convert the SAST time the admin entered into UTC by subtracting 2 hours.
+    // South Africa does not observe DST so UTC+2 is always correct.
     const makeTs = (hhmm) => {
       if (!hhmm) return null;
-      return `${date}T${hhmm}:00+02:00`; // South Africa UTC+2
+      const [h, m] = hhmm.split(':').map(Number);
+      const utcH = ((h - 2) + 24) % 24;
+      return `${date}T${String(utcH).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
     };
 
     const tsIn  = makeTs(time_in);
