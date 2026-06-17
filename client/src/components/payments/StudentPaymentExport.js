@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 const StudentPaymentExport = () => {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -12,6 +12,12 @@ const StudentPaymentExport = () => {
   const [loading, setLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  const handleSessionExpired = () => {
+    toast.error('Your session has expired. Please log in again.');
+    if (logout) logout();
+    setTimeout(() => { window.location.href = '/login'; }, 1500);
+  };
 
   const handleSearch = async (query) => {
     setSearchQuery(query);
@@ -24,10 +30,10 @@ const StudentPaymentExport = () => {
     setSearchLoading(true);
     try {
       const response = await fetch(`/api/enhanced-invoices/search-students?q=${encodeURIComponent(query)}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
+
+      if (response.status === 401) { handleSessionExpired(); return; }
       
       const data = await response.json();
       if (data.success) {
@@ -48,10 +54,10 @@ const StudentPaymentExport = () => {
     
     try {
       const response = await fetch(`/api/enhanced-invoices/student-payment-history/${student.studentNumber}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
+
+      if (response.status === 401) { handleSessionExpired(); return; }
       
       const data = await response.json();
       if (data.success) {
@@ -73,11 +79,10 @@ const StudentPaymentExport = () => {
     setExporting(true);
     try {
       const response = await fetch(`/api/enhanced-invoices/student-payment-history/${selectedStudent.studentNumber}?format=excel`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-      
+
+      if (response.status === 401) { handleSessionExpired(); return; }
       if (!response.ok) throw new Error('Download failed');
       
       const blob = await response.blob();
