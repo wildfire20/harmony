@@ -840,11 +840,13 @@ router.get('/student-payment-history/:studentNumber', [
     
     // Find the student (include created_at as enrollment date and service flags)
     const studentResult = await db.query(`
-      SELECT u.id, u.first_name, u.last_name, u.student_number, u.grade, u.created_at,
+      SELECT u.id, u.first_name, u.last_name, u.student_number, u.created_at,
+             g.name AS grade,
              COALESCE(u.is_boarder, false)       AS is_boarder,
              COALESCE(u.uses_transport, false)   AS uses_transport,
              COALESCE(u.uses_aftercare, false)   AS uses_aftercare
       FROM users u
+      LEFT JOIN grades g ON u.grade_id = g.id
       WHERE u.student_number ILIKE $1 OR u.student_number ILIKE $2
       LIMIT 1
     `, [studentNumber, `HAR${studentNumber.replace(/^HAR/i, '')}`]);
