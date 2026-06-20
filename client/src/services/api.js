@@ -224,6 +224,15 @@ export const passwordsAPI = {
   generatePassword: (firstName) => api.get('/passwords/generate', { params: { firstName } }),
 };
 
+// Enrollments API
+export const enrollmentsAPI = {
+  getStats: () => api.get('/enrollments/stats'),
+  getAll: (params) => api.get('/enrollments', { params }),
+  getOne: (id) => api.get(`/enrollments/${id}`),
+  updateStatus: (id, data) => api.put(`/enrollments/${id}/status`, data),
+  delete: (id) => api.delete(`/enrollments/${id}`),
+};
+
 // Manual Payments API
 export const paymentsAPI = {
   addManualPayment: (data) => api.post('/enhanced-invoices/manual-payment', data),

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../common/ThemeProvider';
 import { Settings, BarChart3, ClipboardList, GraduationCap, Users, DollarSign, ScanLine, UserCheck, Key, ArrowUpCircle } from 'lucide-react';
@@ -8,7 +9,8 @@ import EnrollmentManagement from './EnrollmentManagement';
 const AdminPanel = () => {
   const { user } = useAuth();
   const { theme } = useTheme();
-  const [activeTab, setActiveTab] = useState('overview');
+  const location = useLocation();
+  const [activeTab, setActiveTab] = useState(location.state?.tab || 'overview');
 
   const isDark = theme === 'dark';
   const cardBg = isDark ? 'bg-gray-900' : 'bg-white';

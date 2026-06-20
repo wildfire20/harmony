@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
+import { useQuery } from 'react-query';
 import { 
   Home, 
   BookOpen, 
@@ -20,6 +21,7 @@ import {
   ClipboardCheck
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { enrollmentsAPI } from '../../services/api';
 import HarmonyLogo from '../common/HarmonyLogo';
 import { ThemeToggle, useTheme, ThemedLayout } from '../common/ThemeProvider';
 import { StatusIndicator, DepartmentBadge } from '../common/BrandingElements';
@@ -32,6 +34,17 @@ const Layout = () => {
   const navigate = useNavigate();
   const { isMobile, isTablet } = useResponsive();
   const isTouch = useTouchDevice();
+
+  const { data: enrollmentStatsData } = useQuery(
+    ['enrollment-stats'],
+    () => enrollmentsAPI.getStats(),
+    {
+      enabled: !!isAdmin,
+      refetchInterval: 5 * 60 * 1000,
+      refetchOnWindowFocus: true,
+    }
+  );
+  const pendingEnrollments = parseInt(enrollmentStatsData?.data?.pending || 0);
 
   const handleLogout = async () => {
     await logout();
@@ -52,7 +65,7 @@ const Layout = () => {
     ] : []),
     { name: 'Profile', href: '/profile', icon: User, color: 'harmony-secondary' },
     ...(isAdmin ? [
-      { name: 'Admin Panel', href: '/admin', icon: Settings, color: 'harmony-navy' },
+      { name: 'Admin Panel', href: '/admin', icon: Settings, color: 'harmony-navy', badge: pendingEnrollments },
       { name: 'Users', href: '/users', icon: Users, color: 'harmony-secondary' },
       { name: 'Analytics', href: '/analytics', icon: BarChart3, color: 'harmony-gold' },
       { name: 'Payments', href: '/payments', icon: CreditCard, color: 'harmony-gold' }
@@ -77,7 +90,12 @@ const Layout = () => {
       <item.icon className={`mr-3 h-5 w-5 flex-shrink-0 ${
         theme === 'dark' ? 'text-gray-400 group-hover:text-white' : 'text-gray-400 group-hover:text-red-600'
       }`} />
-      <span className="font-medium">{item.name}</span>
+      <span className="font-medium flex-1">{item.name}</span>
+      {item.badge > 0 && (
+        <span className="ml-2 flex-shrink-0 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-orange-500 text-white text-xs font-bold shadow-sm">
+          {item.badge > 99 ? '99+' : item.badge}
+        </span>
+      )}
     </button>
   );
 

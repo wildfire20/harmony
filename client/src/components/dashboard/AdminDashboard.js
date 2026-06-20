@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from 'react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { 
   Users, 
   BookOpen, 
@@ -9,16 +9,19 @@ import {
   TrendingUp,
   Calendar,
   UserPlus,
-  BarChart3
+  BarChart3,
+  ClipboardList,
+  AlertTriangle
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { adminAPI, announcementsAPI } from '../../services/api';
+import { adminAPI, announcementsAPI, enrollmentsAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { useTheme } from '../common/ThemeProvider';
 
 const AdminDashboard = () => {
   const { user } = useAuth();
   const { theme } = useTheme();
+  const navigate = useNavigate();
 
   const { data: statsData, isLoading: statsLoading } = useQuery(
     ['admin-statistics'],
@@ -30,8 +33,15 @@ const AdminDashboard = () => {
     () => announcementsAPI.getRecentAnnouncements(5)
   );
 
+  const { data: enrollmentStatsData } = useQuery(
+    ['enrollment-stats'],
+    () => enrollmentsAPI.getStats(),
+    { refetchInterval: 5 * 60 * 1000, refetchOnWindowFocus: true }
+  );
+
   const stats = statsData?.data || {};
   const announcements = announcementsData?.data?.announcements || [];
+  const pendingEnrollments = parseInt(enrollmentStatsData?.data?.pending || 0);
 
   const getPriorityColor = (priority) => {
     switch (priority) {
@@ -54,6 +64,33 @@ const AdminDashboard = () => {
 
   return (
     <div className="space-y-6">
+
+      {/* Pending Enrollments Alert */}
+      {pendingEnrollments > 0 && (
+        <div className="flex items-center justify-between gap-4 bg-orange-50 border-2 border-orange-400 rounded-2xl px-5 py-4 shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="flex-shrink-0 p-2 bg-orange-400 rounded-xl">
+              <AlertTriangle className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <p className="font-bold text-orange-800 text-base">
+                {pendingEnrollments} Pending Enrollment{pendingEnrollments !== 1 ? 's' : ''} Awaiting Review
+              </p>
+              <p className="text-orange-700 text-sm mt-0.5">
+                New student application{pendingEnrollments !== 1 ? 's have' : ' has'} been submitted and {pendingEnrollments !== 1 ? 'need' : 'needs'} your approval.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/admin', { state: { tab: 'enrollments' } })}
+            className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition-colors shadow-sm whitespace-nowrap"
+          >
+            <ClipboardList className="h-4 w-4" />
+            Review Now
+          </button>
+        </div>
+      )}
+
       {/* Welcome Section - Same structure, modernized */}
       <div className="bg-gradient-to-r from-emerald-500 via-teal-500 to-blue-600 rounded-2xl shadow-xl p-6 text-white relative overflow-hidden">
         <div className="absolute inset-0 opacity-10" style={{backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '24px 24px'}}></div>
