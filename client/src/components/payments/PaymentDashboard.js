@@ -250,6 +250,23 @@ const PaymentDashboard = () => {
     }
   };
 
+  const handleRecalculateStatus = async () => {
+    if (!window.confirm('This will fix any invoices where the Paid/Unpaid/Partial status doesn\'t match the actual amount paid. Continue?')) return;
+    try {
+      const res = await fetch('/api/invoices/recalculate-status', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message);
+      toast.success(data.message);
+      fetchInvoices();
+    } catch (error) {
+      console.error('Recalculate status error:', error);
+      toast.error(error.message || 'Failed to fix invoice statuses');
+    }
+  };
+
   const handleRemoveSingleGhostInvoice = async (invoiceId) => {
     if (!window.confirm('Remove this ghost invoice? This cannot be undone.')) return;
     try {
@@ -376,6 +393,14 @@ const PaymentDashboard = () => {
         >
           <Trash2 className="h-4 w-4 mr-2" />
           Remove Ghost Invoices
+        </button>
+        <button
+          onClick={handleRecalculateStatus}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700"
+          title="Fix invoices where the status doesn't match the actual amount paid"
+        >
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Fix Invoice Status
         </button>
         <button
           onClick={handleClearAllInvoices}

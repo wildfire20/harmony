@@ -50,42 +50,51 @@ router.post('/generate-monthly', [
     }
 
     const { month, year, amountDue } = req.body;
-    const dueDate = new Date(year, month, 0); // Due on last day of the month (month is 1-based, so month with day 0 = last day of that month)
+    const dueDate = new Date(year, month, 0); // Last day of the month
 
     console.log('Generating monthly invoices:', { month, year, amountDue });
 
-    // Get active students enrolled ON OR BEFORE this invoice month
-    // Students who enrolled after this month should not receive an invoice for it
+    // Get ALL active students (no enrollment date filter — include everyone active)
     const studentsResult = await db.query(`
-      SELECT u.id, u.student_number, u.first_name, u.last_name, u.grade_id, u.class_id
+      SELECT u.id, u.student_number, u.first_name, u.last_name, u.grade_id, u.class_id,
+             COALESCE(u.has_sibling_discount, false) AS has_sibling_discount
       FROM users u
       WHERE u.role = 'student' AND u.is_active = true
-        AND (EXTRACT(YEAR FROM u.created_at) * 12 + EXTRACT(MONTH FROM u.created_at)) <= ($2 * 12 + $1)
-    `, [month, year]);
+    `);
 
     const students = studentsResult.rows;
-    console.log(`Found ${students.length} active students enrolled by ${month}/${year}`);
+    console.log(`Found ${students.length} active students`);
 
     if (students.length === 0) {
       return res.status(400).json({ message: 'No active students found' });
     }
 
-    // Check if invoices already exist for this month/year
-    const existingInvoicesResult = await db.query(`
-      SELECT COUNT(*) as count FROM invoices 
+    // Find which students already have an invoice for this specific month/year
+    // This makes the endpoint idempotent: safe to re-run if generation was partial
+    const existingResult = await db.query(`
+      SELECT student_id FROM invoices
       WHERE EXTRACT(MONTH FROM due_date) = $1 AND EXTRACT(YEAR FROM due_date) = $2
     `, [month, year]);
+    const existingStudentIds = new Set(existingResult.rows.map(r => r.student_id));
 
-    if (parseInt(existingInvoicesResult.rows[0].count) > 0) {
-      return res.status(400).json({ 
-        message: `Invoices for ${month}/${year} already exist. Use update endpoint to modify existing invoices.` 
+    const studentsToInvoice = students.filter(s => !existingStudentIds.has(s.id));
+    const skippedCount = existingStudentIds.size;
+
+    if (studentsToInvoice.length === 0) {
+      return res.status(400).json({
+        message: `All ${students.length} students already have invoices for ${month}/${year}. No new invoices needed.`
       });
     }
 
-    // Generate invoices for all students
-    const invoicePromises = students.map(student => {
+    console.log(`Creating invoices for ${studentsToInvoice.length} students (${skippedCount} already had invoices)`);
+
+    // Generate invoices — apply R150 sibling discount where applicable
+    const invoicePromises = studentsToInvoice.map(student => {
       const referenceNumber = student.student_number;
-      
+      const studentAmountDue = student.has_sibling_discount
+        ? Math.max(0, parseFloat(amountDue) - 150)
+        : parseFloat(amountDue);
+
       return db.query(`
         INSERT INTO invoices (
           student_id, student_number, amount_due, due_date, status, 
@@ -95,7 +104,7 @@ router.post('/generate-monthly', [
       `, [
         student.id,
         student.student_number,
-        amountDue,
+        studentAmountDue,
         dueDate,
         'Unpaid',
         referenceNumber,
@@ -105,17 +114,22 @@ router.post('/generate-monthly', [
 
     const invoiceResults = await Promise.all(invoicePromises);
     const createdInvoices = invoiceResults.map(result => result.rows[0]);
+    const siblingDiscountCount = studentsToInvoice.filter(s => s.has_sibling_discount).length;
 
-    console.log(`Successfully created ${createdInvoices.length} invoices`);
+    console.log(`Successfully created ${createdInvoices.length} invoices (${siblingDiscountCount} with R150 sibling discount)`);
+
+    const skipMsg = skippedCount > 0 ? ` (${skippedCount} student${skippedCount !== 1 ? 's' : ''} already had invoices — skipped)` : '';
+    const discountMsg = siblingDiscountCount > 0 ? ` — R150 sibling discount applied to ${siblingDiscountCount} student${siblingDiscountCount !== 1 ? 's' : ''}` : '';
 
     res.status(201).json({
       success: true,
-      message: `Successfully generated ${createdInvoices.length} invoices for ${month}/${year}`,
+      message: `Successfully generated ${createdInvoices.length} invoices for ${month}/${year}${skipMsg}${discountMsg}`,
       invoices: createdInvoices,
       summary: {
         totalStudents: students.length,
         invoicesCreated: createdInvoices.length,
-        totalAmount: createdInvoices.length * amountDue,
+        skipped: skippedCount,
+        siblingDiscountsApplied: siblingDiscountCount,
         month,
         year,
         dueDate
@@ -129,6 +143,46 @@ router.post('/generate-monthly', [
       message: 'Failed to generate invoices',
       error: error.message 
     });
+  }
+});
+
+// Recalculate invoice statuses based on actual amount_paid vs amount_due
+// Fixes cases where status is out of sync with the real payment data
+router.post('/recalculate-status', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const result = await db.query(`
+      UPDATE invoices SET
+        status = CASE
+          WHEN amount_paid >= amount_due THEN 'Paid'
+          WHEN amount_paid > 0            THEN 'Partial'
+          ELSE 'Unpaid'
+        END,
+        updated_at = NOW()
+      WHERE status IS DISTINCT FROM (
+        CASE
+          WHEN amount_paid >= amount_due THEN 'Paid'
+          WHEN amount_paid > 0            THEN 'Partial'
+          ELSE 'Unpaid'
+        END
+      )
+      RETURNING id, status, student_number, amount_due, amount_paid, due_date
+    `);
+
+    console.log(`Recalculated status for ${result.rowCount} invoices`);
+
+    res.json({
+      success: true,
+      message: result.rowCount > 0
+        ? `Fixed ${result.rowCount} invoice${result.rowCount !== 1 ? 's' : ''} with incorrect status`
+        : 'All invoice statuses are already correct — nothing to fix',
+      fixed: result.rows
+    });
+  } catch (error) {
+    console.error('Recalculate status error:', error);
+    res.status(500).json({ success: false, message: 'Failed to recalculate statuses', error: error.message });
   }
 });
 

@@ -690,7 +690,7 @@ router.put('/students/:id', [
 
     const { id } = req.params;
     const { first_name, last_name, grade_id, class_id, is_active,
-            is_boarder, uses_transport, uses_aftercare } = req.body;
+            is_boarder, uses_transport, uses_aftercare, has_sibling_discount } = req.body;
 
     const updateFields = [];
     const params = [];
@@ -742,6 +742,12 @@ router.put('/students/:id', [
       paramCount++;
       updateFields.push(`uses_aftercare = $${paramCount}`);
       params.push(Boolean(uses_aftercare));
+    }
+
+    if (has_sibling_discount !== undefined) {
+      paramCount++;
+      updateFields.push(`has_sibling_discount = $${paramCount}`);
+      params.push(Boolean(has_sibling_discount));
     }
 
     if (updateFields.length === 0) {

@@ -221,6 +221,7 @@ const StudentManagement = () => {
       is_boarder: student.is_boarder || false,
       uses_transport: student.uses_transport || false,
       uses_aftercare: student.uses_aftercare || false,
+      has_sibling_discount: student.has_sibling_discount || false,
     });
   };
 
@@ -618,6 +619,7 @@ const StudentManagement = () => {
                                   { field: 'is_boarder', label: 'Boarding' },
                                   { field: 'uses_transport', label: 'Transport' },
                                   { field: 'uses_aftercare', label: 'Aftercare' },
+                                  { field: 'has_sibling_discount', label: 'Sibling Discount (R150 off)' },
                                 ].map(({ field, label }) => (
                                   <label key={field} className="flex items-center gap-2 cursor-pointer select-none">
                                     <input
