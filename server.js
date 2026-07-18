@@ -893,6 +893,7 @@ const startServer = async () => {
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS uses_transport BOOLEAN DEFAULT false`);
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS uses_aftercare BOOLEAN DEFAULT false`);
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_sibling_discount BOOLEAN DEFAULT false`);
+      await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_teacher_discount BOOLEAN DEFAULT false`);
 
       await db.query(`
         CREATE TABLE IF NOT EXISTS pending_payments (

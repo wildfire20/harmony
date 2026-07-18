@@ -57,7 +57,8 @@ router.post('/generate-monthly', [
     // Get ALL active students (no enrollment date filter — include everyone active)
     const studentsResult = await db.query(`
       SELECT u.id, u.student_number, u.first_name, u.last_name, u.grade_id, u.class_id,
-             COALESCE(u.has_sibling_discount, false) AS has_sibling_discount
+             COALESCE(u.has_sibling_discount, false) AS has_sibling_discount,
+             COALESCE(u.has_teacher_discount, false) AS has_teacher_discount
       FROM users u
       WHERE u.role = 'student' AND u.is_active = true
     `);
@@ -91,9 +92,13 @@ router.post('/generate-monthly', [
     // Generate invoices — apply R150 sibling discount where applicable
     const invoicePromises = studentsToInvoice.map(student => {
       const referenceNumber = student.student_number;
-      const studentAmountDue = student.has_sibling_discount
-        ? Math.max(0, parseFloat(amountDue) - 150)
-        : parseFloat(amountDue);
+      // Teacher discount (50% off) takes priority; sibling discount (R150 off) applies otherwise
+      let studentAmountDue = parseFloat(amountDue);
+      if (student.has_teacher_discount) {
+        studentAmountDue = Math.max(0, studentAmountDue * 0.5);
+      } else if (student.has_sibling_discount) {
+        studentAmountDue = Math.max(0, studentAmountDue - 150);
+      }
 
       return db.query(`
         INSERT INTO invoices (
@@ -114,12 +119,16 @@ router.post('/generate-monthly', [
 
     const invoiceResults = await Promise.all(invoicePromises);
     const createdInvoices = invoiceResults.map(result => result.rows[0]);
-    const siblingDiscountCount = studentsToInvoice.filter(s => s.has_sibling_discount).length;
+    const siblingDiscountCount = studentsToInvoice.filter(s => s.has_sibling_discount && !s.has_teacher_discount).length;
+    const teacherDiscountCount = studentsToInvoice.filter(s => s.has_teacher_discount).length;
 
-    console.log(`Successfully created ${createdInvoices.length} invoices (${siblingDiscountCount} with R150 sibling discount)`);
+    console.log(`Successfully created ${createdInvoices.length} invoices (${siblingDiscountCount} sibling, ${teacherDiscountCount} teacher discounts)`);
 
     const skipMsg = skippedCount > 0 ? ` (${skippedCount} student${skippedCount !== 1 ? 's' : ''} already had invoices — skipped)` : '';
-    const discountMsg = siblingDiscountCount > 0 ? ` — R150 sibling discount applied to ${siblingDiscountCount} student${siblingDiscountCount !== 1 ? 's' : ''}` : '';
+    const parts = [];
+    if (siblingDiscountCount > 0) parts.push(`R150 sibling discount × ${siblingDiscountCount}`);
+    if (teacherDiscountCount > 0) parts.push(`50% teacher discount × ${teacherDiscountCount}`);
+    const discountMsg = parts.length > 0 ? ` — ${parts.join(', ')}` : '';
 
     res.status(201).json({
       success: true,
@@ -130,6 +139,7 @@ router.post('/generate-monthly', [
         invoicesCreated: createdInvoices.length,
         skipped: skippedCount,
         siblingDiscountsApplied: siblingDiscountCount,
+      teacherDiscountsApplied: teacherDiscountCount,
         month,
         year,
         dueDate

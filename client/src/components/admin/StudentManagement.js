@@ -222,6 +222,7 @@ const StudentManagement = () => {
       uses_transport: student.uses_transport || false,
       uses_aftercare: student.uses_aftercare || false,
       has_sibling_discount: student.has_sibling_discount || false,
+      has_teacher_discount: student.has_teacher_discount || false,
     });
   };
 
@@ -620,6 +621,7 @@ const StudentManagement = () => {
                                   { field: 'uses_transport', label: 'Transport' },
                                   { field: 'uses_aftercare', label: 'Aftercare' },
                                   { field: 'has_sibling_discount', label: 'Sibling Discount (R150 off)' },
+                                  { field: 'has_teacher_discount', label: "Teacher's Child (50% off)" },
                                 ].map(({ field, label }) => (
                                   <label key={field} className="flex items-center gap-2 cursor-pointer select-none">
                                     <input

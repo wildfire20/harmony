@@ -750,6 +750,12 @@ router.put('/students/:id', [
       params.push(Boolean(has_sibling_discount));
     }
 
+    if (req.body.has_teacher_discount !== undefined) {
+      paramCount++;
+      updateFields.push(`has_teacher_discount = $${paramCount}`);
+      params.push(Boolean(req.body.has_teacher_discount));
+    }
+
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'No fields to update' });
     }
