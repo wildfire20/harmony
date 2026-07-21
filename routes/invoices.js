@@ -196,6 +196,115 @@ router.post('/recalculate-status', [
   }
 });
 
+// Preview students with outstanding balances from a given year (for carry-forward)
+router.get('/arrears-preview', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { year } = req.query;
+    if (!year || isNaN(parseInt(year))) {
+      return res.status(400).json({ success: false, message: 'A valid year is required' });
+    }
+
+    const result = await db.query(`
+      SELECT
+        u.id            AS student_id,
+        u.student_number,
+        u.first_name,
+        u.last_name,
+        SUM(i.outstanding_balance)  AS total_outstanding,
+        COUNT(i.id)                 AS invoice_count
+      FROM users u
+      JOIN invoices i ON i.student_id = u.id
+      WHERE u.role = 'student'
+        AND EXTRACT(YEAR FROM i.due_date) = $1
+        AND i.status NOT IN ('Paid', 'Overpaid', 'Carried Forward')
+        AND i.outstanding_balance > 0
+      GROUP BY u.id, u.student_number, u.first_name, u.last_name
+      HAVING SUM(i.outstanding_balance) > 0
+      ORDER BY u.student_number
+    `, [parseInt(year)]);
+
+    res.json({ success: true, students: result.rows, year: parseInt(year) });
+  } catch (error) {
+    console.error('Arrears preview error:', error);
+    res.status(500).json({ success: false, message: 'Failed to load arrears preview', error: error.message });
+  }
+});
+
+// Carry forward outstanding arrears from a previous year into a new invoice
+router.post('/carry-forward', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { fromYear, dueDate, students } = req.body;
+
+    if (!fromYear || !students || students.length === 0) {
+      return res.status(400).json({ success: false, message: 'fromYear and at least one student are required' });
+    }
+
+    const effectiveDueDate = dueDate || new Date(new Date().getFullYear(), 11, 31);
+
+    const client = await db.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const created = [];
+      for (const s of students) {
+        const amount = parseFloat(s.amount);
+        if (!amount || amount <= 0) continue;
+
+        // Create the arrears invoice in the current year
+        const invoiceResult = await client.query(`
+          INSERT INTO invoices (
+            student_id, student_number, amount_due, due_date, status,
+            reference_number, description, created_by, created_at
+          ) VALUES ($1, $2, $3, $4, 'Unpaid', $5, $6, $7, NOW())
+          RETURNING *
+        `, [
+          s.student_id,
+          s.student_number,
+          amount,
+          effectiveDueDate,
+          s.student_number,
+          `Arrears from ${fromYear}`,
+          req.user.id
+        ]);
+        created.push(invoiceResult.rows[0]);
+
+        // Mark the original unpaid invoices from that year as Carried Forward
+        await client.query(`
+          UPDATE invoices
+          SET status = 'Carried Forward', updated_at = NOW()
+          WHERE student_id = $1
+            AND EXTRACT(YEAR FROM due_date) = $2
+            AND status NOT IN ('Paid', 'Overpaid', 'Carried Forward')
+            AND outstanding_balance > 0
+        `, [s.student_id, parseInt(fromYear)]);
+      }
+
+      await client.query('COMMIT');
+
+      console.log(`Carried forward arrears for ${created.length} students from ${fromYear}`);
+      res.json({
+        success: true,
+        message: `Arrears carried forward for ${created.length} student${created.length !== 1 ? 's' : ''} from ${fromYear}`,
+        created
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Carry forward error:', error);
+    res.status(500).json({ success: false, message: 'Failed to carry forward arrears', error: error.message });
+  }
+});
+
 // Get all invoices with filtering and pagination
 router.get('/', [
   authenticate,
