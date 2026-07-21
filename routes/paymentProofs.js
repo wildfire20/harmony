@@ -163,6 +163,19 @@ router.get('/my', requireParent, async (req, res) => {
   }
 });
 
+// ─── GET /api/payment-proofs/count  (admin – count pending) ──────────────────
+router.get('/count', requireAdmin, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT COUNT(*) AS count FROM pending_payments WHERE status = 'pending'`
+    );
+    res.json({ count: parseInt(result.rows[0].count, 10) });
+  } catch (err) {
+    console.error('Pending proofs count error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // ─── GET /api/payment-proofs  (admin sees all pending) ───────────────────────
 router.get('/', requireAdmin, async (req, res) => {
   try {

@@ -242,4 +242,8 @@ export const paymentsAPI = {
   searchStudents: (query) => api.get('/enhanced-invoices/search-students', { params: { q: query } }),
 };
 
+export const paymentProofsAPI = {
+  getPendingCount: () => api.get('/payment-proofs/count'),
+};
+
 export default api;

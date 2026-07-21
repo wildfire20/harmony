@@ -14,7 +14,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { adminAPI, announcementsAPI, enrollmentsAPI } from '../../services/api';
+import { adminAPI, announcementsAPI, enrollmentsAPI, paymentProofsAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { useTheme } from '../common/ThemeProvider';
 
@@ -39,9 +39,16 @@ const AdminDashboard = () => {
     { refetchInterval: 5 * 60 * 1000, refetchOnWindowFocus: true }
   );
 
+  const { data: pendingProofsData } = useQuery(
+    ['pending-proofs-count'],
+    () => paymentProofsAPI.getPendingCount(),
+    { refetchInterval: 2 * 60 * 1000, refetchOnWindowFocus: true }
+  );
+
   const stats = statsData?.data || {};
   const announcements = announcementsData?.data?.announcements || [];
   const pendingEnrollments = parseInt(enrollmentStatsData?.data?.pending || 0);
+  const pendingProofs = parseInt(pendingProofsData?.data?.count || 0);
 
   const getPriorityColor = (priority) => {
     switch (priority) {
@@ -84,6 +91,32 @@ const AdminDashboard = () => {
           <button
             onClick={() => navigate('/admin', { state: { tab: 'enrollments' } })}
             className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition-colors shadow-sm whitespace-nowrap"
+          >
+            <ClipboardList className="h-4 w-4" />
+            Review Now
+          </button>
+        </div>
+      )}
+
+      {/* Pending Payment Proofs Alert */}
+      {pendingProofs > 0 && (
+        <div className="flex items-center justify-between gap-4 bg-blue-50 border-2 border-blue-400 rounded-2xl px-5 py-4 shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="flex-shrink-0 p-2 bg-blue-500 rounded-xl">
+              <ClipboardList className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <p className="font-bold text-blue-800 text-base">
+                {pendingProofs} Proof{pendingProofs !== 1 ? 's' : ''} of Payment Awaiting Approval
+              </p>
+              <p className="text-blue-700 text-sm mt-0.5">
+                Parent{pendingProofs !== 1 ? 's have' : ' has'} submitted payment receipt{pendingProofs !== 1 ? 's' : ''} that {pendingProofs !== 1 ? 'need' : 'needs'} your review.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/payments', { state: { tab: 'pending' } })}
+            className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-xl transition-colors shadow-sm whitespace-nowrap"
           >
             <ClipboardList className="h-4 w-4" />
             Review Now

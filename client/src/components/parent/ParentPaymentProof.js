@@ -39,6 +39,34 @@ export default function ParentPaymentProof({ child, embedded = false }) {
   const [selectedServices, setSelectedServices] = useState([]);
 
   const fileRef = useRef();
+  const [receiptModal, setReceiptModal] = useState(null);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+
+  const viewReceipt = async (id, fileName) => {
+    setReceiptLoading(id);
+    try {
+      const token = localStorage.getItem('parentToken');
+      const res = await fetch(`/api/payment-proofs/${id}/receipt`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || 'Could not load receipt');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setReceiptModal({ url, mime: blob.type, fileName: fileName || 'Receipt' });
+    } catch (err) {
+      setError(`Could not open receipt: ${err.message}`);
+    } finally {
+      setReceiptLoading(null);
+    }
+  };
+
+  const closeReceiptModal = () => {
+    if (receiptModal?.url) URL.revokeObjectURL(receiptModal.url);
+    setReceiptModal(null);
+  };
 
   // Which service keys apply to this child
   const applicableServiceKeys = ['tuition'].concat([
@@ -419,14 +447,14 @@ export default function ParentPaymentProof({ child, embedded = false }) {
                       </div>
                     )}
                     {sub.receipt_file_name && (
-                      <a
-                        href={`/api/payment-proofs/${sub.id}/receipt`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-3 flex items-center gap-1.5 text-xs text-blue-600 font-medium"
+                      <button
+                        onClick={() => viewReceipt(sub.id, sub.receipt_file_name)}
+                        disabled={receiptLoading === sub.id}
+                        className="mt-3 flex items-center gap-1.5 text-xs text-blue-600 font-medium disabled:opacity-50"
                       >
-                        <Receipt className="h-3.5 w-3.5" /> View receipt
-                      </a>
+                        <Receipt className="h-3.5 w-3.5" />
+                        {receiptLoading === sub.id ? 'Opening…' : 'View receipt'}
+                      </button>
                     )}
                   </div>
                 );
@@ -434,6 +462,33 @@ export default function ParentPaymentProof({ child, embedded = false }) {
             </div>
           )}
         </>
+      )}
+
+      {/* Receipt Viewer Modal */}
+      {receiptModal && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={closeReceiptModal}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+              <p className="text-sm font-semibold text-gray-700 truncate">{receiptModal.fileName}</p>
+              <button onClick={closeReceiptModal} className="text-gray-400 hover:text-gray-700 text-2xl leading-none ml-3">&times;</button>
+            </div>
+            <div className="flex-1 overflow-auto flex items-center justify-center bg-gray-50 p-2 min-h-[280px]">
+              {receiptModal.mime === 'application/pdf' ? (
+                <iframe
+                  src={receiptModal.url}
+                  title="Receipt"
+                  className="w-full min-h-[400px] rounded"
+                />
+              ) : (
+                <img
+                  src={receiptModal.url}
+                  alt="Receipt"
+                  className="max-w-full max-h-[65vh] object-contain rounded"
+                />
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

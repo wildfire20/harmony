@@ -35,25 +35,33 @@ export default function PendingPayments() {
   const [adminNote, setAdminNote] = useState('');
   const [feedback, setFeedback] = useState(null);
   const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptModal, setReceiptModal] = useState(null);
 
   const viewReceipt = async (id, fileName) => {
     setReceiptLoading(true);
+    setFeedback(null);
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(`${API_BASE}/payment-proofs/${id}/receipt`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error('Could not load receipt');
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || 'Could not load receipt');
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const win = window.open(url, '_blank');
-      // Revoke the blob URL after the new tab has had time to load it
-      if (win) setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setReceiptModal({ url, mime: blob.type, fileName: fileName || 'Receipt' });
     } catch (err) {
       setFeedback({ type: 'error', message: `Could not open receipt: ${err.message}` });
     } finally {
       setReceiptLoading(false);
     }
+  };
+
+  const closeReceiptModal = () => {
+    if (receiptModal?.url) URL.revokeObjectURL(receiptModal.url);
+    setReceiptModal(null);
   };
 
   const load = useCallback(async () => {
@@ -193,6 +201,33 @@ export default function PendingPayments() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Receipt Viewer Modal */}
+      {receiptModal && (
+        <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center p-4" onClick={closeReceiptModal}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+              <p className="text-sm font-semibold text-gray-700 truncate">{receiptModal.fileName}</p>
+              <button onClick={closeReceiptModal} className="text-gray-400 hover:text-gray-700 text-2xl leading-none ml-4">&times;</button>
+            </div>
+            <div className="flex-1 overflow-auto flex items-center justify-center bg-gray-50 p-2 min-h-[300px]">
+              {receiptModal.mime === 'application/pdf' ? (
+                <iframe
+                  src={receiptModal.url}
+                  title="Receipt"
+                  className="w-full h-full min-h-[500px] rounded"
+                />
+              ) : (
+                <img
+                  src={receiptModal.url}
+                  alt="Receipt"
+                  className="max-w-full max-h-[70vh] object-contain rounded"
+                />
+              )}
+            </div>
           </div>
         </div>
       )}
