@@ -909,6 +909,7 @@ const startServer = async () => {
           receipt_s3_key TEXT,
           receipt_s3_url TEXT,
           receipt_mime_type VARCHAR(100),
+          receipt_data BYTEA,
           status VARCHAR(20) DEFAULT 'pending',
           submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           reviewed_at TIMESTAMP,
@@ -916,6 +917,7 @@ const startServer = async () => {
           admin_note TEXT
         )
       `);
+      await db.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS receipt_data BYTEA`);
       await db.query(`CREATE INDEX IF NOT EXISTS idx_pending_payments_parent ON pending_payments(parent_id)`);
       await db.query(`CREATE INDEX IF NOT EXISTS idx_pending_payments_student ON pending_payments(student_id)`);
       await db.query(`CREATE INDEX IF NOT EXISTS idx_pending_payments_status ON pending_payments(status)`);

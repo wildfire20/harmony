@@ -101,39 +101,47 @@ router.post('/', requireParent, upload.single('receipt'), async (req, res) => {
 
     const child = await resolveChild(req.user.id, child_id);
 
-    let receiptFileName = null, receiptFilePath = null, receiptS3Key = null, receiptS3Url = null, receiptMime = null;
+    let receiptFileName = null, receiptFilePath = null, receiptS3Key = null, receiptS3Url = null, receiptMime = null, receiptData = null;
 
     if (req.file) {
       receiptFileName = req.file.originalname;
       receiptMime = req.file.mimetype;
+      // Always store the raw buffer in the database for reliable retrieval across deployments
+      receiptData = req.file.buffer;
+
       if (s3Service.isConfigValid) {
         try {
-          const result = await s3Service.uploadFile(req.file.buffer, req.file.originalname, req.file.mimetype, 'payment-proofs');
-          receiptS3Key = result.s3Key;
-          receiptS3Url = result.s3Url;
+          const s3Result = await s3Service.uploadFile(req.file.buffer, req.file.originalname, req.file.mimetype, 'payment-proofs');
+          receiptS3Key = s3Result.s3Key;
+          receiptS3Url = s3Result.s3Url;
         } catch (s3Err) {
-          console.warn('S3 upload failed, falling back to local:', s3Err.message);
+          console.warn('S3 upload failed, will use DB storage:', s3Err.message);
         }
       }
       if (!receiptS3Key) {
-        const localDir = path.join(__dirname, '../uploads/payment-proofs');
-        if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
-        const safeName = `${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
-        const fullPath = path.join(localDir, safeName);
-        fs.writeFileSync(fullPath, req.file.buffer);
-        receiptFilePath = `/uploads/payment-proofs/${safeName}`;
+        // Also save to local disk as a fallback (best-effort; ephemeral on Railway)
+        try {
+          const localDir = path.join(__dirname, '../uploads/payment-proofs');
+          if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+          const safeName = `${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
+          const fullPath = path.join(localDir, safeName);
+          fs.writeFileSync(fullPath, req.file.buffer);
+          receiptFilePath = `/uploads/payment-proofs/${safeName}`;
+        } catch (diskErr) {
+          console.warn('Local disk save failed (non-fatal, DB storage used):', diskErr.message);
+        }
       }
     }
 
     const result = await db.query(`
       INSERT INTO pending_payments
         (parent_id, student_id, amount, payment_method, reference, notes,
-         receipt_file_name, receipt_file_path, receipt_s3_key, receipt_s3_url, receipt_mime_type)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         receipt_file_name, receipt_file_path, receipt_s3_key, receipt_s3_url, receipt_mime_type, receipt_data)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       RETURNING *
     `, [req.user.id, child.id, parseFloat(amount).toFixed(2), payment_method,
         reference || null, notes || null,
-        receiptFileName, receiptFilePath, receiptS3Key, receiptS3Url, receiptMime]);
+        receiptFileName, receiptFilePath, receiptS3Key, receiptS3Url, receiptMime, receiptData]);
 
     res.status(201).json({ message: 'Proof of payment submitted successfully', submission: result.rows[0] });
   } catch (err) {
@@ -220,6 +228,18 @@ router.get('/:id/receipt', authenticate, async (req, res) => {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
+    const mime = proof.receipt_mime_type || 'application/octet-stream';
+    const fileName = proof.receipt_file_name || 'receipt';
+
+    // 1. Serve from database (most reliable — survives Railway redeploys)
+    if (proof.receipt_data) {
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      return res.send(proof.receipt_data);
+    }
+
+    // 2. S3 signed URL
     if (proof.receipt_s3_key && s3Service.isConfigValid) {
       try {
         const url = await s3Service.getSignedUrl(proof.receipt_s3_key, 300);
@@ -227,21 +247,20 @@ router.get('/:id/receipt', authenticate, async (req, res) => {
       } catch (e) { console.warn('S3 signed URL failed:', e.message); }
     }
 
-    if (proof.receipt_s3_url) return res.redirect(proof.receipt_s3_url);
-
+    // 3. Local disk (best-effort; only works if server hasn't been redeployed)
     if (proof.receipt_file_path) {
       const localPath = path.join(__dirname, '..', proof.receipt_file_path);
       if (fs.existsSync(localPath)) {
-        res.setHeader('Content-Type', proof.receipt_mime_type || 'application/octet-stream');
-        res.setHeader('Content-Disposition', `inline; filename="${proof.receipt_file_name || 'receipt'}"`);
+        res.setHeader('Content-Type', mime);
+        res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
         return fs.createReadStream(localPath).pipe(res);
       }
     }
 
-    res.status(404).json({ message: 'Receipt file not found' });
+    res.status(404).json({ message: 'Receipt file not found. It may have been lost during a server update. Please ask the parent to re-submit.' });
   } catch (err) {
     console.error('Receipt view error:', err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error retrieving receipt' });
   }
 });
 
