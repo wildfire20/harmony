@@ -264,6 +264,19 @@ router.get('/:id/receipt', authenticate, async (req, res) => {
   }
 });
 
+// ─── DELETE /api/payment-proofs/:id  (admin deletes a submission) ────────────
+router.delete('/:id', requireAdmin, async (req, res) => {
+  try {
+    const result = await db.query('SELECT id FROM pending_payments WHERE id=$1', [req.params.id]);
+    if (!result.rows.length) return res.status(404).json({ message: 'Submission not found' });
+    await db.query('DELETE FROM pending_payments WHERE id=$1', [req.params.id]);
+    res.json({ message: 'Submission deleted' });
+  } catch (err) {
+    console.error('Delete proof error:', err);
+    res.status(500).json({ message: 'Server error deleting submission' });
+  }
+});
+
 // ─── POST /api/payment-proofs/:id/approve  (admin approves) ──────────────────
 router.post('/:id/approve', requireAdmin, async (req, res) => {
   try {

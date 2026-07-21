@@ -103,6 +103,28 @@ export default function PendingPayments() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!selected) return;
+    if (!window.confirm(`Delete this submission from ${selected.student_first_name} ${selected.student_last_name}? This cannot be undone.`)) return;
+    setActionLoading(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`${API_BASE}/payment-proofs/${selected.id}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setSelected(null);
+      setAdminNote('');
+      load();
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.message });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const pendingCount = submissions.filter(s => s.status === 'pending').length;
 
   return (
@@ -315,6 +337,17 @@ export default function PendingPayments() {
                   <p className="text-xs text-gray-400 text-center">Approving will automatically apply the payment to the student's outstanding balance.</p>
                 </div>
               )}
+
+              {/* Delete — always available */}
+              <div className="pt-2 border-t border-gray-100 flex justify-center">
+                <button
+                  onClick={handleDelete}
+                  disabled={actionLoading}
+                  className="text-xs text-red-400 hover:text-red-600 underline disabled:opacity-50 transition-colors"
+                >
+                  Delete this submission
+                </button>
+              </div>
             </div>
           </div>
         </div>
