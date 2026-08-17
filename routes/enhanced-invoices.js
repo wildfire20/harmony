@@ -983,14 +983,15 @@ router.get('/student-payment-history/:studentNumber', [
       return a.monthNumber - b.monthNumber;
     });
     
-    // Calculate summary — "Total Amount Due" is month-to-month (only up to the current month,
-    // not future months the admin may have already generated invoices for)
+    // Calculate summary — "Total Amount Due" is strictly month-to-month for the CURRENT year only,
+    // from the student's first invoice month this year (or January if enrolled before this year)
+    // up to and including the current month.  Prior-year arrears are excluded from this figure.
     const now = new Date();
-    const currentYear = now.getFullYear();
+    const currentYear  = now.getFullYear();
     const currentMonth = now.getMonth() + 1; // 1-based
 
     const monthsUpToNow = monthlyHistory.filter(m =>
-      m.year < currentYear || (m.year === currentYear && m.monthNumber <= currentMonth)
+      m.year === currentYear && m.monthNumber <= currentMonth
     );
 
     const totalDue = monthsUpToNow.reduce((sum, m) => sum + m.amountDue, 0);
@@ -1254,16 +1255,29 @@ router.get('/student-payment-history/:studentNumber', [
         rowNum++;
       });
       
-      // Set column widths — wide enough for all labels and values
+      // Set column widths — narrowed to fit on one A4 landscape page
       worksheet.columns = [
-        { width: 32 },  // A: labels like "Outstanding Balance:", "Account Holder:", "Reference:"
-        { width: 34 },  // B: values like "HARMONY LEARNING INSTITUTE", "First National Bank (FNB)"
-        { width: 18 },  // C: Amount Due
-        { width: 18 },  // D: Amount Paid
-        { width: 18 },  // E: Outstanding
-        { width: 22 },  // F: Status
-        { width: 32 }   // G: Reference
+        { width: 22 },  // A: labels ("Outstanding Balance:", "Reference Number:", …)
+        { width: 22 },  // B: values ("HARMONY LEARNING INSTITUTE", amounts, …)
+        { width: 13 },  // C: Amount Due
+        { width: 13 },  // D: Amount Paid
+        { width: 13 },  // E: Outstanding
+        { width: 14 },  // F: Status ("Missed Payment")
+        { width: 20 },  // G: Reference number
       ];
+
+      // Page setup — A4 landscape, always fit to one page width
+      worksheet.pageSetup = {
+        paperSize:   9,           // 9 = A4
+        orientation: 'landscape',
+        fitToPage:   true,
+        fitToWidth:  1,           // shrink to exactly 1 page wide
+        fitToHeight: 0,           // allow as many rows tall as needed
+        margins: {
+          left: 0.5, right: 0.5, top: 0.75, bottom: 0.75,
+          header: 0.3, footer: 0.3
+        }
+      };
       
       // Generate buffer
       const buffer = await workbook.xlsx.writeBuffer();
