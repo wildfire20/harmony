@@ -842,9 +842,11 @@ router.get('/student-payment-history/:studentNumber', [
     const studentResult = await db.query(`
       SELECT u.id, u.first_name, u.last_name, u.student_number, u.created_at,
              g.name AS grade,
-             COALESCE(u.is_boarder, false)       AS is_boarder,
-             COALESCE(u.uses_transport, false)   AS uses_transport,
-             COALESCE(u.uses_aftercare, false)   AS uses_aftercare
+             COALESCE(u.is_boarder, false)              AS is_boarder,
+             COALESCE(u.uses_transport, false)          AS uses_transport,
+             COALESCE(u.uses_aftercare, false)          AS uses_aftercare,
+             COALESCE(u.has_sibling_discount, false)    AS has_sibling_discount,
+             COALESCE(u.has_teacher_discount, false)    AS has_teacher_discount
       FROM users u
       LEFT JOIN grades g ON u.grade_id = g.id
       WHERE u.student_number ILIKE $1 OR u.student_number ILIKE $2
@@ -994,12 +996,21 @@ router.get('/student-payment-history/:studentNumber', [
       return a.monthNumber - b.monthNumber;
     });
     
-    // Calculate summary
-    const totalDue = monthlyHistory.reduce((sum, m) => sum + m.amountDue, 0);
+    // Calculate summary — "Total Amount Due" is month-to-month (only up to the current month,
+    // not future months the admin may have already generated invoices for)
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-based
+
+    const monthsUpToNow = monthlyHistory.filter(m =>
+      m.year < currentYear || (m.year === currentYear && m.monthNumber <= currentMonth)
+    );
+
+    const totalDue = monthsUpToNow.reduce((sum, m) => sum + m.amountDue, 0);
     const totalPaid = monthlyHistory.reduce((sum, m) => sum + m.amountPaid, 0);
-    const totalOutstanding = monthlyHistory.reduce((sum, m) => sum + m.outstanding, 0);
-    const missedCount = monthlyHistory.filter(m => m.paymentStatus === 'Missed Payment').length;
-    const paidCount = monthlyHistory.filter(m => m.paymentStatus === 'Paid' || m.paymentStatus === 'Overpaid').length;
+    const totalOutstanding = Math.max(0, totalDue - totalPaid);
+    const missedCount = monthsUpToNow.filter(m => m.paymentStatus === 'Missed Payment').length;
+    const paidCount = monthsUpToNow.filter(m => m.paymentStatus === 'Paid' || m.paymentStatus === 'Overpaid').length;
     
     const responseData = {
       success: true,
@@ -1092,7 +1103,19 @@ router.get('/student-payment-history/:studentNumber', [
       if (student.uses_aftercare && servicePrices['aftercare']) {
         applicableServices.push({ label: servicePrices['aftercare'].label || 'Aftercare Fee', amount: servicePrices['aftercare'].amount });
       }
-      const monthlyTotal = applicableServices.reduce((s, f) => s + f.amount, 0);
+      const subtotal = applicableServices.reduce((s, f) => s + f.amount, 0);
+
+      // Determine discount
+      let discountLabel = null;
+      let discountAmount = 0;
+      if (student.has_teacher_discount) {
+        discountAmount = subtotal * 0.5;
+        discountLabel = "Teacher's Child Discount (50% off):";
+      } else if (student.has_sibling_discount) {
+        discountAmount = 150;
+        discountLabel = 'Sibling Discount:';
+      }
+      const monthlyTotal = Math.max(0, subtotal - discountAmount);
 
       const feeStructureRow = studentInfoRow + 4;
       worksheet.getCell(`A${feeStructureRow}`).value = 'FEE STRUCTURE';
@@ -1105,7 +1128,20 @@ router.get('/student-payment-history/:studentNumber', [
         worksheet.getCell(`B${r}`).numFmt = 'R #,##0.00';
       });
 
-      const totalFeeRow = feeStructureRow + 1 + applicableServices.length;
+      let feeRowOffset = applicableServices.length;
+
+      // Show discount row if applicable
+      if (discountLabel) {
+        const discountRow = feeStructureRow + 1 + feeRowOffset;
+        worksheet.getCell(`A${discountRow}`).value = discountLabel;
+        worksheet.getCell(`A${discountRow}`).font = { italic: true, color: { argb: 'FF16A34A' } };
+        worksheet.getCell(`B${discountRow}`).value = -discountAmount;
+        worksheet.getCell(`B${discountRow}`).numFmt = 'R #,##0.00';
+        worksheet.getCell(`B${discountRow}`).font = { italic: true, color: { argb: 'FF16A34A' } };
+        feeRowOffset += 1;
+      }
+
+      const totalFeeRow = feeStructureRow + 1 + feeRowOffset;
       worksheet.getCell(`A${totalFeeRow}`).value = 'Monthly Total:';
       worksheet.getCell(`A${totalFeeRow}`).font = { bold: true };
       worksheet.getCell(`B${totalFeeRow}`).value = monthlyTotal;
@@ -1113,7 +1149,7 @@ router.get('/student-payment-history/:studentNumber', [
       worksheet.getCell(`B${totalFeeRow}`).font = { bold: true, color: { argb: 'FF1E40AF' } };
 
       // Gap before summary
-      const feeStructureHeight = 1 + applicableServices.length + 1; // header + service rows + total row
+      const feeStructureHeight = 1 + feeRowOffset + 1; // header + service rows (+ optional discount) + total row
 
       // Summary section
       const summaryRow = feeStructureRow + feeStructureHeight + 2;
@@ -1231,15 +1267,15 @@ router.get('/student-payment-history/:studentNumber', [
         rowNum++;
       });
       
-      // Set column widths
+      // Set column widths — wide enough for all labels and values
       worksheet.columns = [
-        { width: 10 },
-        { width: 12 },
-        { width: 15 },
-        { width: 15 },
-        { width: 15 },
-        { width: 18 },
-        { width: 20 }
+        { width: 32 },  // A: labels like "Outstanding Balance:", "Account Holder:", "Reference:"
+        { width: 34 },  // B: values like "HARMONY LEARNING INSTITUTE", "First National Bank (FNB)"
+        { width: 18 },  // C: Amount Due
+        { width: 18 },  // D: Amount Paid
+        { width: 18 },  // E: Outstanding
+        { width: 22 },  // F: Status
+        { width: 32 }   // G: Reference
       ];
       
       // Generate buffer

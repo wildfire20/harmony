@@ -63,12 +63,22 @@ const PaymentDashboard = () => {
 
   // Carry-forward arrears modal states
   const [showCarryForwardModal, setShowCarryForwardModal] = useState(false);
+  const [cfTab, setCfTab] = useState('auto'); // 'auto' | 'manual'
   const [cfFromYear, setCfFromYear] = useState(new Date().getFullYear() - 1);
   const [cfDueDate, setCfDueDate] = useState(`${new Date().getFullYear()}-12-31`);
   const [cfStudents, setCfStudents] = useState([]);
   const [cfSelected, setCfSelected] = useState({});
   const [cfLoading, setCfLoading] = useState(false);
   const [cfSubmitting, setCfSubmitting] = useState(false);
+  // Manual arrears entry states
+  const [cfManualSearch, setCfManualSearch] = useState('');
+  const [cfManualSearchResults, setCfManualSearchResults] = useState([]);
+  const [cfManualSearching, setCfManualSearching] = useState(false);
+  const [cfManualStudent, setCfManualStudent] = useState(null);
+  const [cfManualAmount, setCfManualAmount] = useState('');
+  const [cfManualDescription, setCfManualDescription] = useState('');
+  const [cfManualDueDate, setCfManualDueDate] = useState(`${new Date().getFullYear()}-12-31`);
+  const [cfManualSubmitting, setCfManualSubmitting] = useState(false);
 
   // Check if user is admin
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
@@ -257,6 +267,57 @@ const PaymentDashboard = () => {
       setShowGhostModal(false);
     } finally {
       setGhostModalLoading(false);
+    }
+  };
+
+  // Manual arrears: search students as admin types
+  const searchManualStudent = async (query) => {
+    setCfManualSearch(query);
+    setCfManualStudent(null);
+    if (query.length < 2) { setCfManualSearchResults([]); return; }
+    setCfManualSearching(true);
+    try {
+      const res = await fetch(`/api/enhanced-invoices/search-students?q=${encodeURIComponent(query)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setCfManualSearchResults(data.students || []);
+    } catch { setCfManualSearchResults([]); }
+    finally { setCfManualSearching(false); }
+  };
+
+  const handleManualArrearsSubmit = async () => {
+    if (!cfManualStudent) { toast.error('Please select a student'); return; }
+    const amt = parseFloat(cfManualAmount);
+    if (!amt || amt <= 0) { toast.error('Please enter a valid amount'); return; }
+    if (!window.confirm(`Create an arrears invoice of R${amt.toFixed(2)} for ${cfManualStudent.fullName}? This will appear as an outstanding invoice in their account.`)) return;
+    setCfManualSubmitting(true);
+    try {
+      const res = await fetch('/api/invoices/manual-arrears', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentNumber: cfManualStudent.studentNumber,
+          amount: amt,
+          description: cfManualDescription || 'Manual arrears entry',
+          dueDate: cfManualDueDate
+        })
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message);
+      toast.success(data.message);
+      // Reset manual form
+      setCfManualStudent(null);
+      setCfManualSearch('');
+      setCfManualSearchResults([]);
+      setCfManualAmount('');
+      setCfManualDescription('');
+      setShowCarryForwardModal(false);
+      fetchInvoices();
+    } catch (error) {
+      toast.error(error.message || 'Failed to create arrears invoice');
+    } finally {
+      setCfManualSubmitting(false);
     }
   };
 
@@ -929,145 +990,287 @@ const PaymentDashboard = () => {
                 <h3 className="text-lg font-semibold text-gray-900">Carry Forward Arrears</h3>
                 <p className="text-sm text-gray-500 mt-0.5">Roll unpaid balances from a previous year into a new invoice for this year</p>
               </div>
-              <button onClick={() => { setShowCarryForwardModal(false); setCfStudents([]); setCfSelected({}); }} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+              <button onClick={() => { setShowCarryForwardModal(false); setCfStudents([]); setCfSelected({}); setCfManualStudent(null); setCfManualSearch(''); setCfManualSearchResults([]); }} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
             </div>
 
-            {/* Controls */}
-            <div className="p-6 border-b bg-gray-50">
-              <div className="flex flex-wrap gap-4 items-end">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">From Year</label>
-                  <select
-                    value={cfFromYear}
-                    onChange={e => { setCfFromYear(parseInt(e.target.value)); setCfStudents([]); setCfSelected({}); }}
-                    className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 - i).map(y => (
-                      <option key={y} value={y}>{y}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Date for New Invoices</label>
-                  <input
-                    type="date"
-                    value={cfDueDate}
-                    onChange={e => setCfDueDate(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-                <button
-                  onClick={loadArrearsPreview}
-                  disabled={cfLoading}
-                  className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {cfLoading ? 'Loading...' : `Preview ${cfFromYear} Arrears`}
-                </button>
-              </div>
+            {/* Tab switcher */}
+            <div className="flex border-b bg-gray-50">
+              <button
+                onClick={() => setCfTab('auto')}
+                className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${cfTab === 'auto' ? 'border-indigo-600 text-indigo-600 bg-white' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+              >
+                Automatic (from year)
+              </button>
+              <button
+                onClick={() => setCfTab('manual')}
+                className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${cfTab === 'manual' ? 'border-indigo-600 text-indigo-600 bg-white' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+              >
+                Manual Entry
+              </button>
             </div>
 
-            {/* Students list */}
-            <div className="flex-1 overflow-y-auto p-6">
-              {cfStudents.length === 0 && !cfLoading && (
-                <p className="text-center text-gray-400 py-10 text-sm">Click "Preview" to load students with outstanding balances from {cfFromYear}</p>
-              )}
-              {cfStudents.length > 0 && (
-                <>
-                  {/* Select all row */}
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={cfStudents.every(s => cfSelected[s.student_id])}
-                        onChange={e => {
-                          const all = {};
-                          cfStudents.forEach(s => { all[s.student_id] = e.target.checked; });
-                          setCfSelected(all);
-                        }}
-                        className="w-4 h-4 accent-indigo-600"
-                      />
-                      Select all ({cfStudents.length} students)
-                    </label>
-                    <span className="text-sm text-gray-500">
-                      Total selected: R {cfStudents
-                        .filter(s => cfSelected[s.student_id])
-                        .reduce((sum, s) => sum + (parseFloat(s.editAmount) || 0), 0)
-                        .toFixed(2)}
-                    </span>
-                  </div>
-
-                  {/* Table */}
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 border-b">
-                        <tr>
-                          <th className="w-10 px-3 py-2"></th>
-                          <th className="px-3 py-2 text-left font-medium text-gray-600">Student</th>
-                          <th className="px-3 py-2 text-right font-medium text-gray-600">Unpaid Invoices</th>
-                          <th className="px-3 py-2 text-right font-medium text-gray-600">Carry Forward Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {cfStudents.map(s => (
-                          <tr key={s.student_id} className={cfSelected[s.student_id] ? 'bg-white' : 'bg-gray-50 opacity-60'}>
-                            <td className="px-3 py-2 text-center">
-                              <input
-                                type="checkbox"
-                                checked={!!cfSelected[s.student_id]}
-                                onChange={e => setCfSelected(prev => ({ ...prev, [s.student_id]: e.target.checked }))}
-                                className="w-4 h-4 accent-indigo-600"
-                              />
-                            </td>
-                            <td className="px-3 py-2">
-                              <p className="font-medium text-gray-900">{s.first_name} {s.last_name}</p>
-                              <p className="text-gray-400 text-xs">{s.student_number}</p>
-                            </td>
-                            <td className="px-3 py-2 text-right text-gray-500">{s.invoice_count} invoice{s.invoice_count != 1 ? 's' : ''}</td>
-                            <td className="px-3 py-2 text-right">
-                              <div className="flex items-center justify-end gap-1">
-                                <span className="text-gray-500">R</span>
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  value={s.editAmount}
-                                  onChange={e => setCfStudents(prev => prev.map(st =>
-                                    st.student_id === s.student_id ? { ...st, editAmount: e.target.value } : st
-                                  ))}
-                                  className="w-28 px-2 py-1 border border-gray-300 rounded text-sm text-right focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                />
-                              </div>
-                            </td>
-                          </tr>
+            {/* ── AUTOMATIC TAB ── */}
+            {cfTab === 'auto' && (
+              <>
+                {/* Controls */}
+                <div className="p-6 border-b bg-gray-50">
+                  <div className="flex flex-wrap gap-4 items-end">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">From Year</label>
+                      <select
+                        value={cfFromYear}
+                        onChange={e => { setCfFromYear(parseInt(e.target.value)); setCfStudents([]); setCfSelected({}); }}
+                        className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 - i).map(y => (
+                          <option key={y} value={y}>{y}</option>
                         ))}
-                      </tbody>
-                    </table>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Due Date for New Invoices</label>
+                      <input
+                        type="date"
+                        value={cfDueDate}
+                        onChange={e => setCfDueDate(e.target.value)}
+                        className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <button
+                      onClick={loadArrearsPreview}
+                      disabled={cfLoading}
+                      className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {cfLoading ? 'Loading...' : `Preview ${cfFromYear} Arrears`}
+                    </button>
                   </div>
-                </>
-              )}
-            </div>
+                </div>
 
-            {/* Footer */}
-            {cfStudents.length > 0 && (
-              <div className="p-6 border-t bg-gray-50 flex justify-between items-center">
-                <p className="text-sm text-gray-600">
-                  {cfStudents.filter(s => cfSelected[s.student_id]).length} of {cfStudents.length} students selected
-                  &nbsp;·&nbsp; Original {cfFromYear} invoices will be marked <span className="font-medium">Carried Forward</span>
-                </p>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => { setShowCarryForwardModal(false); setCfStudents([]); setCfSelected({}); }}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleCarryForward}
-                    disabled={cfSubmitting || cfStudents.filter(s => cfSelected[s.student_id]).length === 0}
-                    className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    {cfSubmitting ? 'Creating...' : 'Create Arrears Invoices'}
-                  </button>
+                {/* Students list */}
+                <div className="flex-1 overflow-y-auto p-6">
+                  {cfStudents.length === 0 && !cfLoading && (
+                    <p className="text-center text-gray-400 py-10 text-sm">Click "Preview" to load students with outstanding balances from {cfFromYear}</p>
+                  )}
+                  {cfStudents.length > 0 && (
+                    <>
+                      {/* Select all row */}
+                      <div className="flex items-center justify-between mb-3">
+                        <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={cfStudents.every(s => cfSelected[s.student_id])}
+                            onChange={e => {
+                              const all = {};
+                              cfStudents.forEach(s => { all[s.student_id] = e.target.checked; });
+                              setCfSelected(all);
+                            }}
+                            className="w-4 h-4 accent-indigo-600"
+                          />
+                          Select all ({cfStudents.length} students)
+                        </label>
+                        <span className="text-sm text-gray-500">
+                          Total selected: R {cfStudents
+                            .filter(s => cfSelected[s.student_id])
+                            .reduce((sum, s) => sum + (parseFloat(s.editAmount) || 0), 0)
+                            .toFixed(2)}
+                        </span>
+                      </div>
+
+                      {/* Table */}
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50 border-b">
+                            <tr>
+                              <th className="w-10 px-3 py-2"></th>
+                              <th className="px-3 py-2 text-left font-medium text-gray-600">Student</th>
+                              <th className="px-3 py-2 text-right font-medium text-gray-600">Unpaid Invoices</th>
+                              <th className="px-3 py-2 text-right font-medium text-gray-600">Carry Forward Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {cfStudents.map(s => (
+                              <tr key={s.student_id} className={cfSelected[s.student_id] ? 'bg-white' : 'bg-gray-50 opacity-60'}>
+                                <td className="px-3 py-2 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!cfSelected[s.student_id]}
+                                    onChange={e => setCfSelected(prev => ({ ...prev, [s.student_id]: e.target.checked }))}
+                                    className="w-4 h-4 accent-indigo-600"
+                                  />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <p className="font-medium text-gray-900">{s.first_name} {s.last_name}</p>
+                                  <p className="text-gray-400 text-xs">{s.student_number}</p>
+                                </td>
+                                <td className="px-3 py-2 text-right text-gray-500">{s.invoice_count} invoice{s.invoice_count != 1 ? 's' : ''}</td>
+                                <td className="px-3 py-2 text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <span className="text-gray-500">R</span>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      value={s.editAmount}
+                                      onChange={e => setCfStudents(prev => prev.map(st =>
+                                        st.student_id === s.student_id ? { ...st, editAmount: e.target.value } : st
+                                      ))}
+                                      className="w-28 px-2 py-1 border border-gray-300 rounded text-sm text-right focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Footer */}
+                {cfStudents.length > 0 && (
+                  <div className="p-6 border-t bg-gray-50 flex justify-between items-center">
+                    <p className="text-sm text-gray-600">
+                      {cfStudents.filter(s => cfSelected[s.student_id]).length} of {cfStudents.length} students selected
+                      &nbsp;·&nbsp; Original {cfFromYear} invoices will be marked <span className="font-medium">Carried Forward</span>
+                    </p>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => { setShowCarryForwardModal(false); setCfStudents([]); setCfSelected({}); }}
+                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleCarryForward}
+                        disabled={cfSubmitting || cfStudents.filter(s => cfSelected[s.student_id]).length === 0}
+                        className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        {cfSubmitting ? 'Creating...' : 'Create Arrears Invoices'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ── MANUAL ENTRY TAB ── */}
+            {cfTab === 'manual' && (
+              <div className="flex-1 overflow-y-auto p-6">
+                <div className="max-w-lg mx-auto space-y-5">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
+                    <p className="font-medium mb-1">Manual arrears entry</p>
+                    <p>Use this to record an amount that a learner has been owing from a previous year. An unpaid invoice will be created in their account for the amount you specify.</p>
+                  </div>
+
+                  {/* Student search */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Search Learner</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={cfManualSearch}
+                        onChange={e => searchManualStudent(e.target.value)}
+                        placeholder="Type student name or number…"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 pr-8"
+                      />
+                      {cfManualSearching && (
+                        <span className="absolute right-2 top-2.5 text-gray-400 text-xs">…</span>
+                      )}
+                    </div>
+
+                    {/* Search results dropdown */}
+                    {cfManualSearchResults.length > 0 && !cfManualStudent && (
+                      <div className="mt-1 border border-gray-200 rounded-md shadow-sm bg-white divide-y divide-gray-100 max-h-48 overflow-y-auto">
+                        {cfManualSearchResults.map(s => (
+                          <button
+                            key={s.id}
+                            onClick={() => {
+                              setCfManualStudent(s);
+                              setCfManualSearch(`${s.fullName} (${s.studentNumber})`);
+                              setCfManualSearchResults([]);
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 flex items-center gap-2"
+                          >
+                            <span className="font-medium text-gray-900">{s.fullName}</span>
+                            <span className="text-gray-400 text-xs">{s.studentNumber}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Selected student badge */}
+                    {cfManualStudent && (
+                      <div className="mt-2 flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-md px-3 py-2 text-sm">
+                        <CheckCircle size={14} className="text-indigo-600 flex-shrink-0" />
+                        <span className="font-medium text-indigo-900">{cfManualStudent.fullName}</span>
+                        <span className="text-indigo-500">{cfManualStudent.studentNumber}</span>
+                        <button
+                          onClick={() => { setCfManualStudent(null); setCfManualSearch(''); setCfManualSearchResults([]); }}
+                          className="ml-auto text-indigo-400 hover:text-indigo-600 text-xs"
+                        >
+                          Change
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Amount */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Amount Owing (R)</label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500 font-medium">R</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={cfManualAmount}
+                        onChange={e => setCfManualAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Description <span className="text-gray-400 font-normal">(optional)</span></label>
+                    <input
+                      type="text"
+                      value={cfManualDescription}
+                      onChange={e => setCfManualDescription(e.target.value)}
+                      placeholder="e.g. Arrears from 2025"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  {/* Due date */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+                    <input
+                      type="date"
+                      value={cfManualDueDate}
+                      onChange={e => setCfManualDueDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  {/* Submit */}
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      onClick={() => { setShowCarryForwardModal(false); setCfManualStudent(null); setCfManualSearch(''); setCfManualSearchResults([]); setCfManualAmount(''); setCfManualDescription(''); }}
+                      className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleManualArrearsSubmit}
+                      disabled={cfManualSubmitting || !cfManualStudent || !cfManualAmount}
+                      className="flex-1 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {cfManualSubmitting ? 'Creating…' : 'Create Arrears Invoice'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

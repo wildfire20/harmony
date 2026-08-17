@@ -196,6 +196,48 @@ router.post('/recalculate-status', [
   }
 });
 
+// Manual arrears entry: admin creates an arrears invoice for a specific student
+router.post('/manual-arrears', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const { studentNumber, amount, description, dueDate } = req.body;
+    if (!studentNumber || !amount || parseFloat(amount) <= 0) {
+      return res.status(400).json({ success: false, message: 'Student number and a positive amount are required' });
+    }
+
+    // Find student
+    const studentResult = await db.query(
+      `SELECT id, student_number, first_name, last_name FROM users WHERE student_number ILIKE $1 AND role = 'student' LIMIT 1`,
+      [studentNumber]
+    );
+    if (studentResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: `No student found with number "${studentNumber}"` });
+    }
+    const student = studentResult.rows[0];
+
+    const effectiveDueDate = dueDate || `${new Date().getFullYear()}-12-31`;
+    const desc = description || 'Manual arrears entry';
+
+    const result = await db.query(`
+      INSERT INTO invoices (student_id, student_number, amount_due, due_date, status, reference_number, description, created_by, created_at)
+      VALUES ($1, $2, $3, $4, 'Unpaid', $5, $6, $7, NOW())
+      RETURNING *
+    `, [student.id, student.student_number, parseFloat(amount), effectiveDueDate, student.student_number, desc, req.user.id]);
+
+    res.json({
+      success: true,
+      message: `Arrears invoice of R${parseFloat(amount).toFixed(2)} created for ${student.first_name} ${student.last_name} (${student.student_number})`,
+      invoice: result.rows[0],
+      student: { id: student.id, studentNumber: student.student_number, firstName: student.first_name, lastName: student.last_name }
+    });
+  } catch (error) {
+    console.error('Manual arrears error:', error);
+    res.status(500).json({ success: false, message: 'Failed to create arrears invoice', error: error.message });
+  }
+});
+
 // Preview students with outstanding balances from a given year (for carry-forward)
 router.get('/arrears-preview', [
   authenticate,
