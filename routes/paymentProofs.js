@@ -6,6 +6,7 @@ const fs = require('fs');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const s3Service = require('../services/s3Service');
+const { logAudit, getIp } = require('../utils/auditLogger');
 
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin = [authenticate, authorize('admin', 'super_admin')];
@@ -267,9 +268,17 @@ router.get('/:id/receipt', authenticate, async (req, res) => {
 // ─── DELETE /api/payment-proofs/:id  (admin deletes a submission) ────────────
 router.delete('/:id', requireAdmin, async (req, res) => {
   try {
-    const result = await db.query('SELECT id FROM pending_payments WHERE id=$1', [req.params.id]);
+    const result = await db.query('SELECT * FROM pending_payments WHERE id=$1', [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ message: 'Submission not found' });
+    const proof = result.rows[0];
     await db.query('DELETE FROM pending_payments WHERE id=$1', [req.params.id]);
+    await logAudit({
+      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'payment_proof_delete',
+      entityType: 'payment_proof', entityId: proof.id,
+      details: { summary: `Deleted payment proof submission #${proof.id}`, amount: proof.amount, student_id: proof.student_id },
+      ipAddress: getIp(req)
+    });
     res.json({ message: 'Submission deleted' });
   } catch (err) {
     console.error('Delete proof error:', err);
@@ -293,6 +302,13 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
       WHERE id=$3
     `, [req.user.id, admin_note || null, proof.id]);
 
+    await logAudit({
+      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'payment_proof_approve',
+      entityType: 'payment_proof', entityId: proof.id,
+      details: { summary: `Approved payment proof of R${proof.amount}`, amount: proof.amount, student_id: proof.student_id, admin_note: admin_note || null },
+      ipAddress: getIp(req)
+    });
     res.json({ message: 'Payment approved and applied to student balance', transaction_ids: txIds });
   } catch (err) {
     console.error('Approve proof error:', err);
@@ -314,6 +330,13 @@ router.post('/:id/reject', requireAdmin, async (req, res) => {
       WHERE id=$3
     `, [req.user.id, admin_note || null, proof.id]);
 
+    await logAudit({
+      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'payment_proof_reject',
+      entityType: 'payment_proof', entityId: proof.id,
+      details: { summary: `Rejected payment proof of R${proof.amount}`, amount: proof.amount, student_id: proof.student_id, reason: admin_note || null },
+      ipAddress: getIp(req)
+    });
     res.json({ message: 'Submission rejected' });
   } catch (err) {
     console.error('Reject proof error:', err);

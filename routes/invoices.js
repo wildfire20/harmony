@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { logAudit, getIp } = require('../utils/auditLogger');
 
 const router = express.Router();
 
@@ -130,6 +131,18 @@ router.post('/generate-monthly', [
     if (teacherDiscountCount > 0) parts.push(`50% teacher discount × ${teacherDiscountCount}`);
     const discountMsg = parts.length > 0 ? ` — ${parts.join(', ')}` : '';
 
+    await logAudit({
+      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'invoice_generate',
+      entityType: 'invoice', entityId: null,
+      details: {
+        summary: `Generated ${createdInvoices.length} invoices for ${month}/${year}`,
+        month, year, invoices_created: createdInvoices.length, skipped: skippedCount,
+        sibling_discounts: siblingDiscountCount, teacher_discounts: teacherDiscountCount
+      },
+      ipAddress: getIp(req)
+    });
+
     res.status(201).json({
       success: true,
       message: `Successfully generated ${createdInvoices.length} invoices for ${month}/${year}${skipMsg}${discountMsg}`,
@@ -139,7 +152,7 @@ router.post('/generate-monthly', [
         invoicesCreated: createdInvoices.length,
         skipped: skippedCount,
         siblingDiscountsApplied: siblingDiscountCount,
-      teacherDiscountsApplied: teacherDiscountCount,
+        teacherDiscountsApplied: teacherDiscountCount,
         month,
         year,
         dueDate
@@ -225,6 +238,18 @@ router.post('/manual-arrears', [
       VALUES ($1, $2, $3, $4, 'Unpaid', $5, $6, $7, NOW())
       RETURNING *
     `, [student.id, student.student_number, parseFloat(amount), effectiveDueDate, student.student_number, desc, req.user.id]);
+
+    await logAudit({
+      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'manual_arrears_created',
+      entityType: 'invoice', entityId: result.rows[0].id,
+      details: {
+        summary: `Manual arrears invoice of R${parseFloat(amount).toFixed(2)} for ${student.first_name} ${student.last_name}`,
+        student: `${student.first_name} ${student.last_name}`, student_number: student.student_number,
+        amount: parseFloat(amount), description: desc, due_date: effectiveDueDate
+      },
+      ipAddress: getIp(req)
+    });
 
     res.json({
       success: true,
@@ -330,6 +355,18 @@ router.post('/carry-forward', [
       await client.query('COMMIT');
 
       console.log(`Carried forward arrears for ${created.length} students from ${fromYear}`);
+
+      await logAudit({
+        userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        userRole: req.user.role, action: 'invoice_carry_forward',
+        entityType: 'invoice', entityId: null,
+        details: {
+          summary: `Arrears carried forward for ${created.length} student(s) from ${fromYear}`,
+          from_year: fromYear, students_count: created.length, due_date: effectiveDueDate
+        },
+        ipAddress: getIp(req)
+      });
+
       res.json({
         success: true,
         message: `Arrears carried forward for ${created.length} student${created.length !== 1 ? 's' : ''} from ${fromYear}`,

@@ -236,6 +236,7 @@ export const enrollmentsAPI = {
 // Manual Payments API
 export const paymentsAPI = {
   addManualPayment: (data) => api.post('/enhanced-invoices/manual-payment', data),
+  applyArrearsFirst: (data) => api.post('/enhanced-invoices/manual-payment/apply-arrears-first', data),
   getStudentPayments: (studentId) => api.get(`/enhanced-invoices/student-payments/${studentId}`),
   updateManualPayment: (paymentId, data) => api.put(`/enhanced-invoices/manual-payment/${paymentId}`, data),
   deleteManualPayment: (paymentId) => api.delete(`/enhanced-invoices/manual-payment/${paymentId}`),

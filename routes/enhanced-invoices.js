@@ -9,6 +9,7 @@ const EnhancedCSVParser = require('../utils/enhancedCSVParser');
 const FNBPDFParser = require('../utils/fnbPDFParser');
 
 const router = express.Router();
+const { logAudit, getIp } = require('../utils/auditLogger');
 
 // Configure multer for CSV and PDF uploads
 const upload = multer({
@@ -1410,6 +1411,19 @@ router.post('/manual-payment', [
 
     console.log(`✅ Manual payment recorded: R${amount} for ${student.first_name} ${student.last_name} (${student.student_number})`);
 
+    await logAudit({
+      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'manual_payment_add',
+      entityType: 'payment', entityId: paymentResult.rows[0].id,
+      details: {
+        summary: `R${amount} recorded for ${student.first_name} ${student.last_name} (${student.student_number})`,
+        student: `${student.first_name} ${student.last_name}`, student_number: student.student_number,
+        amount, month: paymentMonth, year: paymentYear, reference: refValue,
+        invoice_updated: invoiceResult.rows.length > 0
+      },
+      ipAddress: getIp(req)
+    });
+
     res.json({
       success: true,
       message: `Payment of R${amount} recorded for ${student.first_name} ${student.last_name}`,
@@ -1578,6 +1592,19 @@ router.put('/manual-payment/:paymentId', [
 
     console.log(`✅ Manual payment ${paymentId} updated: month ${oldMonth}/${oldYear} → ${newMonth}/${newYear}, amount R${oldAmount} → R${newAmount}`);
 
+    await logAudit({
+      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'manual_payment_edit',
+      entityType: 'payment', entityId: parseInt(paymentId),
+      details: {
+        summary: `Payment #${paymentId} edited`,
+        old_amount: oldAmount, new_amount: newAmount,
+        old_period: `${oldMonth}/${oldYear}`, new_period: `${newMonth}/${newYear}`,
+        student_id: original.student_id
+      },
+      ipAddress: getIp(req)
+    });
+
     res.json({
       success: true,
       message: 'Payment updated successfully',
@@ -1637,6 +1664,18 @@ router.delete('/manual-payment/:paymentId', [
       `, [payment.amount, payment.student_id, delMonth, delYear]);
     }
 
+    await logAudit({
+      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'manual_payment_delete',
+      entityType: 'payment', entityId: parseInt(paymentId),
+      details: {
+        summary: `Payment #${paymentId} deleted (R${payment.amount})`,
+        amount: payment.amount, student_id: payment.student_id,
+        month: delMonth, year: delYear, method: payment.payment_method
+      },
+      ipAddress: getIp(req)
+    });
+
     res.json({
       success: true,
       message: 'Payment deleted successfully'
@@ -1649,6 +1688,138 @@ router.delete('/manual-payment/:paymentId', [
       message: 'Failed to delete payment',
       error: error.message
     });
+  }
+});
+
+/**
+ * Apply payment manually using arrears-first logic
+ * Finds all unpaid invoices for a student, applies oldest first.
+ */
+router.post('/manual-payment/apply-arrears-first', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+  body('student_id').isInt().withMessage('Student ID is required'),
+  body('amount').isFloat({ min: 0.01 }).withMessage('Amount must be greater than 0'),
+  body('payment_date').isISO8601().withMessage('Valid payment date is required'),
+  body('description').optional().isString(),
+  body('reference').optional().isString()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const { student_id, amount, payment_date, description, reference } = req.body;
+
+    const studentResult = await db.query(
+      'SELECT id, first_name, last_name, student_number FROM users WHERE id=$1 AND role=$2',
+      [student_id, 'student']
+    );
+    if (!studentResult.rows.length) return res.status(404).json({ success: false, message: 'Student not found' });
+    const student = studentResult.rows[0];
+
+    // Fetch all unpaid/partial invoices for this student, oldest first
+    const allUnpaidResult = await db.query(`
+      SELECT id, reference_number, amount_due, amount_paid,
+             COALESCE(outstanding_balance, amount_due - amount_paid) AS outstanding_balance,
+             due_date
+      FROM invoices
+      WHERE student_id = $1 AND status IN ('Unpaid', 'Partial')
+      ORDER BY due_date ASC
+    `, [student_id]);
+
+    if (!allUnpaidResult.rows.length) {
+      return res.status(400).json({ success: false, message: `${student.first_name} ${student.last_name} has no outstanding invoices.` });
+    }
+
+    const thisYear    = new Date().getFullYear();
+    let   remaining   = Math.round(parseFloat(amount) * 100) / 100;
+    const allocations = [];
+    const refValue    = reference || `MANUAL-${Date.now()}`;
+    const client      = await db.pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      for (const inv of allUnpaidResult.rows) {
+        if (remaining <= 0.004) break;
+        const outstanding = Math.round(parseFloat(inv.outstanding_balance) * 100) / 100;
+        const currentPaid = Math.round(parseFloat(inv.amount_paid || 0) * 100) / 100;
+        const amountDue   = Math.round(parseFloat(inv.amount_due) * 100) / 100;
+        const toApply     = Math.round(Math.min(remaining, outstanding) * 100) / 100;
+        const newPaid     = Math.round((currentPaid + toApply) * 100) / 100;
+        const newOutstanding = Math.max(0, Math.round((outstanding - toApply) * 100) / 100);
+        const newStatus   = newPaid >= amountDue ? (newPaid > amountDue ? 'Overpaid' : 'Paid') : 'Partial';
+
+        await client.query(`
+          UPDATE invoices SET
+            status = $1, amount_paid = $2::DECIMAL(10,2),
+            outstanding_balance = $3::DECIMAL(10,2), updated_at = NOW()
+          WHERE id = $4
+        `, [newStatus, newPaid, newOutstanding, inv.id]);
+
+        const invDue  = inv.due_date ? new Date(inv.due_date) : null;
+        const txMonth = invDue ? invDue.getMonth() + 1 : null;
+        const txYear  = invDue ? invDue.getFullYear()  : null;
+        const isArrears = txYear !== null && txYear < thisYear;
+
+        await client.query(`
+          INSERT INTO payment_transactions (
+            invoice_id, student_id, student_number, reference_number, reference,
+            amount, transaction_date, payment_date, description, payment_method,
+            recorded_by, month, year
+          ) VALUES ($1,$2,$3,$4,$4,$5,$6,$6,$7,'manual_entry',$8,$9,$10)
+        `, [
+          inv.id, student_id, student.student_number, refValue,
+          toApply, payment_date,
+          (description || 'Manual payment') + (isArrears ? ` [Arrears from ${txYear}]` : ''),
+          req.user.id, txMonth, txYear
+        ]);
+
+        allocations.push({ invoiceId: inv.id, reference: inv.reference_number, month: txMonth, year: txYear, appliedAmount: toApply, newStatus, isArrears });
+        remaining = Math.round((remaining - toApply) * 100) / 100;
+      }
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    const arrearsAllocations = allocations.filter(a => a.isArrears);
+    const currentAllocations = allocations.filter(a => !a.isArrears);
+
+    const summaryMsg = arrearsAllocations.length > 0
+      ? `R${parseFloat(amount).toFixed(2)} applied: R${arrearsAllocations.reduce((s,a)=>s+a.appliedAmount,0).toFixed(2)} to previous-year arrears${currentAllocations.length ? `, R${currentAllocations.reduce((s,a)=>s+a.appliedAmount,0).toFixed(2)} to current year` : ''}`
+      : `R${parseFloat(amount).toFixed(2)} applied across ${allocations.length} invoice(s)`;
+
+    await logAudit({
+      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'manual_payment_arrears',
+      entityType: 'payment', entityId: null,
+      details: {
+        summary: summaryMsg, student: `${student.first_name} ${student.last_name}`,
+        student_number: student.student_number, amount: parseFloat(amount),
+        invoices_updated: allocations.length, arrears_invoices: arrearsAllocations.length,
+        current_invoices: currentAllocations.length
+      },
+      ipAddress: getIp(req)
+    });
+
+    res.json({
+      success: true,
+      message: summaryMsg,
+      allocations,
+      arrearsCount:  arrearsAllocations.length,
+      currentCount:  currentAllocations.length,
+      totalApplied:  Math.round((parseFloat(amount) - remaining) * 100) / 100,
+      student: { id: student.id, name: `${student.first_name} ${student.last_name}`, studentNumber: student.student_number }
+    });
+
+  } catch (error) {
+    console.error('Apply arrears-first error:', error);
+    res.status(500).json({ success: false, message: 'Failed to apply payment', error: error.message });
   }
 });
 

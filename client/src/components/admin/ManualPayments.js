@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { DollarSign, Search, Plus, Edit, Trash2, Check, X } from 'lucide-react';
+import { DollarSign, Search, Plus, Edit, Trash2, Check, X, Zap } from 'lucide-react';
 import { paymentsAPI, adminAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 import toast from 'react-hot-toast';
@@ -10,6 +10,7 @@ const ManualPayments = () => {
   const [activeSearch, setActiveSearch] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [paymentMode, setPaymentMode] = useState('specific'); // 'specific' | 'arrears'
   const [editingPayment, setEditingPayment] = useState(null);
   const [paymentData, setPaymentData] = useState({
     amount: '',
@@ -18,6 +19,13 @@ const ManualPayments = () => {
     reference: '',
     month: new Date().getMonth() + 1,
     year: new Date().getFullYear()
+  });
+  // Arrears-first quick-apply form
+  const [arrearsData, setArrearsData] = useState({
+    amount: '',
+    payment_date: new Date().toISOString().split('T')[0],
+    description: '',
+    reference: ''
   });
   const queryClient = useQueryClient();
 
@@ -87,6 +95,26 @@ const ManualPayments = () => {
     }
   );
 
+  const arrearsFirstMutation = useMutation(
+    (data) => paymentsAPI.applyArrearsFirst(data),
+    {
+      onSuccess: (response) => {
+        const d = response.data;
+        if (d.arrearsCount > 0) {
+          toast.success(`${d.message}`, { duration: 5000 });
+        } else {
+          toast.success(d.message);
+        }
+        queryClient.invalidateQueries(['studentPayments', selectedStudent?.id]);
+        setArrearsData({ amount: '', payment_date: new Date().toISOString().split('T')[0], description: '', reference: '' });
+        setShowPaymentForm(false);
+      },
+      onError: (error) => {
+        toast.error(error.response?.data?.message || 'Failed to apply payment');
+      }
+    }
+  );
+
   const handleSearch = () => {
     setActiveSearch(searchTerm);
   };
@@ -117,31 +145,31 @@ const ManualPayments = () => {
 
   const handleSubmitPayment = (e) => {
     e.preventDefault();
-    if (!selectedStudent) {
-      toast.error('Please select a student first');
-      return;
-    }
-    if (!paymentData.amount || parseFloat(paymentData.amount) <= 0) {
-      toast.error('Please enter a valid amount');
-      return;
-    }
-
+    if (!selectedStudent) { toast.error('Please select a student first'); return; }
+    if (!paymentData.amount || parseFloat(paymentData.amount) <= 0) { toast.error('Please enter a valid amount'); return; }
     if (editingPayment) {
-      updatePaymentMutation.mutate({
-        paymentId: editingPayment.id,
-        data: paymentData
-      });
+      updatePaymentMutation.mutate({ paymentId: editingPayment.id, data: paymentData });
     } else {
-      addPaymentMutation.mutate({
-        student_id: selectedStudent.id,
-        ...paymentData,
-        amount: parseFloat(paymentData.amount)
-      });
+      addPaymentMutation.mutate({ student_id: selectedStudent.id, ...paymentData, amount: parseFloat(paymentData.amount) });
     }
+  };
+
+  const handleArrearsSubmit = (e) => {
+    e.preventDefault();
+    if (!selectedStudent) { toast.error('Please select a student first'); return; }
+    if (!arrearsData.amount || parseFloat(arrearsData.amount) <= 0) { toast.error('Please enter a valid amount'); return; }
+    arrearsFirstMutation.mutate({
+      student_id: selectedStudent.id,
+      amount: parseFloat(arrearsData.amount),
+      payment_date: arrearsData.payment_date,
+      description: arrearsData.description,
+      reference: arrearsData.reference
+    });
   };
 
   const handleEditPayment = (payment) => {
     setEditingPayment(payment);
+    setPaymentMode('specific');
     setPaymentData({
       amount: payment.amount,
       payment_date: payment.payment_date?.split('T')[0] || '',
@@ -257,114 +285,138 @@ const ManualPayments = () => {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Step 2: Add Payment</h3>
               {!showPaymentForm && (
-                <button
-                  onClick={() => setShowPaymentForm(true)}
-                  className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 flex items-center gap-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  Add Payment
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setPaymentMode('arrears'); setShowPaymentForm(true); setEditingPayment(null); }}
+                    className="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 flex items-center gap-2 text-sm"
+                    title="Automatically applies to oldest unpaid invoice first"
+                  >
+                    <Zap className="h-4 w-4" />
+                    Apply to Oldest Unpaid
+                  </button>
+                  <button
+                    onClick={() => { setPaymentMode('specific'); setShowPaymentForm(true); setEditingPayment(null); }}
+                    className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 flex items-center gap-2 text-sm"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Specific Month/Year
+                  </button>
+                </div>
               )}
             </div>
 
-            {showPaymentForm && (
-              <form onSubmit={handleSubmitPayment} className="space-y-4 bg-gray-50 p-4 rounded-lg">
+            {showPaymentForm && paymentMode === 'arrears' && (
+              <form onSubmit={handleArrearsSubmit} className="space-y-4 bg-purple-50 border border-purple-200 p-4 rounded-lg">
+                <div className="flex items-start gap-3 mb-2">
+                  <Zap className="h-5 w-5 text-purple-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-purple-900">Apply to Oldest Unpaid Invoice First</p>
+                    <p className="text-xs text-purple-700 mt-0.5">
+                      The system will automatically apply this payment to the student's oldest outstanding invoice first.
+                      If the amount covers multiple invoices, it will split accordingly — previous-year arrears before current year.
+                    </p>
+                  </div>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Amount (R) *</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.01"
-                      value={paymentData.amount}
-                      onChange={(e) => setPaymentData({ ...paymentData, amount: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"
-                      required
-                    />
+                    <input type="number" step="0.01" min="0.01" value={arrearsData.amount}
+                      onChange={e => setArrearsData({ ...arrearsData, amount: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-purple-500" required />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Payment Date *</label>
-                    <input
-                      type="date"
-                      value={paymentData.payment_date}
-                      onChange={(e) => setPaymentData({ ...paymentData, payment_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"
-                      required
-                    />
+                    <input type="date" value={arrearsData.payment_date}
+                      onChange={e => setArrearsData({ ...arrearsData, payment_date: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-purple-500" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bank Reference</label>
+                    <input type="text" value={arrearsData.reference} placeholder="Optional"
+                      onChange={e => setArrearsData({ ...arrearsData, reference: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-purple-500" />
+                  </div>
+                  <div className="md:col-span-2 lg:col-span-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                    <input type="text" value={arrearsData.description} placeholder="e.g., Cash payment for outstanding arrears"
+                      onChange={e => setArrearsData({ ...arrearsData, description: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-purple-500" />
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button type="submit" disabled={arrearsFirstMutation.isLoading}
+                    className="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2">
+                    <Zap className="h-4 w-4" />
+                    {arrearsFirstMutation.isLoading ? 'Applying…' : 'Apply Payment (Arrears First)'}
+                  </button>
+                  <button type="button" onClick={() => { setShowPaymentForm(false); }}
+                    className="border border-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-50">Cancel</button>
+                </div>
+              </form>
+            )}
+
+            {showPaymentForm && paymentMode === 'specific' && (
+              <form onSubmit={handleSubmitPayment} className="space-y-4 bg-gray-50 p-4 rounded-lg">
+                {editingPayment && (
+                  <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-md px-3 py-2">
+                    Editing payment — you can change the amount, date, month, year, or reference.
+                    {editingPayment.payment_method === 'bank_transfer' && ' (Originally a bank import)'}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Amount (R) *</label>
+                    <input type="number" step="0.01" min="0.01" value={paymentData.amount}
+                      onChange={e => setPaymentData({ ...paymentData, amount: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Payment Date *</label>
+                    <input type="date" value={paymentData.payment_date}
+                      onChange={e => setPaymentData({ ...paymentData, payment_date: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500" required />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">For Month</label>
-                    <select
-                      value={paymentData.month}
-                      onChange={(e) => {
+                    <select value={paymentData.month}
+                      onChange={e => {
                         const selectedMonth = parseInt(e.target.value);
-                        const payDateMonth = paymentData.payment_date
-                          ? new Date(paymentData.payment_date).getMonth() + 1
-                          : new Date().getMonth() + 1;
-                        const payDateYear = paymentData.payment_date
-                          ? new Date(paymentData.payment_date).getFullYear()
-                          : new Date().getFullYear();
-                        // If selected month is earlier than payment month (e.g. Jan selected when payment is December),
-                        // automatically set year to the next year
+                        const payDateMonth = paymentData.payment_date ? new Date(paymentData.payment_date).getMonth() + 1 : new Date().getMonth() + 1;
+                        const payDateYear  = paymentData.payment_date ? new Date(paymentData.payment_date).getFullYear()  : new Date().getFullYear();
                         const autoYear = selectedMonth < payDateMonth ? payDateYear + 1 : payDateYear;
                         setPaymentData({ ...paymentData, month: selectedMonth, year: autoYear });
                       }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"
-                    >
-                      {months.map((m) => (
-                        <option key={m.value} value={m.value}>{m.label}</option>
-                      ))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500">
+                      {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
-                    <input
-                      type="number"
-                      value={paymentData.year}
-                      onChange={(e) => setPaymentData({ ...paymentData, year: parseInt(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"
-                    />
+                    <input type="number" value={paymentData.year}
+                      onChange={e => setPaymentData({ ...paymentData, year: parseInt(e.target.value) })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Bank Reference</label>
-                    <input
-                      type="text"
-                      value={paymentData.reference}
-                      onChange={(e) => setPaymentData({ ...paymentData, reference: e.target.value })}
-                      placeholder="Original bank reference (if known)"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"
-                    />
+                    <input type="text" value={paymentData.reference} placeholder="Original bank reference (if known)"
+                      onChange={e => setPaymentData({ ...paymentData, reference: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    <input
-                      type="text"
-                      value={paymentData.description}
-                      onChange={(e) => setPaymentData({ ...paymentData, description: e.target.value })}
-                      placeholder="e.g., Parent name, reason for manual entry"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"
-                    />
+                    <input type="text" value={paymentData.description} placeholder="e.g., Parent name, reason for manual entry"
+                      onChange={e => setPaymentData({ ...paymentData, description: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500" />
                   </div>
                 </div>
                 <div className="flex space-x-3">
-                  <button
-                    type="submit"
-                    disabled={addPaymentMutation.isLoading || updatePaymentMutation.isLoading}
-                    className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
-                  >
+                  <button type="submit" disabled={addPaymentMutation.isLoading || updatePaymentMutation.isLoading}
+                    className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:opacity-50 flex items-center gap-2">
                     <Check className="h-4 w-4" />
                     {editingPayment ? 'Update Payment' : 'Record Payment'}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      resetPaymentForm();
-                      setEditingPayment(null);
-                    }}
-                    className="border border-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
+                  <button type="button" onClick={() => { resetPaymentForm(); setEditingPayment(null); }}
+                    className="border border-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-50">Cancel</button>
                 </div>
               </form>
             )}

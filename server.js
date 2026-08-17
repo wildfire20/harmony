@@ -274,6 +274,25 @@ const initializeInvoiceSystem = async () => {
     // Backfill reference from reference_number where null
     await db.query(`UPDATE payment_transactions SET reference = reference_number WHERE reference IS NULL AND reference_number IS NOT NULL`).catch(() => {});
 
+    // Create audit_logs table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id          SERIAL PRIMARY KEY,
+        user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        user_name   VARCHAR(255),
+        user_role   VARCHAR(50),
+        action      VARCHAR(100) NOT NULL,
+        entity_type VARCHAR(50),
+        entity_id   INTEGER,
+        details     JSONB,
+        ip_address  VARCHAR(45),
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_user    ON audit_logs(user_id)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_action  ON audit_logs(action)`);
+
     // Create payment_upload_logs table
     await db.query(`
       CREATE TABLE IF NOT EXISTS payment_upload_logs (
@@ -467,6 +486,7 @@ app.use('/api/staff-attendance', staffAttendanceRoutes);
 app.use('/api/payment-proofs', paymentProofsRoutes);
 app.use('/api/student-fees', studentFeesRoutes);
 app.use('/api/service-prices', servicePricesRoutes);
+app.use('/api/audit-logs', require('./routes/auditLogs'));
 app.use('/api', s3HealthRoutes);
 
 // Add migration endpoint for database setup
