@@ -668,16 +668,15 @@ async function processTransactions(transactions, userId) {
           ? Math.round((newPaid - amountDue) * 100) / 100
           : 0;
 
-        // Update this invoice
+        // Update this invoice (outstanding_balance is a generated column — DB computes it automatically)
         await client.query(`
           UPDATE invoices SET
-            status           = $1,
-            amount_paid      = $2::DECIMAL(10,2),
-            outstanding_balance = $3::DECIMAL(10,2),
-            overpaid_amount  = $4::DECIMAL(10,2),
-            updated_at       = NOW()
-          WHERE id = $5
-        `, [newStatus, newPaid, newOutstanding, overpaidAmt, inv.id]);
+            status          = $1,
+            amount_paid     = $2::DECIMAL(10,2),
+            overpaid_amount = $3::DECIMAL(10,2),
+            updated_at      = NOW()
+          WHERE id = $4
+        `, [newStatus, newPaid, overpaidAmt, inv.id]);
 
         // Derive month/year from the invoice's due_date for the transaction record
         const invDue   = inv.due_date ? new Date(inv.due_date) : null;
@@ -1764,12 +1763,12 @@ router.post('/manual-payment/apply-arrears-first', [
         const newOutstanding = Math.max(0, Math.round((outstanding - toApply) * 100) / 100);
         const newStatus   = newPaid >= amountDue ? (newPaid > amountDue ? 'Overpaid' : 'Paid') : 'Partial';
 
+        // outstanding_balance is a generated column — DB computes it automatically from amount_due - amount_paid
         await client.query(`
           UPDATE invoices SET
-            status = $1, amount_paid = $2::DECIMAL(10,2),
-            outstanding_balance = $3::DECIMAL(10,2), updated_at = NOW()
-          WHERE id = $4
-        `, [newStatus, newPaid, newOutstanding, inv.id]);
+            status = $1, amount_paid = $2::DECIMAL(10,2), updated_at = NOW()
+          WHERE id = $3
+        `, [newStatus, newPaid, inv.id]);
 
         const invDue  = inv.due_date ? new Date(inv.due_date) : null;
         const txMonth = invDue ? invDue.getMonth() + 1 : null;

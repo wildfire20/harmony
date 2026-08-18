@@ -418,11 +418,7 @@ router.put('/:id/arrears', [
     if (amount_due !== undefined) {
       fields.push(`amount_due = $${p++}`);
       params.push(parseFloat(amount_due));
-      // Recalculate outstanding
-      const paid = parseFloat(inv.amount_paid || 0);
-      const newDue = parseFloat(amount_due);
-      fields.push(`outstanding_balance = $${p++}`);
-      params.push(Math.max(0, newDue - paid));
+      // outstanding_balance is a generated column — PostgreSQL recalculates it automatically
     }
     if (description !== undefined) {
       fields.push(`description = $${p++}`);
