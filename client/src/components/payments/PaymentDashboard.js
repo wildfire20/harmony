@@ -15,7 +15,8 @@ import {
   Plus,
   RefreshCw,
   Trash2,
-  ArrowRight
+  ArrowRight,
+  Pencil
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -79,6 +80,13 @@ const PaymentDashboard = () => {
   const [cfManualDescription, setCfManualDescription] = useState('');
   const [cfManualDueDate, setCfManualDueDate] = useState(`${new Date().getFullYear()}-12-31`);
   const [cfManualSubmitting, setCfManualSubmitting] = useState(false);
+
+  // Edit arrears invoice modal states
+  const [editArrearsInvoice, setEditArrearsInvoice] = useState(null); // the invoice being edited
+  const [editArrearsDueDate, setEditArrearsDueDate] = useState('');
+  const [editArrearsAmount, setEditArrearsAmount] = useState('');
+  const [editArrearsDescription, setEditArrearsDescription] = useState('');
+  const [editArrearsSaving, setEditArrearsSaving] = useState(false);
 
   // Check if user is admin
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
@@ -267,6 +275,39 @@ const PaymentDashboard = () => {
       setShowGhostModal(false);
     } finally {
       setGhostModalLoading(false);
+    }
+  };
+
+  // Open edit-arrears modal
+  const openEditArrears = (invoice) => {
+    setEditArrearsInvoice(invoice);
+    setEditArrearsDueDate(invoice.due_date ? invoice.due_date.split('T')[0] : '');
+    setEditArrearsAmount(parseFloat(invoice.amount_due).toFixed(2));
+    setEditArrearsDescription(invoice.description || '');
+  };
+
+  const handleSaveArrears = async () => {
+    if (!editArrearsInvoice) return;
+    setEditArrearsSaving(true);
+    try {
+      const res = await fetch(`/api/invoices/${editArrearsInvoice.id}/arrears`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          due_date:    editArrearsDueDate,
+          amount_due:  parseFloat(editArrearsAmount),
+          description: editArrearsDescription
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Failed to update');
+      toast.success('Arrears invoice updated');
+      setEditArrearsInvoice(null);
+      fetchInvoices();
+    } catch (err) {
+      toast.error(err.message || 'Failed to update arrears invoice');
+    } finally {
+      setEditArrearsSaving(false);
     }
   };
 
@@ -730,46 +771,68 @@ const PaymentDashboard = () => {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Status
                       </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {invoices.map((invoice) => (
-                      <tr key={invoice.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">
-                              {invoice.first_name} {invoice.last_name}
+                    {invoices.map((invoice) => {
+                      const isArrearsInvoice = (invoice.description || '').toLowerCase().includes('arrears');
+                      return (
+                        <tr key={invoice.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">
+                                {invoice.first_name} {invoice.last_name}
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                {invoice.student_number}
+                              </div>
                             </div>
-                            <div className="text-sm text-gray-500">
-                              {invoice.student_number}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {invoice.reference_number}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatCurrency(invoice.amount_due)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatCurrency(invoice.amount_paid)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatCurrency(invoice.outstanding_balance)}
-                          {invoice.overpaid_amount > 0 && (
-                            <div className="text-xs text-blue-600">
-                              Overpaid: {formatCurrency(invoice.overpaid_amount)}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatDate(invoice.due_date)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          {getStatusBadge(invoice.status)}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            <div>{invoice.reference_number}</div>
+                            {isArrearsInvoice && invoice.description && (
+                              <div className="text-xs text-amber-600 font-medium mt-0.5">
+                                {invoice.description}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatCurrency(invoice.amount_due)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatCurrency(invoice.amount_paid)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatCurrency(invoice.outstanding_balance)}
+                            {invoice.overpaid_amount > 0 && (
+                              <div className="text-xs text-blue-600">
+                                Overpaid: {formatCurrency(invoice.overpaid_amount)}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatDate(invoice.due_date)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {getStatusBadge(invoice.status)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {isArrearsInvoice && (
+                              <button
+                                onClick={() => openEditArrears(invoice)}
+                                className="flex items-center gap-1 text-xs px-2 py-1 bg-amber-50 text-amber-700 border border-amber-300 rounded hover:bg-amber-100"
+                                title="Edit this arrears invoice"
+                              >
+                                <Pencil className="h-3 w-3" /> Edit
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -980,6 +1043,73 @@ const PaymentDashboard = () => {
           </div>
         </div>
       )}
+      {/* Edit Arrears Invoice Modal */}
+      {editArrearsInvoice && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg w-full max-w-md shadow-xl">
+            <div className="flex items-center justify-between p-5 border-b">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Edit Arrears Invoice</h3>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {editArrearsInvoice.first_name} {editArrearsInvoice.last_name} — {editArrearsInvoice.student_number}
+                </p>
+              </div>
+              <button onClick={() => setEditArrearsInvoice(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Due Date *</label>
+                <input
+                  type="date"
+                  value={editArrearsDueDate}
+                  onChange={e => setEditArrearsDueDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Change the year here to fix the arrears date (e.g. set to 2025 if these are 2025 arrears).
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Amount Due (R) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={editArrearsAmount}
+                  onChange={e => setEditArrearsAmount(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <input
+                  type="text"
+                  value={editArrearsDescription}
+                  onChange={e => setEditArrearsDescription(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  placeholder="e.g. Arrears from 2025"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 p-5 border-t bg-gray-50 rounded-b-lg">
+              <button
+                onClick={handleSaveArrears}
+                disabled={editArrearsSaving || !editArrearsDueDate || !editArrearsAmount}
+                className="flex-1 bg-amber-600 text-white py-2 rounded-md hover:bg-amber-700 disabled:opacity-50 font-medium text-sm"
+              >
+                {editArrearsSaving ? 'Saving…' : 'Save Changes'}
+              </button>
+              <button
+                onClick={() => setEditArrearsInvoice(null)}
+                className="flex-1 border border-gray-300 text-gray-700 py-2 rounded-md hover:bg-gray-100 text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Carry Forward Arrears Modal */}
       {showCarryForwardModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">

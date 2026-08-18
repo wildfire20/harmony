@@ -312,7 +312,8 @@ router.post('/carry-forward', [
       return res.status(400).json({ success: false, message: 'fromYear and at least one student are required' });
     }
 
-    const effectiveDueDate = dueDate || new Date(new Date().getFullYear(), 11, 31);
+    // Default due date to December 31 of the year being carried FROM (not the current year)
+    const effectiveDueDate = dueDate || new Date(parseInt(fromYear), 11, 31);
 
     const client = await db.pool.connect();
     try {
@@ -384,6 +385,76 @@ router.post('/carry-forward', [
   }
 });
 
+// Edit an arrears invoice (due_date, amount_due, description)
+router.put('/:id/arrears', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+  body('due_date').isISO8601().withMessage('Valid due date is required'),
+  body('amount_due').optional().isFloat({ min: 0.01 }),
+  body('description').optional().isString()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const { id } = req.params;
+    const { due_date, amount_due, description } = req.body;
+
+    // Fetch the invoice first — only allow editing arrears/manual-arrears invoices
+    const existing = await db.query('SELECT * FROM invoices WHERE id = $1', [id]);
+    if (!existing.rows.length) return res.status(404).json({ success: false, message: 'Invoice not found' });
+
+    const inv = existing.rows[0];
+    const isArrears = (inv.description || '').toLowerCase().includes('arrears') ||
+                      inv.status === 'Carried Forward';
+    if (!isArrears) {
+      return res.status(403).json({ success: false, message: 'Only arrears invoices can be edited here.' });
+    }
+
+    const fields = ['due_date = $1', 'updated_at = NOW()'];
+    const params = [due_date];
+    let p = 2;
+
+    if (amount_due !== undefined) {
+      fields.push(`amount_due = $${p++}`);
+      params.push(parseFloat(amount_due));
+      // Recalculate outstanding
+      const paid = parseFloat(inv.amount_paid || 0);
+      const newDue = parseFloat(amount_due);
+      fields.push(`outstanding_balance = $${p++}`);
+      params.push(Math.max(0, newDue - paid));
+    }
+    if (description !== undefined) {
+      fields.push(`description = $${p++}`);
+      params.push(description);
+    }
+
+    params.push(parseInt(id));
+    const result = await db.query(
+      `UPDATE invoices SET ${fields.join(', ')} WHERE id = $${p} RETURNING *`,
+      params
+    );
+
+    await logAudit({
+      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'invoice_arrears_edit',
+      entityType: 'invoice', entityId: parseInt(id),
+      details: {
+        summary: `Arrears invoice #${id} edited`,
+        old_due_date: inv.due_date, new_due_date: due_date,
+        old_amount: inv.amount_due, new_amount: amount_due || inv.amount_due,
+        student_id: inv.student_id
+      },
+      ipAddress: getIp(req)
+    });
+
+    res.json({ success: true, message: 'Arrears invoice updated', invoice: result.rows[0] });
+  } catch (error) {
+    console.error('Edit arrears invoice error:', error);
+    res.status(500).json({ success: false, message: 'Failed to update arrears invoice', error: error.message });
+  }
+});
+
 // Get all invoices with filtering and pagination
 router.get('/', [
   authenticate,
@@ -415,7 +486,7 @@ router.get('/', [
       SELECT 
         i.id, i.student_id, i.student_number, i.amount_due, i.amount_paid, 
         i.outstanding_balance, i.overpaid_amount, i.due_date, i.status, 
-        i.reference_number, i.created_at, i.updated_at,
+        i.reference_number, i.description, i.created_at, i.updated_at,
         u.first_name, u.last_name, u.grade_id, u.class_id,
         g.name as grade_name, c.name as class_name
       FROM invoices i
