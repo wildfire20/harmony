@@ -4,6 +4,7 @@ const { body, validationResult } = require('express-validator');
 const { Parser } = require('json2csv');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { logAudit, getIp } = require('../utils/auditLogger');
 
 const router = express.Router();
 
@@ -32,6 +33,8 @@ router.post('/students/bulk', [
 
       const addedStudents = [];
       const failedStudents = [];
+      // Collect audit payloads; only emit after COMMIT so a rollback leaves no false records
+      const pendingAuditPayloads = [];
 
       for (const student of students) {
         try {
@@ -67,9 +70,25 @@ router.post('/students/bulk', [
             student.email || `${student.student_number}@harmonylearning.edu`
           ]);
 
+          const addedRow = result.rows[0];
           addedStudents.push({
-            ...result.rows[0],
+            ...addedRow,
             generated_password: student.student_number // For admin reference
+          });
+
+          pendingAuditPayloads.push({
+            userId:     req.user.id,
+            userName:   `${req.user.first_name} ${req.user.last_name}`,
+            userRole:   req.user.role,
+            action:     'student_create',
+            entityType: 'student',
+            entityId:   addedRow.id,
+            details: {
+              student_name:   `${addedRow.first_name} ${addedRow.last_name}`,
+              student_number: addedRow.student_number,
+              source:         'bulk_import',
+            },
+            ipAddress: getIp(req),
           });
 
         } catch (error) {
@@ -81,6 +100,11 @@ router.post('/students/bulk', [
       }
 
       await client.query('COMMIT');
+
+      // Transaction committed — safe to write audit entries now
+      for (const payload of pendingAuditPayloads) {
+        logAudit(payload);
+      }
 
       res.json({
         message: 'Bulk student addition completed',
@@ -188,9 +212,25 @@ router.post('/students', [
       email || `${student_number}@harmonylearning.edu`
     ]);
 
+    const newStudent = result.rows[0];
+
+    await logAudit({
+      userId:     req.user.id,
+      userName:   `${req.user.first_name} ${req.user.last_name}`,
+      userRole:   req.user.role,
+      action:     'student_create',
+      entityType: 'student',
+      entityId:   newStudent.id,
+      details: {
+        student_name:   `${newStudent.first_name} ${newStudent.last_name}`,
+        student_number: newStudent.student_number,
+      },
+      ipAddress: getIp(req),
+    });
+
     res.status(201).json({
       message: 'Student added successfully',
-      student: result.rows[0],
+      student: newStudent,
       generated_password: student_number // For admin reference
     });
 
@@ -692,6 +732,15 @@ router.put('/students/:id', [
     const { first_name, last_name, grade_id, class_id, is_active,
             is_boarder, uses_transport, uses_aftercare, has_sibling_discount } = req.body;
 
+    // Fetch current values so we can record which fields genuinely changed
+    const beforeResult = await db.query(
+      `SELECT first_name, last_name, grade_id, class_id, is_active,
+              is_boarder, uses_transport, uses_aftercare, has_sibling_discount, has_teacher_discount
+       FROM users WHERE id = $1 AND role = 'student'`,
+      [id]
+    );
+    const before = beforeResult.rows[0] || {};
+
     const updateFields = [];
     const params = [];
     let paramCount = 0;
@@ -776,9 +825,37 @@ router.put('/students/:id', [
       return res.status(404).json({ message: 'Student not found' });
     }
 
+    const updatedStudent = result.rows[0];
+
+    // Determine which fields genuinely changed by comparing before vs after values
+    const trackableFields = ['first_name','last_name','grade_id','class_id','is_active',
+      'is_boarder','uses_transport','uses_aftercare','has_sibling_discount','has_teacher_discount'];
+    const changedFields = trackableFields.filter(k => {
+      if (!(k in req.body)) return false;
+      // Normalise for comparison (DB booleans vs JS booleans, ints vs strings)
+      const oldVal = before[k] === null || before[k] === undefined ? null : String(before[k]);
+      const newVal = req.body[k] === null || req.body[k] === undefined ? null : String(req.body[k]);
+      return oldVal !== newVal;
+    });
+
+    await logAudit({
+      userId:     req.user.id,
+      userName:   `${req.user.first_name} ${req.user.last_name}`,
+      userRole:   req.user.role,
+      action:     'student_update',
+      entityType: 'student',
+      entityId:   updatedStudent.id,
+      details: {
+        student_name:   `${updatedStudent.first_name} ${updatedStudent.last_name}`,
+        student_number: updatedStudent.student_number,
+        changed_fields: changedFields.join(', '),
+      },
+      ipAddress: getIp(req),
+    });
+
     res.json({
       message: 'Student updated successfully',
-      student: result.rows[0]
+      student: updatedStudent
     });
 
   } catch (error) {
@@ -805,9 +882,25 @@ router.delete('/students/:id', [
       return res.status(404).json({ message: 'Student not found' });
     }
 
+    const deletedStudent = result.rows[0];
+
+    await logAudit({
+      userId:     req.user.id,
+      userName:   `${req.user.first_name} ${req.user.last_name}`,
+      userRole:   req.user.role,
+      action:     'student_delete',
+      entityType: 'student',
+      entityId:   deletedStudent.id,
+      details: {
+        student_name:   `${deletedStudent.first_name} ${deletedStudent.last_name}`,
+        student_number: deletedStudent.student_number,
+      },
+      ipAddress: getIp(req),
+    });
+
     res.json({
       message: 'Student deleted successfully',
-      student: result.rows[0]
+      student: deletedStudent
     });
 
   } catch (error) {
