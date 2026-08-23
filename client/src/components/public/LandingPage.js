@@ -55,8 +55,8 @@ export const Header = () => {
     <>
       <div className="fixed top-0 left-0 right-0 z-50 bg-red-700 text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-9 flex items-center justify-center text-center">
-          <a href="#apply" className="text-xs sm:text-sm font-semibold tracking-wide hover:text-red-100 focus:outline-none focus:ring-2 focus:ring-white rounded">
-            2027 admissions are now open <span className="hidden sm:inline">— begin your application online</span>
+           <a href="/#apply" className="text-xs sm:text-sm font-semibold tracking-wide hover:text-red-100 focus:outline-none focus:ring-2 focus:ring-white rounded">
+            No Fee Increase in 2027 <span className="hidden sm:inline">— 2027 admissions are now open</span>
           </a>
         </div>
       </div>
@@ -65,7 +65,7 @@ export const Header = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="h-16 md:h-[4.7rem] flex items-center justify-between">
             <a href="/" className="flex items-center gap-2.5 min-w-0" aria-label="Harmony Learning Institute home">
-              <img src="/images/harmony-logo.png" alt="" className="w-11 h-11 md:w-12 md:h-12 object-contain shrink-0" />
+              <img src="/images/harmony-logo.png" alt="" className="w-12 h-12 md:w-14 md:h-14 object-contain shrink-0" />
               <span className="leading-tight">
                 <span className="block font-extrabold text-[15px] sm:text-base text-blue-950 tracking-tight">Harmony Learning</span>
                 <span className="block text-[10px] font-bold tracking-[0.16em] text-red-600 uppercase">Institute</span>
@@ -355,7 +355,8 @@ const Programmes = () => {
     {
       name: 'Preschool',
       level: 'Ages 0–6',
-      image: 'young-learners.webp',
+       image: '/images/school/552693350_830159562853848_3695668521832927477_n_1765536715561.jpg',
+       alt: 'A young Harmony learner celebrating heritage',
       copy: 'A warm foundation for play, discovery, creativity and early learning.',
       points: ['Play-based learning', 'Creative development', 'Social skills'],
     },
@@ -369,7 +370,8 @@ const Programmes = () => {
     {
       name: 'Boarding',
       level: 'Available option',
-      image: 'campus-classrooms.webp',
+      image: 'learners-community.webp',
+      alt: 'Harmony learners sharing time together',
       copy: 'A structured home-away-from-home option for families who need it.',
       points: ['Supervised environment', 'Study support', 'Community living'],
     },
@@ -381,7 +383,7 @@ const Programmes = () => {
         <div className="mt-12 grid md:grid-cols-3 gap-6 lg:gap-8">
           {programmes.map((programme) => (
             <article key={programme.name} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-xl transition-shadow">
-              <img src={`${HOME_IMAGE}${programme.image}`} alt={`${programme.name} learners at Harmony Learning Institute`} loading="lazy" className="w-full h-56 object-cover group-hover:scale-[1.03] transition-transform duration-500" />
+              <img src={programme.image.startsWith('/') ? programme.image : `${HOME_IMAGE}${programme.image}`} alt={programme.alt || `${programme.name} learners at Harmony Learning Institute`} loading="lazy" className="w-full h-56 object-cover group-hover:scale-[1.03] transition-transform duration-500" />
               <div className="p-6">
                 <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-red-700">{programme.level}</p>
                 <h3 className="mt-2 text-2xl font-black text-blue-950">{programme.name}</h3>
@@ -406,9 +408,9 @@ const Facilities = () => (
           <p className="text-xs font-extrabold tracking-[0.16em] uppercase text-red-300">Campus facilities</p>
           <h2 className="mt-3 text-3xl sm:text-4xl font-black leading-tight">Space for learning, creating and moving.</h2>
           <p className="mt-5 text-lg leading-relaxed text-blue-100">Our campus gives learners room for focused classroom learning, technology and active school life.</p>
-          <a href="#apply" className="mt-8 inline-flex items-center gap-2 min-h-12 px-5 rounded-lg bg-white text-blue-950 font-extrabold hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white">
-            Apply for 2027 <Arrow />
-          </a>
+           <Link to="/gallery" className="mt-8 inline-flex items-center gap-2 min-h-12 px-5 rounded-lg bg-white text-blue-950 font-extrabold hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white">
+             View more school photos <Arrow />
+           </Link>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:gap-4">
           <figure className="col-span-2 relative overflow-hidden rounded-2xl aspect-[2/1]">
@@ -431,14 +433,11 @@ const Facilities = () => (
 
 const SchoolLife = () => {
   const photos = [
-    ['sports-team.webp', 'Harmony learners taking part in a sports day', 'md:col-span-2 md:row-span-2'],
-    ['learners-community.webp', 'Harmony learners in school uniform', ''],
-    ['young-learners.webp', 'Young Harmony learners together', ''],
-    ['/images/school/546959768_822582210278250_5565575276103000568_n_1765536715571.jpg', 'Harmony learners enjoying a school activity', ''],
-    ['/images/school/552693350_830159562853848_3695668521832927477_n_1765536715561.jpg', 'Harmony heritage celebration', ''],
-    ['/images/school/579967972_869923822210755_7676298534031595389_n_1765536746196.jpg', 'Harmony school concert', ''],
-    ['/images/school/589306128_883951014141369_2429705641371166214_n_1765536746195.jpg', 'Harmony graduation day', 'md:col-span-2'],
-    ['campus-classrooms.webp', 'Harmony classrooms on campus', ''],
+    ['/images/school/542757838_812685227934615_1612604276869659548_n_1765536715570.jpg', 'Harmony learners enjoying a school event', 'md:col-span-2 md:row-span-2'],
+    ['/images/school/547212707_824173240119147_8225029070731606342_n_1765536715572.jpg', 'Harmony learners in a classroom', ''],
+    ['/images/school/571020461_858591460010658_2205033645939389574_n_1765536715566.jpg', 'Harmony learners sharing a school moment', ''],
+    ['/images/school/585606417_878202904716180_1733055620027623180_n_1765536746198.jpg', 'Harmony learners on the sports court', ''],
+    ['/images/school/586021157_878203054716165_8351932850885782583_n_1765536746200.jpg', 'Harmony Learning Institute classroom buildings', ''],
   ];
   return (
     <section id="school-life" className="py-20 sm:py-28 bg-slate-50">
@@ -450,7 +449,7 @@ const SchoolLife = () => {
             <a href="#apply" className="inline-flex self-start lg:self-auto items-center gap-2 text-sm font-extrabold text-slate-600 hover:text-red-700">Join the Harmony community <Arrow /></a>
           </div>
         </div>
-        <div className="mt-10 grid grid-cols-2 md:grid-cols-4 md:grid-rows-2 gap-3 sm:gap-4 h-[31rem] sm:h-[37rem]">
+         <div className="mt-10 grid grid-cols-2 md:grid-cols-4 md:grid-rows-2 gap-3 sm:gap-4 h-[31rem] sm:h-[37rem]">
           {photos.map(([image, alt, span]) => {
             const source = image.startsWith('/') ? image : `${HOME_IMAGE}${image}`;
             return (
@@ -651,7 +650,7 @@ export const Footer = () => (
           <li><a href="#apply" className="hover:text-white">2027 admissions</a></li>
           <li><Link to="/parent/login" className="hover:text-white">Parent Portal</Link></li>
           <li><Link to="/login?type=student" className="hover:text-white">Student Portal</Link></li>
-          <li><Link to="/login" className="hover:text-white">Staff login</Link></li>
+           <li><Link to="/login" className="hover:text-white">Staff Portal</Link></li>
         </ul>
       </div>
       <address className="not-italic">
