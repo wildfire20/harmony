@@ -2,12 +2,12 @@
 providers = ["node"]
 
 [phases.setup]
-nixPkgs = ["nodejs-18_x", "npm-9_x"]
+nixPkgs = ["nodejs_20"]
 
 [phases.install]
 cmds = [
-  "npm install --legacy-peer-deps",
-  "cd client && npm install --legacy-peer-deps"
+  "npm install --legacy-peer-deps --package-lock=false --registry=https://registry.npmjs.org/",
+  "cd client && npm install --legacy-peer-deps --package-lock=false --registry=https://registry.npmjs.org/"
 ]
 
 [phases.build]
