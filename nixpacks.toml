@@ -7,7 +7,7 @@ nixPkgs = ["nodejs_20"]
 [phases.install]
 cmds = [
   "npm install --legacy-peer-deps --package-lock=false --registry=https://registry.npmjs.org/",
-  "cd client && npm install --legacy-peer-deps --package-lock=false --registry=https://registry.npmjs.org/"
+  "cd client && npm ci --legacy-peer-deps --registry=https://registry.npmjs.org/"
 ]
 
 [phases.build]

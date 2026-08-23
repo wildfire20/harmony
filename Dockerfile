@@ -12,8 +12,9 @@ COPY client/package*.json ./client/
 # contains Replit-internal package URLs that are not reachable from Railway.
 RUN npm install --legacy-peer-deps --package-lock=false --registry=https://registry.npmjs.org/
 
-# Install client dependencies from the public npm registry.
-RUN cd client && npm install --legacy-peer-deps --package-lock=false --registry=https://registry.npmjs.org/
+# Install the client from its clean, public-registry lockfile. This preserves the
+# separate AJV versions required by the React build toolchain.
+RUN cd client && npm ci --legacy-peer-deps --registry=https://registry.npmjs.org/
 
 # Copy the rest of the application
 COPY . .
