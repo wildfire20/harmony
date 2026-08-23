@@ -16,9 +16,9 @@
     "railway-setup": "node setup-database.js"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.842.0",
-    "@aws-sdk/lib-storage": "^3.842.0",
-    "@aws-sdk/s3-request-presigner": "^3.842.0",
+    "@aws-sdk/client-s3": "^3.1116.0",
+    "@aws-sdk/lib-storage": "^3.1116.0",
+    "@aws-sdk/s3-request-presigner": "^3.1116.0",
     "@replit/connectors-sdk": "^0.4.0",
     "axios": "^1.10.0",
     "bcryptjs": "^2.4.3",
@@ -45,6 +45,6 @@
     "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=20.0.0"
   }
 }
