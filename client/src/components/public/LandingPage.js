@@ -1,9 +1,36 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 
 const HOME_IMAGE = '/images/homepage/';
+
+export const GALLERY_IMAGES = [
+  { src: `${HOME_IMAGE}learner-group.webp`, alt: 'Harmony learners in uniform on campus', title: 'A place to learn, grow and belong', category: 'Learners' },
+  { src: `${HOME_IMAGE}learners-community.webp`, alt: 'Harmony learners in school uniform', title: 'Growing together', category: 'Learners' },
+  { src: `${HOME_IMAGE}young-learners.webp`, alt: 'Young Harmony learners together', title: 'Every learner matters', category: 'Learners' },
+  { src: `${HOME_IMAGE}staff-team.webp`, alt: 'Harmony Learning Institute teaching team', title: 'Our dedicated teaching team', category: 'Team' },
+  { src: `${HOME_IMAGE}campus-gate.webp`, alt: 'Harmony Learning Institute campus entrance', title: 'Welcome to Harmony', category: 'Campus' },
+  { src: `${HOME_IMAGE}campus-classrooms.webp`, alt: 'Harmony classrooms on campus', title: 'Spaces made for learning', category: 'Campus' },
+  { src: `${HOME_IMAGE}classroom.webp`, alt: 'A prepared Harmony classroom', title: 'Ready for discovery', category: 'Learning' },
+  { src: `${HOME_IMAGE}computer-lab.webp`, alt: 'Harmony computer lab', title: 'Learning for the future', category: 'Learning' },
+  { src: `${HOME_IMAGE}sports-court.webp`, alt: 'Harmony covered sports court', title: 'Active days at Harmony', category: 'Activities' },
+  { src: `${HOME_IMAGE}sports-team.webp`, alt: 'Harmony learners taking part in a sports day', title: 'Shared achievements', category: 'Activities' },
+  { src: '/images/school/542757838_812685227934615_1612604276869659548_n_1765536715570.jpg', alt: 'Harmony learners enjoying school life', title: 'Making memories together', category: 'Activities' },
+  { src: '/images/school/546959768_822582210278250_5565575276103000568_n_1765536715571.jpg', alt: 'Harmony learners enjoying a school activity', title: 'Joyful school days', category: 'Activities' },
+  { src: '/images/school/547212707_824173240119147_8225029070731606342_n_1765536715572.jpg', alt: 'Harmony learners participating in a school activity', title: 'Learning beyond the classroom', category: 'Activities' },
+  { src: '/images/school/552693350_830159562853848_3695668521832927477_n_1765536715561.jpg', alt: 'Harmony heritage celebration', title: 'Celebrating our community', category: 'Activities' },
+  { src: '/images/school/558220948_843198804883257_1331796588957140620_n_1765536715564.jpg', alt: 'Harmony school activity', title: 'Together at Harmony', category: 'Activities' },
+  { src: '/images/school/571020461_858591460010658_2205033645939389574_n_1765536715566.jpg', alt: 'Harmony school event', title: 'Moments that matter', category: 'Activities' },
+  { src: '/images/school/572089308_859738236562647_1058946190080182228_n_1765536715567.jpg', alt: 'Harmony learners at a school event', title: 'A welcoming community', category: 'Activities' },
+  { src: '/images/school/572776172_859739109895893_1292514017724096687_n_1765536715568.jpg', alt: 'Harmony learners enjoying an event', title: 'Friendships and fun', category: 'Activities' },
+  { src: '/images/school/574083654_859739219895882_5859464915249295367_n_1765536715569.jpg', alt: 'Harmony school celebration', title: 'Celebrating every learner', category: 'Activities' },
+  { src: '/images/school/579967972_869923822210755_7676298534031595389_n_1765536746196.jpg', alt: 'Harmony school concert', title: 'Finding your voice', category: 'Activities' },
+  { src: '/images/school/585606417_878202904716180_1733055620027623180_n_1765536746198.jpg', alt: 'Harmony school performance', title: 'Proud moments on stage', category: 'Activities' },
+  { src: '/images/school/586021157_878203054716165_8351932850885782583_n_1765536746200.jpg', alt: 'Harmony learners performing together', title: 'A school full of expression', category: 'Activities' },
+  { src: '/images/school/589068204_883907127479091_6403058270590047581_n_1765536746193.jpg', alt: 'Harmony school community', title: 'Part of the Harmony family', category: 'Community' },
+  { src: '/images/school/589306128_883951014141369_2429705641371166214_n_1765536746195.jpg', alt: 'Harmony graduation day', title: 'Celebrating the journey', category: 'Community' },
+];
 
 const Arrow = () => (
   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
@@ -17,7 +44,7 @@ const Check = () => (
   </svg>
 );
 
-const Header = () => {
+export const Header = () => {
   const [open, setOpen] = useState(false);
   const [portalOpen, setPortalOpen] = useState(false);
 
@@ -46,11 +73,12 @@ const Header = () => {
             </a>
 
             <nav className="hidden lg:flex items-center gap-6 text-sm font-semibold text-slate-600" aria-label="Main navigation">
-              <a href="#about" className="hover:text-red-700 transition-colors">Why Harmony</a>
-              <a href="#programmes" className="hover:text-red-700 transition-colors">Programmes</a>
-              <a href="#facilities" className="hover:text-red-700 transition-colors">Facilities</a>
-              <a href="#school-life" className="hover:text-red-700 transition-colors">School Life</a>
-              <a href="#apply" className="hover:text-red-700 transition-colors">Admissions</a>
+              <a href="/#about" className="hover:text-red-700 transition-colors">Why Harmony</a>
+              <a href="/#programmes" className="hover:text-red-700 transition-colors">Programmes</a>
+              <a href="/#facilities" className="hover:text-red-700 transition-colors">Facilities</a>
+              <a href="/#school-life" className="hover:text-red-700 transition-colors">School Life</a>
+              <Link to="/gallery" className="hover:text-red-700 transition-colors">Gallery</Link>
+              <a href="/#apply" className="hover:text-red-700 transition-colors">Admissions</a>
             </nav>
 
             <div className="hidden md:flex items-center gap-3">
@@ -76,7 +104,7 @@ const Header = () => {
                   </div>
                 )}
               </div>
-              <a href="#apply" className="inline-flex items-center justify-center gap-1.5 min-h-11 px-5 text-sm font-bold text-white bg-red-700 rounded-lg shadow-sm hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2">
+              <a href="/#apply" className="inline-flex items-center justify-center gap-1.5 min-h-11 px-5 text-sm font-bold text-white bg-red-700 rounded-lg shadow-sm hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2">
                 Apply for 2027 <Arrow />
               </a>
             </div>
@@ -97,11 +125,11 @@ const Header = () => {
           {open && (
             <nav className="md:hidden py-3 border-t border-slate-100" aria-label="Mobile navigation">
               {[
-                ['Why Harmony', '#about'],
-                ['Programmes', '#programmes'],
-                ['Facilities', '#facilities'],
-                ['School Life', '#school-life'],
-                ['Admissions', '#apply'],
+                ['Why Harmony', '/#about'],
+                ['Programmes', '/#programmes'],
+                ['Facilities', '/#facilities'],
+                ['School Life', '/#school-life'],
+                ['Admissions', '/#apply'],
               ].map(([label, href]) => (
                 <a key={href} href={href} onClick={closeMenu} className="block px-3 py-3 text-sm font-bold text-slate-700 hover:bg-red-50 hover:text-red-700 rounded-lg">
                   {label}
@@ -115,8 +143,11 @@ const Header = () => {
                   <MobilePortalLink to="/login" tone="red" title="Staff Portal" description="Teachers & administration" onClick={closeMenu} />
                 </div>
               </div>
+              <Link to="/gallery" onClick={closeMenu} className="block mt-1 px-3 py-3 text-sm font-bold text-slate-700 hover:bg-red-50 hover:text-red-700 rounded-lg">
+                Gallery
+              </Link>
               <div className="pt-3 px-1">
-                <a href="#apply" onClick={closeMenu} className="inline-flex w-full justify-center items-center min-h-11 text-sm font-bold text-white bg-red-700 rounded-lg">
+                <a href="/#apply" onClick={closeMenu} className="inline-flex w-full justify-center items-center min-h-11 text-sm font-bold text-white bg-red-700 rounded-lg">
                   Apply for 2027
                 </a>
               </div>
@@ -164,13 +195,72 @@ const MobilePortalLink = ({ to, tone, title, description, onClick }) => {
   );
 };
 
-const Hero = () => (
-  <section className="relative overflow-hidden bg-blue-950 pt-[6.5rem] md:pt-[7.4rem]">
-    <div className="absolute inset-0">
-      <img src={`${HOME_IMAGE}learner-group.webp`} alt="Harmony learners in uniform on campus" className="w-full h-full object-cover object-center" />
-      <div className="absolute inset-0 bg-gradient-to-r from-blue-950 via-blue-950/85 to-blue-950/30" />
-      <div className="absolute inset-0 bg-gradient-to-t from-blue-950/70 via-transparent to-transparent" />
-    </div>
+const HERO_SLIDES = [
+  GALLERY_IMAGES[0],
+  GALLERY_IMAGES[3],
+  GALLERY_IMAGES[4],
+  GALLERY_IMAGES[7],
+  GALLERY_IMAGES[9],
+  GALLERY_IMAGES[11],
+  GALLERY_IMAGES[19],
+  GALLERY_IMAGES[23],
+];
+
+const Hero = () => {
+  const [activeSlide, setActiveSlide] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updatePreference = () => setReducedMotion(mediaQuery.matches);
+    updatePreference();
+    mediaQuery.addEventListener?.('change', updatePreference);
+    mediaQuery.addListener?.(updatePreference);
+    return () => {
+      mediaQuery.removeEventListener?.('change', updatePreference);
+      mediaQuery.removeListener?.(updatePreference);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isPaused || reducedMotion) return undefined;
+    const timer = window.setInterval(() => {
+      setActiveSlide((current) => (current + 1) % HERO_SLIDES.length);
+    }, 5500);
+    return () => window.clearInterval(timer);
+  }, [isPaused, reducedMotion]);
+
+  const showPrevious = () => setActiveSlide((current) => (current - 1 + HERO_SLIDES.length) % HERO_SLIDES.length);
+  const showNext = () => setActiveSlide((current) => (current + 1) % HERO_SLIDES.length);
+
+  return (
+    <section className="relative overflow-hidden bg-blue-950 pt-[6.5rem] md:pt-[7.4rem]">
+      <div className="absolute inset-0">
+        {HERO_SLIDES.map((slide, index) => (
+          <img
+            key={slide.src}
+            src={slide.src}
+            alt={index === activeSlide ? slide.alt : ''}
+            aria-hidden={index !== activeSlide}
+            className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-1000 ${index === activeSlide ? 'opacity-100' : 'opacity-0'}`}
+          />
+        ))}
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-950 via-blue-950/85 to-blue-950/30" />
+        <div className="absolute inset-0 bg-gradient-to-t from-blue-950/70 via-transparent to-transparent" />
+      </div>
+      <div className="absolute z-10 bottom-5 right-4 sm:right-6 lg:right-8 flex items-center gap-2 rounded-xl border border-white/20 bg-blue-950/65 px-2.5 py-2 text-white backdrop-blur-sm" aria-label="Hero image slideshow controls">
+        <span className="px-1 text-xs font-bold tabular-nums" aria-live="polite">{activeSlide + 1} / {HERO_SLIDES.length}</span>
+        <button type="button" onClick={showPrevious} aria-label="Show previous hero image" className="inline-flex h-8 w-8 items-center justify-center rounded-lg hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white">
+          <span aria-hidden="true">‹</span>
+        </button>
+        <button type="button" onClick={() => setIsPaused(!isPaused)} aria-label={isPaused ? 'Play hero slideshow' : 'Pause hero slideshow'} className="inline-flex h-8 w-8 items-center justify-center rounded-lg hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white">
+          <span aria-hidden="true" className="text-xs">{isPaused ? '▶' : 'Ⅱ'}</span>
+        </button>
+        <button type="button" onClick={showNext} aria-label="Show next hero image" className="inline-flex h-8 w-8 items-center justify-center rounded-lg hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white">
+          <span aria-hidden="true">›</span>
+        </button>
+      </div>
     <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 sm:py-28 lg:py-36">
       <div className="max-w-2xl">
         <p className="inline-flex items-center gap-2 rounded-full bg-white/12 border border-white/20 px-3.5 py-2 text-xs sm:text-sm font-bold tracking-wide text-white mb-6">
@@ -194,8 +284,9 @@ const Hero = () => (
         </div>
       </div>
     </div>
-  </section>
-);
+    </section>
+  );
+};
 
 const TrustStrip = () => (
   <section className="relative z-10 bg-white border-b border-slate-200">
@@ -354,7 +445,10 @@ const SchoolLife = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5">
           <SectionHeading eyebrow="Life at Harmony" title="Learning is only part of the story." copy="School life is made of friendships, shared achievements, active days and moments that help learners feel at home." />
-          <a href="#apply" className="inline-flex self-start lg:self-auto items-center gap-2 text-sm font-extrabold text-red-700 hover:text-red-900">Join the Harmony community <Arrow /></a>
+          <div className="flex flex-wrap items-center gap-5">
+            <Link to="/gallery" className="inline-flex self-start lg:self-auto items-center gap-2 text-sm font-extrabold text-red-700 hover:text-red-900">View the full gallery <Arrow /></Link>
+            <a href="#apply" className="inline-flex self-start lg:self-auto items-center gap-2 text-sm font-extrabold text-slate-600 hover:text-red-700">Join the Harmony community <Arrow /></a>
+          </div>
         </div>
         <div className="mt-10 grid grid-cols-2 md:grid-cols-4 md:grid-rows-2 gap-3 sm:gap-4 h-[31rem] sm:h-[37rem]">
           {photos.map(([image, alt, span]) => {
@@ -538,7 +632,7 @@ const Field = ({ label, error, children, optional = false }) => (
   </label>
 );
 
-const Footer = () => (
+export const Footer = () => (
   <footer className="bg-blue-950 text-white">
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 grid md:grid-cols-[1.3fr_0.7fr_1fr] gap-10">
       <div>
@@ -579,7 +673,7 @@ const Footer = () => (
   </footer>
 );
 
-const WhatsAppButton = () => (
+export const WhatsAppButton = () => (
   <a href="https://wa.me/27711679620" target="_blank" rel="noopener noreferrer" aria-label="Chat with Harmony Learning Institute on WhatsApp" className="fixed bottom-5 right-5 z-40 w-14 h-14 rounded-full bg-green-600 text-white shadow-lg hover:bg-green-700 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 transition flex items-center justify-center">
     <svg className="w-7 h-7" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884" /></svg>
   </a>

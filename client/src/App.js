@@ -32,6 +32,7 @@ import Analytics from './components/analytics/Analytics';
 import DebugPage from './components/debug/DebugPage';
 import PaymentsHub from './components/payments/PaymentsHub';
 import LandingPage from './components/public/LandingPage';
+import GalleryPage from './components/public/GalleryPage';
 import EnrollmentManagement from './components/admin/EnrollmentManagement';
 import AttendancePage from './components/attendance/AttendancePage';
 import ParentLogin from './components/parent/ParentLogin';
@@ -105,6 +106,7 @@ const AppContent = () => {
   return (
     <Routes>
       <Route path="/" element={<LandingRoute />} />
+      <Route path="/gallery" element={<GalleryPage />} />
       
       <Route path="/login" element={
         <PublicRoute>
