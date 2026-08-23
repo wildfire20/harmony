@@ -355,8 +355,8 @@ const Programmes = () => {
     {
       name: 'Preschool',
       level: 'Ages 0–6',
-       image: '/images/school/552693350_830159562853848_3695668521832927477_n_1765536715561.jpg',
-       alt: 'A young Harmony learner celebrating heritage',
+       image: '/images/school/542757838_812685227934615_1612604276869659548_n_1765536715570.jpg',
+       alt: 'Harmony preschool learners visiting a fire truck',
       copy: 'A warm foundation for play, discovery, creativity and early learning.',
       points: ['Play-based learning', 'Creative development', 'Social skills'],
     },
