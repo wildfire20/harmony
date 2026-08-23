@@ -19,8 +19,10 @@ const Check = () => (
 
 const Header = () => {
   const [open, setOpen] = useState(false);
+  const [portalOpen, setPortalOpen] = useState(false);
 
   const closeMenu = () => setOpen(false);
+  const closePortal = () => setPortalOpen(false);
 
   return (
     <>
@@ -52,9 +54,28 @@ const Header = () => {
             </nav>
 
             <div className="hidden md:flex items-center gap-3">
-              <Link to="/parent/login" className="inline-flex items-center justify-center min-h-11 px-4 text-sm font-bold text-blue-950 border border-blue-950/15 rounded-lg hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-red-600">
-                Parent Portal
-              </Link>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setPortalOpen(!portalOpen)}
+                  aria-haspopup="menu"
+                  aria-expanded={portalOpen}
+                  className="inline-flex items-center justify-center gap-2 min-h-11 px-4 text-sm font-bold text-blue-950 border border-blue-950/15 rounded-lg hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-red-600"
+                >
+                  Portal Login
+                  <svg className={`w-4 h-4 transition-transform ${portalOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
+                {portalOpen && (
+                  <div role="menu" className="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl">
+                    <p className="px-4 pt-4 pb-2 text-[10px] font-extrabold tracking-[0.14em] uppercase text-slate-400">Select your portal</p>
+                    <PortalLink to="/login?type=student" tone="emerald" title="Student Portal" description="Access assignments & quizzes" onClick={closePortal} />
+                    <PortalLink to="/parent/login" tone="blue" title="Parent Portal" description="Track your child's progress" onClick={closePortal} />
+                    <PortalLink to="/login" tone="red" title="Staff Portal" description="Teachers & administration" onClick={closePortal} />
+                  </div>
+                )}
+              </div>
               <a href="#apply" className="inline-flex items-center justify-center gap-1.5 min-h-11 px-5 text-sm font-bold text-white bg-red-700 rounded-lg shadow-sm hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2">
                 Apply for 2027 <Arrow />
               </a>
@@ -86,12 +107,17 @@ const Header = () => {
                   {label}
                 </a>
               ))}
-              <div className="grid grid-cols-2 gap-3 pt-3 px-1">
-                <Link to="/parent/login" onClick={closeMenu} className="inline-flex justify-center items-center min-h-11 text-sm font-bold text-blue-950 border border-blue-950/15 rounded-lg">
-                  Parent Portal
-                </Link>
-                <a href="#apply" onClick={closeMenu} className="inline-flex justify-center items-center min-h-11 text-sm font-bold text-white bg-red-700 rounded-lg">
-                  Apply now
+              <div className="mt-2 px-1 pt-3 border-t border-slate-100">
+                <p className="px-2 pb-2 text-[10px] font-extrabold tracking-[0.14em] uppercase text-slate-400">Portal Login</p>
+                <div className="space-y-2">
+                  <MobilePortalLink to="/login?type=student" tone="emerald" title="Student Portal" description="Assignments & quizzes" onClick={closeMenu} />
+                  <MobilePortalLink to="/parent/login" tone="blue" title="Parent Portal" description="Track your child's progress" onClick={closeMenu} />
+                  <MobilePortalLink to="/login" tone="red" title="Staff Portal" description="Teachers & administration" onClick={closeMenu} />
+                </div>
+              </div>
+              <div className="pt-3 px-1">
+                <a href="#apply" onClick={closeMenu} className="inline-flex w-full justify-center items-center min-h-11 text-sm font-bold text-white bg-red-700 rounded-lg">
+                  Apply for 2027
                 </a>
               </div>
             </nav>
@@ -99,6 +125,42 @@ const Header = () => {
         </div>
       </header>
     </>
+  );
+};
+
+const PortalLink = ({ to, tone, title, description, onClick }) => {
+  const tones = {
+    emerald: 'bg-emerald-50 text-emerald-700 group-hover:bg-emerald-100',
+    blue: 'bg-blue-50 text-blue-700 group-hover:bg-blue-100',
+    red: 'bg-red-50 text-red-700 group-hover:bg-red-100',
+  };
+  return (
+    <Link to={to} role="menuitem" onClick={onClick} className="group flex items-center gap-3 border-t border-slate-50 px-4 py-3.5 hover:bg-slate-50">
+      <span className={`inline-flex w-9 h-9 items-center justify-center rounded-xl ${tones[tone]}`}>
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" aria-hidden="true">
+          {tone === 'emerald' && <path strokeLinecap="round" strokeLinejoin="round" d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v15H6.5A2.5 2.5 0 0 0 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />}
+          {tone === 'blue' && <><path strokeLinecap="round" strokeLinejoin="round" d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path strokeLinecap="round" strokeLinejoin="round" d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>}
+          {tone === 'red' && <><rect x="3" y="5" width="18" height="14" rx="2" /><path strokeLinecap="round" strokeLinejoin="round" d="M8 5v-1a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1M8 12h8M10 9h4" /></>}
+        </svg>
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-extrabold text-slate-800">{title}</span>
+        <span className="block text-xs text-slate-500">{description}</span>
+      </span>
+    </Link>
+  );
+};
+
+const MobilePortalLink = ({ to, tone, title, description, onClick }) => {
+  const tones = {
+    emerald: 'bg-emerald-50 text-emerald-700',
+    blue: 'bg-blue-50 text-blue-700',
+    red: 'bg-red-50 text-red-700',
+  };
+  return (
+    <Link to={to} onClick={onClick} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${tones[tone]}`}>
+      <span className="min-w-0"><span className="block text-sm font-extrabold">{title}</span><span className="block text-xs opacity-80">{description}</span></span>
+    </Link>
   );
 };
 
@@ -281,7 +343,11 @@ const SchoolLife = () => {
     ['sports-team.webp', 'Harmony learners taking part in a sports day', 'md:col-span-2 md:row-span-2'],
     ['learners-community.webp', 'Harmony learners in school uniform', ''],
     ['young-learners.webp', 'Young Harmony learners together', ''],
-    ['campus-classrooms.webp', 'Harmony classrooms on campus', 'md:col-span-2'],
+    ['/images/school/546959768_822582210278250_5565575276103000568_n_1765536715571.jpg', 'Harmony learners enjoying a school activity', ''],
+    ['/images/school/552693350_830159562853848_3695668521832927477_n_1765536715561.jpg', 'Harmony heritage celebration', ''],
+    ['/images/school/579967972_869923822210755_7676298534031595389_n_1765536746196.jpg', 'Harmony school concert', ''],
+    ['/images/school/589306128_883951014141369_2429705641371166214_n_1765536746195.jpg', 'Harmony graduation day', 'md:col-span-2'],
+    ['campus-classrooms.webp', 'Harmony classrooms on campus', ''],
   ];
   return (
     <section id="school-life" className="py-20 sm:py-28 bg-slate-50">
@@ -291,11 +357,14 @@ const SchoolLife = () => {
           <a href="#apply" className="inline-flex self-start lg:self-auto items-center gap-2 text-sm font-extrabold text-red-700 hover:text-red-900">Join the Harmony community <Arrow /></a>
         </div>
         <div className="mt-10 grid grid-cols-2 md:grid-cols-4 md:grid-rows-2 gap-3 sm:gap-4 h-[31rem] sm:h-[37rem]">
-          {photos.map(([image, alt, span]) => (
-            <figure key={image} className={`relative overflow-hidden rounded-2xl ${span}`}>
-              <img src={`${HOME_IMAGE}${image}`} alt={alt} loading="lazy" className="w-full h-full object-cover hover:scale-105 transition-transform duration-700" />
-            </figure>
-          ))}
+          {photos.map(([image, alt, span]) => {
+            const source = image.startsWith('/') ? image : `${HOME_IMAGE}${image}`;
+            return (
+              <figure key={image} className={`relative overflow-hidden rounded-2xl ${span}`}>
+                <img src={source} alt={alt} loading="lazy" className="w-full h-full object-cover hover:scale-105 transition-transform duration-700" />
+              </figure>
+            );
+          })}
         </div>
       </div>
     </section>
