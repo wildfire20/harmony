@@ -1,0 +1,568 @@
+I want you to improve the existing Harmony Learning Institute website tonight.
+
+Website: https://www.harmonylearning.co.za/
+
+IMPORTANT:
+
+* Work with the EXISTING project and existing design.
+* Do NOT rebuild the entire website from scratch.
+* Do NOT break or remove the Parent Portal, school management system, application functionality, forms, database connections, backend routes, authentication, or existing working features.
+* Preserve the existing Harmony branding, logo, red/navy/white identity and overall professional feel.
+* Improve the site rather than replacing everything.
+* Make a backup/commit before making major changes.
+* Make all changes fully responsive for desktop, tablet and mobile.
+* Do not invent school facts, prices, statistics, staff qualifications, testimonials or facilities that have not been provided.
+
+## GOAL
+
+I want Harmony Learning Institute's public website to feel like a modern, professional private school website that is easy for parents to understand and use.
+
+Tonight's focus is ONLY:
+
+1. SEO cleanup
+2. Homepage messaging
+3. 2027 admissions promotion
+4. Better use of real school photographs
+5. Stronger homepage structure
+6. Parent trust
+7. Mobile responsiveness
+8. Visual polish
+9. Better calls to action
+
+Do NOT build the AI assistant, WhatsApp automation, fee calculator, application tracking or Zapier/n8n workflows yet. Those will be Phase 2.
+
+---
+
+# 1. FIRST INSPECT THE CURRENT PROJECT
+
+Before changing anything:
+
+* Inspect the entire existing website structure.
+* Identify the homepage file/component.
+* Identify shared navigation/footer components.
+* Identify the current image/assets directory.
+* Identify existing SEO/meta tags.
+* Identify all links to the Parent Portal and online application.
+* Identify existing animations and styling.
+* Identify any backend/API functionality connected to the public site.
+
+Preserve anything that is already working correctly.
+
+Do not duplicate sections unnecessarily.
+
+---
+
+# 2. FIX THE HOMEPAGE SEO
+
+The public website must NOT present Harmony as a "School Management System".
+
+Change the homepage SEO to target actual parents searching for a school.
+
+Use approximately:
+
+TITLE:
+Harmony Learning Institute | Private School in Lephalale
+
+META DESCRIPTION:
+Harmony Learning Institute is a private preschool and primary school in Lephalale offering quality education from age 3 to Grade 7, computer classes, sport and boarding. 2027 admissions are now open.
+
+Also ensure:
+
+* Correct canonical URL uses https://www.harmonylearning.co.za/
+* Open Graph title and description match the school
+* Appropriate Open Graph image
+* Twitter/social sharing metadata where supported
+* One clear H1 per page
+* Meaningful image alt text
+* School-related structured data/schema if the project already supports JSON-LD
+
+Do not put "School Management System" in public-facing SEO metadata.
+
+---
+
+# 3. ADD A 2027 ADMISSIONS ANNOUNCEMENT BAR
+
+Add a professional slim announcement bar above or directly below the navigation.
+
+Message:
+
+2027 Admissions Now Open · No Fee Increase for 2027 · Age 3 to Grade 7
+
+Include a clear:
+
+Apply Now
+
+button.
+
+The Apply Now button must connect to Harmony's EXISTING online application process.
+
+Do not create a fake application link.
+
+Make the announcement bar attractive but not overly flashy.
+
+---
+
+# 4. IMPROVE THE HERO SECTION
+
+Redesign/improve the existing hero without making it look like a template website.
+
+Preferred structure:
+
+LEFT SIDE:
+
+Small label:
+2027 ADMISSIONS NOW OPEN
+
+Main heading:
+Quality Education. Bright Futures.
+
+Supporting text:
+A caring private school in Lephalale helping learners grow academically, socially and confidently from age 3 to Grade 7.
+
+Buttons:
+
+Primary:
+Apply for 2027
+
+Secondary:
+Explore Harmony
+
+Also include a small supporting line such as:
+
+CAPS Curriculum · Computer Classes · Sport · Boarding · Parent Portal
+
+RIGHT SIDE:
+
+Use a strong REAL Harmony learner photograph.
+
+Preferred hero image:
+IMG-20260823-WA0010.jpg
+
+Use the actual uploaded photograph.
+
+Do not AI-generate children or replace real learners with stock photography.
+
+Make sure the photograph is cropped professionally and faces are not covered by text.
+
+On mobile, stack the content naturally.
+
+---
+
+# 5. ADD A TRUST / FEATURE STRIP
+
+Immediately below the hero, create a clean feature strip.
+
+Use 5 items:
+
+CAPS Curriculum
+Computer Classes
+Sport
+Boarding Available
+Parent Portal
+
+Use simple consistent icons.
+
+Do not make the icons oversized.
+
+---
+
+# 6. IMPROVE THE ABOUT / WHY HARMONY SECTION
+
+Create or improve a section introducing Harmony.
+
+Heading:
+
+A School Where Every Learner Matters
+
+Keep the copy short and parent-friendly.
+
+Focus on:
+
+* supportive learning
+* academics
+* technology
+* development
+* school community
+
+Use:
+
+IMG-20260823-WA0009.jpg
+
+as one of the main community/student photographs if available.
+
+Avoid long blocks of generic marketing text.
+
+---
+
+# 7. PROGRAMMES SECTION
+
+Ensure the homepage clearly presents Harmony's main offerings.
+
+Use three professional cards:
+
+Preschool
+Age-appropriate early learning and development.
+
+Primary School
+Quality education and a strong academic foundation.
+
+Boarding
+A structured and supportive environment for boarding learners.
+
+If more accurate existing wording is already available in the project, preserve the verified information.
+
+Do not invent prices or boarding details.
+
+Each card may link to an existing relevant section/page.
+
+---
+
+# 8. FACILITIES / LEARNING ENVIRONMENT
+
+Create a clean visual section such as:
+
+Explore Our Learning Environment
+
+Use these photographs where available:
+
+Computer Lab:
+IMG-20260823-WA0034.jpg
+
+Classroom:
+IMG-20260823-WA0031.jpg
+
+Sports Court:
+IMG-20260823-WA0036.jpg
+
+Campus:
+IMG-20260823-WA0003.jpg
+
+Present these as professional cards or a modern image grid.
+
+Labels could be:
+
+Computer Lab
+Modern Classrooms
+Sport & Recreation
+Our Campus
+
+For IMG-20260823-WA0034.jpg:
+Crop/reposition it so the computer stations are the primary focus rather than the ceiling/projector.
+
+Do not distort images.
+
+Use object-fit: cover or the equivalent.
+
+---
+
+# 9. SCHOOL LIFE SECTION
+
+Create or improve a section showing that Harmony is an active school community.
+
+Heading:
+Life at Harmony
+
+Supporting line:
+Learning goes beyond the classroom through sport, teamwork, activities and shared experiences.
+
+Preferred images:
+
+IMG-20260823-WA0018.jpg
+IMG-20260823-WA0026.jpg
+IMG-20260823-WA0025.jpg
+IMG-20260823-WA0028.jpg
+
+Use the school assembly/community image as the strongest visual.
+
+Use the football and netball photographs as supporting images.
+
+Do not put every photograph on the homepage. Keep it curated.
+
+Additional images can remain for a gallery later.
+
+---
+
+# 10. STAFF / EDUCATORS SECTION
+
+Use:
+
+IMG-20260823-WA0014.jpg
+
+Create a tasteful section:
+
+Meet the People Behind Harmony
+
+Text:
+Our educators and staff work together to create a supportive environment where learners can learn, grow and thrive.
+
+Do NOT invent individual teacher names, qualifications or job titles.
+
+Include a button such as:
+
+Our School Community
+
+only if there is a suitable existing destination.
+
+Otherwise omit the button.
+
+---
+
+# 11. 2027 ADMISSIONS CTA
+
+Near the bottom of the homepage create a visually strong admissions section.
+
+Heading:
+
+2027 Admissions Are Open
+
+Supporting information:
+
+No Fee Increase for 2027
+Age 3 to Grade 7
+Primary School
+Boarding Available
+
+Primary button:
+
+Start Your Application
+
+Connect this button to the EXISTING Harmony application functionality.
+
+Secondary button if appropriate:
+
+Contact Admissions
+
+Use Harmony colours and make this section highly visible.
+
+The social media admissions poster may remain available as supporting material, but DO NOT use the entire poster as the main website section.
+
+Turn its important information into real HTML content.
+
+---
+
+# 12. PARENT PORTAL SECTION
+
+Make the existing Parent Portal easier to find.
+
+Create a clean section:
+
+Already Part of the Harmony Family?
+
+Access school information and your existing parent services through the Harmony Parent Portal.
+
+Button:
+
+Open Parent Portal
+
+IMPORTANT:
+Use the EXISTING Parent Portal URL/functionality.
+
+Do not recreate the portal.
+Do not change its authentication.
+Do not expose private student information publicly.
+
+---
+
+# 13. CONTACT SECTION
+
+Ensure the homepage footer/contact area clearly provides:
+
+* School name
+* Address
+* Phone/contact options already verified in the project
+* WhatsApp if already configured
+* Email if already configured
+* Operating/contact hours only if verified
+* Directions/map if already available
+* Apply Now
+* Parent Portal
+
+Do not invent contact information.
+
+---
+
+# 14. PHOTOS TO USE AND AVOID
+
+PRIORITISE:
+
+IMG-20260823-WA0010.jpg — hero/student image
+IMG-20260823-WA0009.jpg — student/community
+IMG-20260823-WA0014.jpg — staff
+IMG-20260823-WA0018.jpg — school community/assembly
+IMG-20260823-WA0036.jpg — sports court
+IMG-20260823-WA0034.jpg — computer lab
+IMG-20260823-WA0031.jpg — classroom
+IMG-20260823-WA0003.jpg — campus
+IMG-20260823-WA0026.jpg — football
+IMG-20260823-WA0025.jpg — netball
+IMG-20260823-WA0028.jpg — netball/gallery
+
+SECONDARY / GALLERY ONLY:
+
+IMG-20260823-WA0022.jpg
+IMG-20260823-WA0017.jpg
+IMG-20260823-WA0004.jpg
+IMG-20260823-WA0021.jpg
+
+DO NOT USE ON THE PUBLIC WEBSITE:
+
+IMG-20260823-WA0035.jpg — projector close-up
+IMG-20260823-WA0013.jpg — phone screenshot
+IMG-20260823-WA0020.jpg — flag close-up
+IMG-20260823-WA0033.jpg — exterior perimeter wall
+
+If any filename does not exist in the project, DO NOT replace it with random stock photography.
+
+Instead, tell me which required files are missing at the end.
+
+---
+
+# 15. IMAGE OPTIMISATION
+
+The photos are high-resolution phone images, so optimise them for the web.
+
+Where practical:
+
+* Create appropriately sized versions
+* Prefer WebP/AVIF where supported
+* Preserve acceptable quality
+* Lazy-load images below the fold
+* Do NOT lazy-load the main hero image if it hurts Largest Contentful Paint
+* Set image width/height or aspect ratio to reduce layout shifting
+* Do not stretch portraits into landscape dimensions
+* Crop intelligently
+* Keep people's faces visible
+* Add descriptive alt text
+
+Do not degrade the photos noticeably.
+
+---
+
+# 16. VISUAL STYLE
+
+The website should feel:
+
+* professional
+* clean
+* warm
+* trustworthy
+* modern
+* premium but approachable
+* suitable for parents choosing a private school
+
+Avoid:
+
+* excessive gradients
+* excessive animations
+* floating objects everywhere
+* unnecessary glassmorphism
+* huge icons
+* giant blocks of text
+* AI-looking illustrations
+* stock photos when real Harmony photos exist
+* childish visual design
+* overcrowded sections
+
+Use Harmony's existing brand colours intelligently.
+
+Use generous whitespace.
+
+Animations should be subtle and smooth.
+
+---
+
+# 17. MOBILE EXPERIENCE
+
+This is extremely important.
+
+Check the entire homepage at approximately:
+
+375px
+390px
+430px
+768px
+1024px
+1440px
+
+Ensure:
+
+* navigation works
+* no horizontal scrolling
+* images crop correctly
+* buttons are easy to tap
+* headings do not overflow
+* sections do not become too tall
+* images do not load at enormous sizes
+* application CTA remains easy to find
+* Parent Portal remains accessible
+
+---
+
+# 18. PRESERVE FUNCTIONALITY
+
+Before finishing, verify:
+
+* Home navigation
+* Application link/form
+* Parent Portal
+* Contact links
+* WhatsApp links if present
+* Phone links
+* Email links
+* Existing forms
+* Existing backend/API calls
+* Existing authentication
+* Existing management system links
+
+Do not change databases or backend structures unnecessarily.
+
+---
+
+# 19. PERFORMANCE & ACCESSIBILITY
+
+Also check:
+
+* console errors
+* broken links
+* missing images
+* missing alt text
+* obvious accessibility contrast problems
+* duplicate IDs
+* unnecessary JavaScript
+* excessive image sizes
+* layout shift
+* obvious Lighthouse/performance problems
+
+Improve what can safely be improved without rewriting the entire application.
+
+---
+
+# 20. FINAL REPORT
+
+After completing everything, give me a concise report containing:
+
+1. Files changed
+2. New sections added
+3. Images used and where
+4. Images missing from the project
+5. SEO changes
+6. Mobile improvements
+7. Any existing functionality you deliberately left untouched
+8. Any bugs/problems you discovered
+9. What still needs to be done in Phase 2
+
+For Phase 2, simply list future items such as:
+
+* Harmony AI Assistant
+* Admissions Hub
+* Fee Calculator
+* Campus Visit Booking
+* Application Tracking
+* Document Uploads
+* WhatsApp Automation
+* Email Automation
+* Parent Portal enhancements
+
+Do NOT implement Phase 2 tonight.
+
+Finish and test Phase 1 first.
