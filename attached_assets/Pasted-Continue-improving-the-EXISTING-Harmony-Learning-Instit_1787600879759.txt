@@ -1,0 +1,415 @@
+Continue improving the EXISTING Harmony Learning Institute website.
+
+This is PHASE 2A.
+
+Do NOT redesign the website again. The current visual design has already been approved and Phase 1 is complete.
+
+Website:
+https://www.harmonylearning.co.za/
+
+The goal tonight is to add verified 2027 fee information, create a useful fee estimator, strengthen admissions information and prepare the website for future automation/AI functionality.
+
+IMPORTANT:
+
+* Preserve the current visual design.
+* Preserve all existing application functionality.
+* Preserve Parent Portal, Student Portal and Staff Portal functionality.
+* Do not change authentication or database functionality unnecessarily.
+* Do not invent fees, age ranges, transport prices, admissions requirements or other school facts.
+* Work responsively on mobile and desktop.
+* Use the existing Harmony red/navy/white design system.
+* Commit/back up the current working version before major changes.
+
+# VERIFIED 2027 FEE INFORMATION
+
+Use ONLY the following verified fee information:
+
+Grade R:
+R1,850 per month
+
+Grades 1–7:
+R2,350 per month
+
+Boarding:
+R3,650 per month for the Grade R / younger category.
+This amount INCLUDES school fees.
+
+R3,950 per month for Grades 1–7.
+This amount INCLUDES school fees.
+
+Aftercare:
+R550 per month
+
+Registration fee:
+R800 once-off for NEW applicants.
+Non-refundable.
+
+Re-registration:
+R500 for learners who are already registered.
+
+School fees are payable over 12 months:
+January 2027 through December 2027.
+
+Payment methods:
+
+1. EFT monthly on or before the 3rd of every month.
+2. Card-machine payment at the school.
+3. Annual payment in advance qualifies for a one-month fee discount.
+
+Do NOT publish or calculate transport fees because they have not yet been provided.
+
+For transport, display something such as:
+
+"School transport may be available. Contact Harmony for route availability and a transport quotation."
+
+Do NOT invent an amount.
+
+# IMPORTANT AGE CORRECTION
+
+The current website contains wording such as:
+
+"Ages 0–6"
+
+for Preschool.
+
+Remove that age claim because it has not been verified.
+
+Use:
+
+"Preschool"
+or
+"Early Learning"
+
+without specifying an age range until the school confirms it.
+
+Do not change "Grades 1–7".
+
+# 1. CREATE A 2027 FEES SECTION/PAGE
+
+Create a professional page or major section titled:
+
+2027 School Fees
+
+Intro:
+
+"Clear, straightforward information to help families plan for the 2027 school year."
+
+Present the fees in attractive cards or a clean responsive table.
+
+Show:
+
+GRADE R
+R1,850 / month
+
+GRADES 1–7
+R2,350 / month
+
+BOARDING – GRADE R CATEGORY
+R3,650 / month
+School fees included
+
+BOARDING – GRADES 1–7
+R3,950 / month
+School fees included
+
+AFTERCARE
+R550 / month
+
+NEW LEARNER REGISTRATION
+R800 once-off
+Non-refundable
+
+RE-REGISTRATION
+R500
+
+Include:
+
+"School fees are payable over 12 months from January to December 2027."
+
+Also show the verified payment methods.
+
+Do not expose banking account information in the calculator or homepage.
+
+# 2. BUILD A 2027 FEE ESTIMATOR
+
+Create a professional interactive section:
+
+Estimate Your 2027 Fees
+
+This is an ESTIMATOR, not an invoice.
+
+Fields:
+
+Learner category:
+
+* Grade R
+* Grades 1–7
+
+Boarding:
+
+* No
+* Yes
+
+Aftercare:
+
+* No
+* Yes
+
+Applicant:
+
+* New learner
+* Returning learner
+
+Transport:
+
+* Interested
+* Not required
+
+CALCULATION RULES:
+
+GRADE R WITHOUT BOARDING:
+R1,850/month
+
+GRADES 1–7 WITHOUT BOARDING:
+R2,350/month
+
+GRADE R CATEGORY WITH BOARDING:
+R3,650/month TOTAL
+Do NOT add R1,850 again because the boarding fee includes school fees.
+
+GRADES 1–7 WITH BOARDING:
+R3,950/month TOTAL
+Do NOT add R2,350 again because the boarding fee includes school fees.
+
+AFTERCARE:
+If selected, add R550/month.
+
+NEW LEARNER:
+Show an additional once-off R800 registration fee.
+
+RETURNING LEARNER:
+Show an additional R500 re-registration fee.
+
+TRANSPORT:
+Do NOT add any amount.
+
+Instead show:
+
+"Transport pricing depends on route and availability. Please contact Harmony for a quotation."
+
+OUTPUT EXAMPLE:
+
+Estimated Monthly Fees
+Tuition / Boarding: R____
+Aftercare: R____
+Transport: Quote required
+
+Estimated Monthly Total:
+R____
+
+Once-off / Registration:
+R____
+
+Do not describe the resulting amount as a final invoice.
+
+Add:
+
+"This estimate is based on Harmony Learning Institute's published 2027 fee structure. Final fees and service availability should be confirmed with the school."
+
+# 3. ANNUAL PAYMENT INFORMATION
+
+Explain that the verified fee document states:
+
+"Annual payment in advance qualifies for a one-month fee discount."
+
+Do NOT automatically calculate discounts for combinations where the exact application of the discount is unclear.
+
+Instead show this as an informational benefit:
+
+"Pay annually in advance and qualify for a one-month fee discount. Contact the school for your confirmed annual amount."
+
+# 4. IMPROVE THE ADMISSIONS PAGE
+
+Above or alongside the existing application form, create an easy admissions overview.
+
+Suggested steps:
+
+1. Explore Harmony
+2. Review 2027 fees
+3. Complete the online application
+4. Harmony reviews the application
+5. Admissions contacts the parent/guardian
+
+Do not invent assessment procedures, acceptance timelines or required documents that have not been verified.
+
+Keep the existing application form working.
+
+# 5. REMOVE UNVERIFIED RESPONSE PROMISE
+
+If the website still says:
+
+"We will contact you within 48 hours"
+
+remove it unless there is explicit verified school confirmation.
+
+Use:
+
+"Our admissions team will contact you after reviewing your application."
+
+# 6. ADD A SMALL ADMISSIONS FAQ
+
+Create a concise FAQ using ONLY verified information.
+
+Suggested questions:
+
+When are 2027 applications open?
+2027 admissions are currently open.
+
+How much are Grade R fees?
+R1,850 per month for 2027.
+
+How much are Grades 1–7?
+R2,350 per month for 2027.
+
+Does boarding include school fees?
+Yes. The published 2027 boarding amounts include school fees.
+
+How much is boarding?
+R3,650 per month for the Grade R category and R3,950 per month for Grades 1–7.
+
+How much is aftercare?
+R550 per month.
+
+Is there a registration fee?
+New applicants pay a non-refundable R800 registration fee. Re-registration for existing learners is R500.
+
+How many months are fees paid?
+The published 2027 fee structure states that fees are payable over 12 months, January through December.
+
+Can fees be paid annually?
+Yes. The published fee structure states that annual payment in advance qualifies for a one-month fee discount. Parents should contact Harmony for the confirmed annual amount.
+
+Does Harmony offer transport?
+Do not claim availability universally. Say that parents should contact Harmony regarding transport routes, availability and pricing.
+
+# 7. CALL TO ACTION
+
+After the fee calculator provide:
+
+Ready to Join Harmony?
+
+Buttons:
+
+Start Your Application
+Contact Admissions
+
+Use the existing application functionality and verified contact methods.
+
+If WhatsApp is already correctly configured, include:
+
+Ask Us on WhatsApp
+
+Do not create fake contact links.
+
+# 8. PREPARE FOR FUTURE AI
+
+Store the verified fee information cleanly in one reusable configuration/data source rather than duplicating hard-coded numbers throughout many components.
+
+For example, create an appropriate data/config structure for:
+
+* year
+* Grade R fee
+* Grades 1–7 fee
+* boarding Grade R fee
+* boarding Grades 1–7 fee
+* aftercare
+* registration
+* re-registration
+* payment period
+* payment methods
+
+The UI, calculator and future Harmony AI Assistant should eventually be able to reference the same source of truth.
+
+Do not build the AI Assistant yet.
+
+# 9. NEW MEDIA
+
+I will be uploading additional Harmony photographs and a school video.
+
+When those assets are present:
+
+* inspect their dimensions/orientation
+* optimise them for the web
+* use only the strongest relevant photographs
+* avoid repeating the same image several times on the homepage
+* do not remove strong existing photographs simply to use every new photo
+* preserve natural appearance
+* do not AI-generate learners
+* add meaningful alt text
+
+For the school video:
+
+Create a polished section such as:
+
+"Experience Harmony"
+
+or
+
+"See Life at Harmony"
+
+If the video is suitable.
+
+Use a professional video player or click-to-play presentation.
+
+Do NOT autoplay audio.
+
+If autoplay is appropriate, it must be muted.
+
+Optimise the video so it does not significantly slow down the homepage.
+
+Use an appropriate poster/thumbnail.
+
+Do not make a poor-quality or vertical video the homepage hero automatically. Evaluate the media first.
+
+# 10. NAVIGATION
+
+If the website currently has no easy way to access fee information, add:
+
+Fees
+
+under an appropriate Admissions menu/dropdown or navigation area.
+
+Avoid overcrowding the primary navigation.
+
+# 11. TEST EVERYTHING
+
+Before finishing:
+
+* Test fee calculations manually.
+* Verify boarding does not double-charge tuition.
+* Verify registration/re-registration logic.
+* Verify transport never adds a made-up price.
+* Test mobile.
+* Test application link.
+* Test Parent Portal.
+* Test WhatsApp/contact links.
+* Test navigation.
+* Check console for errors.
+* Check all images.
+* Ensure no existing functionality broke.
+
+# 12. FINAL REPORT
+
+After implementation, report:
+
+1. Files changed
+2. Fee page/section created
+3. Calculator logic implemented
+4. Test calculations performed
+5. Admissions improvements
+6. Unverified information deliberately excluded
+7. Any new media used
+8. Any issues discovered
+9. Information still required from school management
+
+Do NOT begin AI, document tracking, application status tracking, WhatsApp automation or external workflow automation in this task.

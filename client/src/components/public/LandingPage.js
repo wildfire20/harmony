@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
+import HashScroll from './HashScroll';
 
 const HOME_IMAGE = '/images/homepage/';
 
@@ -16,6 +17,18 @@ export const GALLERY_IMAGES = [
   { src: `${HOME_IMAGE}computer-lab.webp`, alt: 'Harmony computer lab', title: 'Learning for the future', category: 'Learning' },
   { src: `${HOME_IMAGE}sports-court.webp`, alt: 'Harmony covered sports court', title: 'Active days at Harmony', category: 'Activities' },
   { src: `${HOME_IMAGE}sports-team.webp`, alt: 'Harmony learners taking part in a sports day', title: 'Shared achievements', category: 'Activities' },
+  { src: '/images/school/harmony-trip-group.webp', alt: 'Harmony learners and staff beside a school bus', title: 'Learning beyond the classroom', category: 'Activities' },
+  { src: '/images/school/harmony-classroom-group.webp', alt: 'Harmony learners working together in a classroom', title: 'Learning together', category: 'Learning' },
+  { src: '/images/school/harmony-learner-writing.webp', alt: 'Harmony learner writing in class', title: 'Focused learning', category: 'Learning' },
+  { src: '/images/school/harmony-learner-writing-red.webp', alt: 'Harmony learner completing classwork', title: 'Confidence in every lesson', category: 'Learning' },
+  { src: '/images/school/harmony-campus.webp', alt: 'Harmony Learning Institute campus buildings and courtyard', title: 'A bright place to belong', category: 'Campus' },
+  { src: '/images/school/harmony-boarding-room.webp', alt: 'Harmony boarding room with bunk beds', title: 'A place to feel at home', category: 'Boarding' },
+  { src: '/images/school/harmony-boarding-room-pink.webp', alt: 'Harmony boarding room prepared for learners', title: 'Comfortable spaces for rest', category: 'Boarding' },
+  { src: '/images/school/harmony-boarding-room-wide.webp', alt: 'Harmony boarding room with rows of bunk beds', title: 'Shared boarding spaces', category: 'Boarding' },
+  { src: '/images/school/harmony-parent-day-01.webp', alt: 'Harmony learner taking part in a dress-as-your-parent school event', title: 'Dress as your parent day', category: 'Community events' },
+  { src: '/images/school/harmony-parent-day-02.webp', alt: 'Harmony learner taking part in a dress-as-your-parent school event', title: 'Dress as your parent day', category: 'Community events' },
+  { src: '/images/school/harmony-parent-day-03.webp', alt: 'Harmony learner taking part in a dress-as-your-parent school event', title: 'Dress as your parent day', category: 'Community events' },
+  { src: '/images/school/harmony-parent-day-06.webp', alt: 'Harmony learner taking part in a dress-as-your-parent school event', title: 'Dress as your parent day', category: 'Community events' },
   { src: '/images/school/542757838_812685227934615_1612604276869659548_n_1765536715570.jpg', alt: 'Harmony learners enjoying school life', title: 'Making memories together', category: 'Activities' },
   { src: '/images/school/546959768_822582210278250_5565575276103000568_n_1765536715571.jpg', alt: 'Harmony learners enjoying a school activity', title: 'Joyful school days', category: 'Activities' },
   { src: '/images/school/547212707_824173240119147_8225029070731606342_n_1765536715572.jpg', alt: 'Harmony learners participating in a school activity', title: 'Learning beyond the classroom', category: 'Activities' },
@@ -72,16 +85,17 @@ export const Header = () => {
               </span>
             </a>
 
-            <nav className="hidden lg:flex items-center gap-6 text-sm font-semibold text-slate-600" aria-label="Main navigation">
+            <nav className="hidden xl:flex items-center gap-6 text-sm font-semibold text-slate-600" aria-label="Main navigation">
               <a href="/#about" className="hover:text-red-700 transition-colors">Why Harmony</a>
               <a href="/#programmes" className="hover:text-red-700 transition-colors">Programmes</a>
               <a href="/#facilities" className="hover:text-red-700 transition-colors">Facilities</a>
               <a href="/#school-life" className="hover:text-red-700 transition-colors">School Life</a>
               <Link to="/gallery" className="hover:text-red-700 transition-colors">Gallery</Link>
-              <a href="/#apply" className="hover:text-red-700 transition-colors">Admissions</a>
+               <Link to="/fees" className="hover:text-red-700 transition-colors">Fees</Link>
+               <a href="/#admissions" className="hover:text-red-700 transition-colors">Admissions</a>
             </nav>
 
-            <div className="hidden md:flex items-center gap-3">
+            <div className="hidden xl:flex items-center gap-3">
               <div className="relative">
                 <button
                   type="button"
@@ -111,7 +125,7 @@ export const Header = () => {
 
             <button
               type="button"
-              className="md:hidden inline-flex items-center justify-center w-11 h-11 rounded-lg text-blue-950 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-red-600"
+              className="xl:hidden inline-flex items-center justify-center w-11 h-11 rounded-lg text-blue-950 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-red-600"
               aria-label={open ? 'Close navigation menu' : 'Open navigation menu'}
               aria-expanded={open}
               onClick={() => setOpen(!open)}
@@ -123,13 +137,14 @@ export const Header = () => {
           </div>
 
           {open && (
-            <nav className="md:hidden py-3 border-t border-slate-100" aria-label="Mobile navigation">
+            <nav className="xl:hidden py-3 border-t border-slate-100" aria-label="Mobile navigation">
               {[
                 ['Why Harmony', '/#about'],
                 ['Programmes', '/#programmes'],
                 ['Facilities', '/#facilities'],
                 ['School Life', '/#school-life'],
-                ['Admissions', '/#apply'],
+                ['Fees', '/fees'],
+                ['Admissions', '/#admissions'],
               ].map(([label, href]) => (
                 <a key={href} href={href} onClick={closeMenu} className="block px-3 py-3 text-sm font-bold text-slate-700 hover:bg-red-50 hover:text-red-700 rounded-lg">
                   {label}
@@ -199,12 +214,12 @@ const HERO_SLIDES = [
   GALLERY_IMAGES[0],
   GALLERY_IMAGES[3],
   GALLERY_IMAGES[4],
-  GALLERY_IMAGES[7],
-  GALLERY_IMAGES[9],
+  GALLERY_IMAGES.find((image) => image.src.includes('harmony-classroom-group')),
+  GALLERY_IMAGES[8],
+  GALLERY_IMAGES.find((image) => image.src.includes('harmony-trip-group')),
+  GALLERY_IMAGES.find((image) => image.src.includes('harmony-campus')),
   GALLERY_IMAGES[11],
-  GALLERY_IMAGES[19],
-  GALLERY_IMAGES[23],
-];
+].filter(Boolean);
 
 const Hero = () => {
   const [activeSlide, setActiveSlide] = useState(0);
@@ -354,7 +369,7 @@ const Programmes = () => {
   const programmes = [
     {
       name: 'Preschool',
-      level: 'Ages 0–6',
+      level: 'Early learning',
        image: '/images/school/542757838_812685227934615_1612604276869659548_n_1765536715570.jpg',
        alt: 'Harmony preschool learners visiting a fire truck',
       copy: 'A warm foundation for play, discovery, creativity and early learning.',
@@ -414,7 +429,7 @@ const Facilities = () => (
         </div>
         <div className="grid grid-cols-2 gap-3 sm:gap-4">
           <figure className="col-span-2 relative overflow-hidden rounded-2xl aspect-[2/1]">
-            <img src={`${HOME_IMAGE}classroom.webp`} alt="A prepared Harmony classroom" loading="lazy" className="w-full h-full object-cover" />
+            <img src="/images/school/harmony-classroom-group.webp" alt="Harmony learners working together in a classroom" loading="lazy" className="w-full h-full object-cover" />
             <figcaption className="absolute left-4 bottom-4 px-3 py-1.5 bg-blue-950/90 rounded text-sm font-bold">Classrooms</figcaption>
           </figure>
           <figure className="relative overflow-hidden rounded-2xl aspect-square">
@@ -433,11 +448,11 @@ const Facilities = () => (
 
 const SchoolLife = () => {
   const photos = [
-    ['/images/school/542757838_812685227934615_1612604276869659548_n_1765536715570.jpg', 'Harmony learners enjoying a school event', 'md:col-span-2 md:row-span-2'],
-    ['/images/school/547212707_824173240119147_8225029070731606342_n_1765536715572.jpg', 'Harmony learners in a classroom', ''],
+    ['/images/school/harmony-classroom-group.webp', 'Harmony learners working together in a classroom', 'md:col-span-2 md:row-span-2'],
+    ['/images/school/harmony-trip-group.webp', 'Harmony learners and staff on a school trip', ''],
     ['/images/school/571020461_858591460010658_2205033645939389574_n_1765536715566.jpg', 'Harmony learners sharing a school moment', ''],
     ['/images/school/585606417_878202904716180_1733055620027623180_n_1765536746198.jpg', 'Harmony learners on the sports court', ''],
-    ['/images/school/586021157_878203054716165_8351932850885782583_n_1765536746200.jpg', 'Harmony Learning Institute classroom buildings', ''],
+    ['/images/school/harmony-campus.webp', 'Harmony Learning Institute campus and courtyard', ''],
   ];
   return (
     <section id="school-life" className="py-20 sm:py-28 bg-slate-50">
@@ -458,6 +473,93 @@ const SchoolLife = () => {
               </figure>
             );
           })}
+        </div>
+      </div>
+    </section>
+  );
+};
+
+const MediaShowcase = () => (
+  <section className="py-20 sm:py-28 bg-white">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid lg:grid-cols-[1.1fr_0.9fr] gap-10 lg:gap-16 items-center">
+      <div className="overflow-hidden rounded-3xl bg-blue-950 shadow-xl">
+        <video
+          controls
+          preload="metadata"
+          poster="/images/media/harmony-school-video-poster.webp"
+          className="aspect-video w-full object-cover"
+          aria-label="Video showing learning and school life at Harmony Learning Institute"
+        >
+          <source src="/media/harmony-school-life.mp4" type="video/mp4" />
+          Your browser does not support the school video.
+        </video>
+      </div>
+      <div>
+        <SectionHeading eyebrow="Experience Harmony" title="See learning and school life in motion." copy="Take a closer look at the classrooms, learners and caring environment that make Harmony feel like home." />
+        <p className="mt-5 text-sm leading-relaxed text-slate-500">Click play when you are ready. The video does not autoplay or play audio without your action.</p>
+        <div className="mt-7 flex flex-wrap gap-3">
+          <Link to="/gallery" className="inline-flex items-center gap-2 min-h-12 px-5 rounded-lg bg-red-700 text-white font-extrabold hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-700 focus:ring-offset-2">
+            Explore the gallery <Arrow />
+          </Link>
+          <Link to="/fees" className="inline-flex items-center gap-2 min-h-12 px-5 rounded-lg border border-slate-200 text-blue-950 font-extrabold hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-700">
+            View 2027 fees <Arrow />
+          </Link>
+        </div>
+      </div>
+    </div>
+  </section>
+);
+
+const AdmissionsGuide = () => {
+  const faqs = [
+    ['When are 2027 applications open?', '2027 admissions are currently open.'],
+    ['How much are Grade R fees?', 'Grade R fees are R1,850 per month for 2027.'],
+    ['How much are Grades 1–7?', 'Grades 1–7 fees are R2,350 per month for 2027.'],
+    ['Does boarding include school fees?', 'Yes. The published 2027 boarding amounts include school fees.'],
+    ['How much is aftercare?', 'Aftercare is R550 per month.'],
+    ['Are there registration fees?', 'New applicants pay a non-refundable R800 registration fee. Re-registration for existing learners is R500.'],
+    ['How are fees paid?', 'The published fee structure states that fees are payable over 12 months, January through December. Annual payment in advance qualifies for a one-month fee discount; contact the school for the confirmed annual amount.'],
+    ['Does Harmony offer transport?', 'Please contact Harmony regarding transport routes, availability and pricing. Transport pricing depends on the route and availability.'],
+  ];
+
+  return (
+    <section id="admissions" className="scroll-mt-28 py-20 sm:py-28 bg-white">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid lg:grid-cols-[0.85fr_1.15fr] gap-10 lg:gap-16 items-start">
+          <div>
+            <SectionHeading eyebrow="Your admissions journey" title="A clear next step for your family." copy="Explore Harmony, review the 2027 fees, and send us your application. Our admissions team will contact you after reviewing it." />
+            <ol className="mt-8 space-y-4">
+              {[
+                'Explore Harmony',
+                'Review 2027 fees',
+                'Complete the online application',
+                'Harmony reviews the application',
+                'Admissions contacts the parent or guardian',
+              ].map((step, index) => (
+                <li key={step} className="flex items-center gap-4">
+                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-700 text-sm font-black text-white">{index + 1}</span>
+                  <span className="font-extrabold text-blue-950">{step}</span>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Link to="/fees" className="inline-flex items-center gap-2 min-h-11 px-4 rounded-lg bg-blue-950 text-white text-sm font-extrabold hover:bg-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-950 focus:ring-offset-2">Review 2027 fees <Arrow /></Link>
+              <a href="mailto:harmonylearninginstitute@gmail.com" className="inline-flex items-center gap-2 min-h-11 px-4 rounded-lg border border-slate-200 text-blue-950 text-sm font-extrabold hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-700">Contact Admissions <Arrow /></a>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-extrabold tracking-[0.16em] uppercase text-red-700">Admissions FAQ</p>
+            <div className="mt-4 divide-y divide-slate-200 rounded-2xl border border-slate-200 bg-slate-50">
+              {faqs.map(([question, answer]) => (
+                <details key={question} className="group p-5">
+                  <summary className="cursor-pointer list-none pr-6 font-extrabold text-blue-950 marker:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
+                    <span className="relative block">{question}<span className="absolute right-0 top-0 text-red-700 transition-transform group-open:rotate-45" aria-hidden="true">+</span></span>
+                  </summary>
+                  <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-600">{answer}</p>
+                </details>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -501,10 +603,7 @@ const EnrollmentSection = () => {
   const { register, handleSubmit, formState: { errors }, reset } = useForm();
 
   const grades = [
-    { value: 'preschool-0', label: 'Preschool (Age 0)' }, { value: 'preschool-1', label: 'Preschool (Age 1)' },
-    { value: 'preschool-2', label: 'Preschool (Age 2)' }, { value: 'preschool-3', label: 'Preschool (Age 3)' },
-    { value: 'preschool-4', label: 'Preschool (Age 4)' }, { value: 'preschool-5', label: 'Preschool (Age 5)' },
-    { value: 'preschool-6', label: 'Preschool (Age 6)' }, { value: 'grade-1', label: 'Grade 1' },
+    { value: 'preschool', label: 'Preschool' }, { value: 'grade-1', label: 'Grade 1' },
     { value: 'grade-2', label: 'Grade 2' }, { value: 'grade-3', label: 'Grade 3' },
     { value: 'grade-4', label: 'Grade 4' }, { value: 'grade-5', label: 'Grade 5' },
     { value: 'grade-6', label: 'Grade 6' }, { value: 'grade-7', label: 'Grade 7' },
@@ -548,7 +647,7 @@ const EnrollmentSection = () => {
 
   if (submitted) {
     return (
-      <section id="apply" className="py-20 sm:py-28 bg-slate-50">
+      <section id="apply" className="scroll-mt-28 py-20 sm:py-28 bg-slate-50">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="bg-white rounded-3xl shadow-lg border border-slate-100 p-8 sm:p-12 text-center">
             <div className="w-14 h-14 rounded-full mx-auto bg-emerald-100 flex items-center justify-center">
@@ -556,7 +655,7 @@ const EnrollmentSection = () => {
             </div>
             <p className="mt-5 text-xs font-extrabold tracking-[0.16em] uppercase text-red-700">Application received</p>
             <h2 className="mt-3 text-3xl font-black text-blue-950">Thank you for choosing Harmony.</h2>
-            <p className="mt-4 text-slate-600 text-lg">Our admissions team will review your application and contact you within 48 hours.</p>
+             <p className="mt-4 text-slate-600 text-lg">Our admissions team will contact you after reviewing your application.</p>
             <button type="button" onClick={() => setSubmitted(false)} className="mt-8 min-h-12 px-5 rounded-lg bg-red-700 text-white font-extrabold hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-700 focus:ring-offset-2">
               Submit another application
             </button>
@@ -568,18 +667,15 @@ const EnrollmentSection = () => {
 
   const inputClass = 'mt-1.5 w-full min-h-12 px-3.5 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent';
   return (
-    <section id="apply" className="py-20 sm:py-28 bg-slate-50">
+    <section id="apply" className="scroll-mt-28 py-20 sm:py-28 bg-slate-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid lg:grid-cols-[0.75fr_1.25fr] gap-10 lg:gap-16 items-start">
         <div className="lg:sticky lg:top-32">
           <SectionHeading eyebrow="2027 admissions" title="Take the next step with Harmony." copy="Complete the online application below and our admissions team will contact you to discuss the next steps." />
-          <div className="mt-8 bg-blue-950 rounded-2xl p-6 text-white">
-            <p className="font-extrabold">What you’ll need</p>
-            <ul className="mt-4 space-y-3 text-sm text-blue-100">
-              <li className="flex gap-2"><Check /><span>Parent or guardian contact details</span></li>
-              <li className="flex gap-2"><Check /><span>Learner details and date of birth</span></li>
-              <li className="flex gap-2"><Check /><span>The grade you are applying for</span></li>
-            </ul>
-          </div>
+           <div className="mt-8 rounded-2xl bg-blue-950 p-6 text-white">
+             <p className="font-extrabold">Planning your application?</p>
+             <p className="mt-3 text-sm leading-relaxed text-blue-100">Review the verified 2027 fee structure before submitting your application.</p>
+             <Link to="/fees" className="mt-5 inline-flex items-center gap-2 text-sm font-extrabold text-red-300 hover:text-white">View 2027 fees <Arrow /></Link>
+           </div>
           <p className="mt-6 text-sm leading-relaxed text-slate-600">Already a Harmony parent? <Link to="/parent/login" className="font-extrabold text-red-700 hover:text-red-900">Open the Parent Portal.</Link></p>
         </div>
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 sm:p-8 lg:p-10">
@@ -615,7 +711,7 @@ const EnrollmentSection = () => {
             <button type="submit" disabled={loading} className="w-full min-h-14 inline-flex items-center justify-center gap-2 rounded-lg bg-red-700 text-white font-extrabold hover:bg-red-800 disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-red-700 focus:ring-offset-2">
               {loading ? 'Submitting application…' : <>Submit application <Arrow /></>}
             </button>
-            <p className="text-center text-xs text-slate-500">We will contact you within 48 hours after your application is received.</p>
+             <p className="text-center text-xs text-slate-500">Our admissions team will contact you after reviewing your application.</p>
           </form>
         </div>
       </div>
@@ -647,7 +743,9 @@ export const Footer = () => (
           <li><a href="#about" className="hover:text-white">Why Harmony</a></li>
           <li><a href="#programmes" className="hover:text-white">Programmes</a></li>
           <li><a href="#facilities" className="hover:text-white">Facilities</a></li>
-          <li><a href="#apply" className="hover:text-white">2027 admissions</a></li>
+          <li><Link to="/fees" className="hover:text-white">2027 fees</Link></li>
+          <li><Link to="/gallery" className="hover:text-white">Gallery</Link></li>
+          <li><a href="#admissions" className="hover:text-white">Admissions</a></li>
           <li><Link to="/parent/login" className="hover:text-white">Parent Portal</Link></li>
           <li><Link to="/login?type=student" className="hover:text-white">Student Portal</Link></li>
            <li><Link to="/login" className="hover:text-white">Staff Portal</Link></li>
@@ -660,6 +758,10 @@ export const Footer = () => (
           <p><a href="tel:+27147631358" className="hover:text-white">014 763 1358</a></p>
           <p><a href="mailto:harmonylearninginstitute@gmail.com" className="hover:text-white break-words">harmonylearninginstitute@gmail.com</a></p>
           <p><a href="https://wa.me/27711679620" target="_blank" rel="noopener noreferrer" className="font-extrabold text-white hover:text-red-200">Chat on WhatsApp</a></p>
+          <p className="flex flex-wrap gap-x-4 gap-y-1">
+            <a href="https://www.tiktok.com/@harmsies?_r=1&_t=ZS-999I4YzAo4L" target="_blank" rel="noopener noreferrer" className="hover:text-white">TikTok</a>
+            <a href="https://www.facebook.com/share/18Kw6nkhx6/" target="_blank" rel="noopener noreferrer" className="hover:text-white">Facebook</a>
+          </p>
         </div>
       </address>
     </div>
@@ -681,6 +783,7 @@ export const WhatsAppButton = () => (
 const LandingPage = () => (
   <div className="min-h-screen scroll-smooth bg-white">
     <Header />
+    <HashScroll />
     <main>
       <Hero />
       <TrustStrip />
@@ -688,7 +791,9 @@ const LandingPage = () => (
       <Programmes />
       <Facilities />
       <SchoolLife />
+      <MediaShowcase />
       <ParentPortal />
+      <AdmissionsGuide />
       <EnrollmentSection />
     </main>
     <Footer />
