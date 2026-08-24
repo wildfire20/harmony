@@ -385,8 +385,8 @@ const Programmes = () => {
     {
       name: 'Boarding',
       level: 'Available option',
-      image: 'learners-community.webp',
-      alt: 'Harmony learners sharing time together',
+      image: '/images/school/harmony-boarding-room.webp',
+      alt: 'Harmony boarding room with red-painted bunk beds and a hexagonal ceiling light',
       copy: 'A structured home-away-from-home option for families who need it.',
       points: ['Supervised environment', 'Study support', 'Community living'],
     },
