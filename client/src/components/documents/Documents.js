@@ -436,20 +436,20 @@ const Documents = () => {
 
   const handleDownload = async (documentId, fileName) => {
     try {
-      console.log('Attempting to download document:', { documentId, fileName });
-      
-      // Create a temporary link for download with token authentication
+      const response = await fetch(`/api/documents/download/${documentId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error('Failed to download document');
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = `/api/documents/download/${documentId}?token=${encodeURIComponent(token)}`;
+      link.href = blobUrl;
       link.download = fileName || 'document';
       link.style.display = 'none';
-      
-      // Add to DOM, click, and remove
       document.body.appendChild(link);
       link.click();
-      document.body.removeChild(link);
-      
-      console.log('Download initiated successfully');
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
     } catch (error) {
       console.error('Error downloading document:', error);
       toast.error('Failed to download document. Please try again.');

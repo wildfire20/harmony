@@ -14,7 +14,7 @@ const validateS3Config = () => {
     if (!value) {
       console.error(`❌ Missing: ${key}`);
     } else {
-      console.log(`✅ ${key}: ${key.includes('SECRET') ? '[HIDDEN]' : value}`);
+      console.log(`✅ ${key}: [CONFIGURED]`);
     }
   }
 
@@ -24,9 +24,12 @@ const validateS3Config = () => {
   return isValid;
 };
 
-// AWS S3 Configuration with enhanced error handling
+const configuredRegion = process.env.AWS_REGION?.trim();
+const configuredBucket = process.env.AWS_S3_BUCKET_NAME?.trim();
+
+// AWS S3 configuration. No placeholder region or bucket is used.
 const s3Config = {
-  region: process.env.AWS_REGION?.trim() || 'us-east-1',
+  region: configuredRegion,
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID?.trim(),
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY?.trim(),
@@ -34,9 +37,9 @@ const s3Config = {
   // Force path-style addressing to avoid DNS issues
   forcePathStyle: false,
   // Explicitly set endpoint for better compatibility
-  endpoint: process.env.AWS_REGION?.trim() === 'us-east-1' 
+  endpoint: configuredRegion === 'us-east-1'
     ? undefined 
-    : `https://s3.${process.env.AWS_REGION?.trim() || 'us-east-1'}.amazonaws.com`,
+    : configuredRegion ? `https://s3.${configuredRegion}.amazonaws.com` : undefined,
   // Disable acceleration and other features that might cause issues
   useAccelerateEndpoint: false,
   useDualstackEndpoint: false,
@@ -64,8 +67,8 @@ if (isS3ConfigValid) {
 
 // S3 bucket configuration
 const bucketConfig = {
-  bucketName: process.env.AWS_S3_BUCKET_NAME || 'harmony-learning-documents',
-  region: process.env.AWS_REGION || 'us-east-1',
+  bucketName: configuredBucket || null,
+  region: configuredRegion || null,
 };
 
 module.exports = {

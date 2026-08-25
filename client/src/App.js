@@ -40,7 +40,6 @@ import ParentLogin from './components/parent/ParentLogin';
 import ParentPortal from './components/parent/ParentPortal';
 import ParentForgotPassword from './components/parent/ParentForgotPassword';
 import ParentForceChangePassword from './components/parent/ParentForceChangePassword';
-import ParentWelcome from './components/parent/ParentWelcome';
 import StaffScanStation from './components/attendance/StaffScanStation';
 
 // Create a client
@@ -189,7 +188,7 @@ const AppContent = () => {
       <Route path="/staff-scan" element={<StaffScanStation />} />
 
       {/* Parent Portal – standalone, own layout */}
-      <Route path="/parent/welcome"         element={<ParentWelcome />} />
+      <Route path="/parent/welcome"         element={<Navigate to="/parent/forgot-password" replace />} />
       <Route path="/parent/login"           element={<ParentLogin />} />
       <Route path="/parent/forgot-password" element={<ParentForgotPassword />} />
       <Route path="/parent/change-password" element={<ParentForceChangePassword />} />

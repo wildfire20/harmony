@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const multer = require('multer');
 const path = require('path');
 const { body, validationResult } = require('express-validator');
@@ -2729,7 +2730,7 @@ router.put('/:id/upload-graded-document', [
     const submission = submissionResult.rows[0];
 
     // Upload to S3
-    const fileName = `graded-documents/${req.file.originalname}-${Date.now()}-${Math.random().toString(36).substring(7)}${path.extname(req.file.originalname)}`;
+    const fileName = `graded-documents/${req.file.originalname}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}${path.extname(req.file.originalname)}`;
     
     let s3Key, s3Url;
     try {

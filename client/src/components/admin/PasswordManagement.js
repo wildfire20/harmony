@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { passwordsAPI, adminAPI } from '../../services/api';
-import { Key, RefreshCw, Search, Users, GraduationCap, Eye, EyeOff, Copy, Check, AlertCircle } from 'lucide-react';
+import { Key, RefreshCw, Search, Users, GraduationCap, Copy, Check, AlertCircle } from 'lucide-react';
 import LoadingSpinner from '../common/LoadingSpinner';
 
 const PasswordManagement = () => {
@@ -9,7 +9,6 @@ const PasswordManagement = () => {
   const [search, setSearch] = useState('');
   const [selectedGrade, setSelectedGrade] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
-  const [showPasswords, setShowPasswords] = useState({});
   const [copiedId, setCopiedId] = useState(null);
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [bulkResetResults, setBulkResetResults] = useState(null);
@@ -23,7 +22,6 @@ const PasswordManagement = () => {
   const { data: studentsData, isLoading: studentsLoading, refetch: refetchStudents } = useQuery(
     ['studentPasswords', search, selectedGrade, selectedClass],
     () => {
-      console.log('Fetching student passwords with:', { search, selectedGrade, selectedClass });
       return passwordsAPI.getStudentPasswords({ 
         search: search || undefined, 
         grade_id: selectedGrade || undefined, 
@@ -32,7 +30,6 @@ const PasswordManagement = () => {
     },
     { 
       enabled: activeTab === 'students',
-      onSuccess: (data) => console.log('Student passwords response:', data),
       onError: (error) => console.error('Student passwords error:', error)
     }
   );
@@ -84,8 +81,6 @@ const PasswordManagement = () => {
   const students = studentsData?.data?.data?.students || [];
   const teachers = teachersData?.data?.data?.teachers || [];
   
-  console.log('Students data parsed:', students.length, 'students found');
-
   const filteredClasses = selectedGrade 
     ? classes.filter(c => c.grade_id === parseInt(selectedGrade))
     : classes;
@@ -126,13 +121,6 @@ const PasswordManagement = () => {
     }
   };
 
-  const togglePasswordVisibility = (userId) => {
-    setShowPasswords(prev => ({
-      ...prev,
-      [userId]: !prev[userId]
-    }));
-  };
-
   const copyPassword = async (password, userId) => {
     try {
       await navigator.clipboard.writeText(password);
@@ -161,8 +149,8 @@ const PasswordManagement = () => {
           <div>
             <h4 className="font-medium text-yellow-800">Password Security</h4>
             <p className="text-sm text-yellow-700 mt-1">
-              Passwords shown here are display copies. When you reset a password, a new easy-to-remember password is generated 
-              (like "HappyLion42" or "BraveTiger78"). Share the new password with the user securely.
+              Existing passwords cannot be viewed. A strong temporary password is shown only once after a reset.
+              Share it securely and ask the user to change it after signing in.
             </p>
           </div>
         </div>
@@ -311,7 +299,7 @@ const PasswordManagement = () => {
                   </>
                 )}
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Password</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Password status</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
@@ -345,30 +333,8 @@ const PasswordManagement = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {user.email}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {user.display_password ? (
-                        <div className="flex items-center space-x-2">
-                          <span className="font-mono text-sm">
-                            {showPasswords[user.id] ? user.display_password : '••••••••'}
-                          </span>
-                          <button
-                            onClick={() => togglePasswordVisibility(user.id)}
-                            className="text-gray-400 hover:text-gray-600"
-                          >
-                            {showPasswords[user.id] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                          </button>
-                          {showPasswords[user.id] && (
-                            <button
-                              onClick={() => copyPassword(user.display_password, user.id)}
-                              className="text-gray-400 hover:text-gray-600"
-                            >
-                              {copiedId === user.id ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
-                            </button>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-gray-400 italic">Not set (old password)</span>
-                      )}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      Stored securely
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <button

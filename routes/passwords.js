@@ -5,38 +5,13 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { generatePasswordForUser, generateKidFriendlyPassword } = require('../utils/passwordGenerator');
 
-// Ensure display_password column exists (for Railway/production compatibility)
-async function ensureDisplayPasswordColumn() {
-  try {
-    const checkColumn = await pool.query(`
-      SELECT column_name FROM information_schema.columns 
-      WHERE table_name = 'users' AND column_name = 'display_password'
-    `);
-    
-    if (checkColumn.rows.length === 0) {
-      console.log('🔧 Adding display_password column to users table...');
-      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS display_password VARCHAR(255)`);
-      console.log('✅ display_password column added successfully');
-    }
-  } catch (error) {
-    console.error('Error checking/adding display_password column:', error.message);
-  }
-}
-
-// Run on startup
-ensureDisplayPasswordColumn();
-
 router.get('/students', authenticate, authorize('admin', 'super_admin'), async (req, res) => {
   try {
-    // Ensure column exists before querying
-    await ensureDisplayPasswordColumn();
-    
     const { search, grade_id, class_id } = req.query;
-    console.log('📋 Password API - Fetching students with params:', { search, grade_id, class_id });
     
     let query = `
       SELECT u.id, u.student_number, u.first_name, u.last_name, u.email, 
-             u.display_password, u.grade_id, u.class_id, u.is_active,
+             u.grade_id, u.class_id, u.is_active,
              g.name as grade_name, c.name as class_name
       FROM users u
       LEFT JOIN grades g ON u.grade_id = g.id
@@ -66,12 +41,7 @@ router.get('/students', authenticate, authorize('admin', 'super_admin'), async (
 
     query += ' ORDER BY u.first_name, u.last_name';
     
-    console.log('📋 Password API - Query:', query);
-    console.log('📋 Password API - Params:', params);
-
     const result = await pool.query(query, params);
-    
-    console.log('📋 Password API - Found', result.rows.length, 'students');
     
     res.json({
       success: true,
@@ -87,13 +57,10 @@ router.get('/students', authenticate, authorize('admin', 'super_admin'), async (
 
 router.get('/teachers', authenticate, authorize('admin', 'super_admin'), async (req, res) => {
   try {
-    // Ensure column exists before querying
-    await ensureDisplayPasswordColumn();
-    
     const { search } = req.query;
     
     let query = `
-      SELECT id, first_name, last_name, email, display_password, role, is_active
+      SELECT id, first_name, last_name, email, role, is_active
       FROM users
       WHERE role = 'teacher' AND is_active = true
     `;
@@ -140,15 +107,18 @@ router.post('/reset/:userId', authenticate, authorize('admin', 'super_admin'), a
     let newPassword;
     if (customPassword && customPassword.trim()) {
       newPassword = customPassword.trim();
+      if (newPassword.length < 12) {
+        return res.status(400).json({ success: false, message: 'Temporary passwords must be at least 12 characters' });
+      }
     } else {
-      newPassword = generatePasswordForUser(user.first_name);
+      newPassword = generatePasswordForUser();
     }
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const hashedPassword = await bcrypt.hash(newPassword, parseInt(process.env.BCRYPT_ROUNDS) || 12);
 
     await pool.query(
-      'UPDATE users SET password = $1, display_password = $2, updated_at = NOW() WHERE id = $3',
-      [hashedPassword, newPassword, userId]
+      'UPDATE users SET password = $1, must_change_password = true, updated_at = NOW() WHERE id = $2',
+      [hashedPassword, userId]
     );
 
     res.json({
@@ -184,12 +154,12 @@ router.post('/bulk-reset', authenticate, authorize('admin', 'super_admin'), asyn
         
         if (user.role === 'super_admin' || user.role === 'admin') continue;
 
-        const newPassword = generatePasswordForUser(user.first_name);
-        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        const newPassword = generatePasswordForUser();
+        const hashedPassword = await bcrypt.hash(newPassword, parseInt(process.env.BCRYPT_ROUNDS) || 12);
 
         await pool.query(
-          'UPDATE users SET password = $1, display_password = $2, updated_at = NOW() WHERE id = $3',
-          [hashedPassword, newPassword, userId]
+          'UPDATE users SET password = $1, must_change_password = true, updated_at = NOW() WHERE id = $2',
+          [hashedPassword, userId]
         );
 
         results.push({

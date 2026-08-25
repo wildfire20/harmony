@@ -3,6 +3,7 @@ const { DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { s3Client, bucketConfig, isS3ConfigValid } = require('../config/s3');
 const path = require('path');
+const crypto = require('crypto');
 
 class S3Service {
   constructor() {
@@ -41,7 +42,7 @@ class S3Service {
 
       // Generate unique filename to prevent conflicts
       const timestamp = Date.now();
-      const randomId = Math.round(Math.random() * 1E9);
+      const randomId = crypto.randomBytes(8).toString('hex');
       const extension = path.extname(fileName);
       const baseName = path.basename(fileName, extension);
       const uniqueFileName = `${baseName}-${timestamp}-${randomId}${extension}`;

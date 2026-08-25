@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+
 const adjectives = [
   'Happy', 'Sunny', 'Brave', 'Clever', 'Swift', 'Bright', 'Lucky', 'Mighty',
   'Golden', 'Silver', 'Rainbow', 'Starry', 'Cosmic', 'Super', 'Magic', 'Royal',
@@ -37,40 +39,20 @@ const objects = [
 ];
 
 function getRandomItem(array) {
-  return array[Math.floor(Math.random() * array.length)];
+  return array[crypto.randomInt(0, array.length)];
 }
 
 function getRandomNumber(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+  return crypto.randomInt(min, max + 1);
 }
 
 function generateKidFriendlyPassword() {
-  const patterns = [
-    () => `${getRandomItem(adjectives)}${getRandomItem(animals)}${getRandomNumber(10, 99)}`,
-    () => `${getRandomItem(colors)}${getRandomItem(animals)}${getRandomNumber(10, 99)}`,
-    () => `${getRandomItem(adjectives)}${getRandomItem(objects)}${getRandomNumber(10, 99)}`,
-    () => `${getRandomItem(animals)}${getRandomItem(adjectives)}${getRandomNumber(10, 99)}`,
-    () => `${getRandomItem(colors)}${getRandomItem(objects)}${getRandomNumber(10, 99)}`
-  ];
-
-  const pattern = patterns[Math.floor(Math.random() * patterns.length)];
-  return pattern();
+  const prefix = `${getRandomItem(adjectives)}${getRandomItem(animals)}`;
+  const randomPart = crypto.randomBytes(9).toString('base64url');
+  return `${prefix}-${randomPart}!${getRandomNumber(10, 99)}`;
 }
 
-function generatePasswordForUser(firstName) {
-  const cleanName = firstName ? firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase() : '';
-  const patterns = [
-    () => `${cleanName}${getRandomItem(animals)}${getRandomNumber(10, 99)}`,
-    () => `${cleanName}${getRandomItem(adjectives)}${getRandomNumber(10, 99)}`,
-    () => `${getRandomItem(adjectives)}${cleanName}${getRandomNumber(10, 99)}`,
-    () => `${cleanName}${getRandomItem(colors)}${getRandomNumber(10, 99)}`
-  ];
-
-  if (cleanName && cleanName.length >= 3) {
-    const pattern = patterns[Math.floor(Math.random() * patterns.length)];
-    return pattern();
-  }
-  
+function generatePasswordForUser() {
   return generateKidFriendlyPassword();
 }
 

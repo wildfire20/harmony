@@ -25,7 +25,7 @@ import toast from 'react-hot-toast';
 const TaskDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const queryClient = useQueryClient();
 
   // State for submission form
@@ -417,48 +417,23 @@ const TaskDetails = () => {
 
   // View document in new tab handler
   const handleViewDocument = async (submissionId) => {
+    const newWindow = window.open('about:blank', '_blank');
+    if (!newWindow) {
+      return toast.error('Popup blocked. Please allow popups for this site.');
+    }
+    newWindow.opener = null;
     try {
-      console.log('🔍 Opening document in new tab for submission:', submissionId);
-      
-      // Use a different approach - create a temporary URL that serves the file directly
-      const viewUrl = `${process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000/api'}/submissions/${submissionId}/view?token=${localStorage.getItem('token')}`;
-      
-      // Open in new tab
-      const newWindow = window.open(viewUrl, '_blank');
-      
-      if (newWindow) {
-        toast.success('Document opened in new tab');
-      } else {
-        // Fallback if popup was blocked
-        toast.error('Popup blocked. Please allow popups for this site.');
-        // Try alternative approach with downloadSubmission API
-        try {
-          const response = await submissionsAPI.downloadSubmission(submissionId);
-          
-          if (response.data && typeof response.data === 'object' && response.data.downloadUrl) {
-            // Create a link element and click it to trigger download
-            const a = document.createElement('a');
-            a.href = response.data.downloadUrl;
-            a.target = '_blank';
-            a.rel = 'noopener noreferrer';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            toast.info('Document opened in new tab (alternative method)');
-          } else {
-            // Handle as blob
-            const blob = new Blob([response.data]);
-            const blobUrl = window.URL.createObjectURL(blob);
-            window.open(blobUrl, '_blank');
-            setTimeout(() => window.URL.revokeObjectURL(blobUrl), 30000);
-            toast.success('Document opened in new tab');
-          }
-        } catch (fallbackError) {
-          console.error('Fallback method also failed:', fallbackError);
-          toast.error('Failed to open document. Please try downloading instead.');
-        }
-      }
+      const response = await fetch(`/api/submissions/${submissionId}/view`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error('Failed to retrieve document');
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      newWindow.location.href = blobUrl;
+      toast.success('Document opened in new tab');
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     } catch (error) {
+      newWindow.close();
       console.error('View document error:', error);
       toast.error('Failed to open document');
     }

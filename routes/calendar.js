@@ -152,7 +152,9 @@ async function ensureSchoolEventsTimestamp() {
     console.log('School events table setup:', err.message);
   }
 }
-ensureSchoolEventsTimestamp();
+if (process.env.ENABLE_STARTUP_SCHEMA_CHANGES === 'true') {
+  ensureSchoolEventsTimestamp();
+}
 
 // Create school event (admin only)
 router.post('/events', [

@@ -1,11 +1,28 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
+
+const createAuthLimiter = (max, message) => rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message },
+});
+
+const loginLimiter = createAuthLimiter(10, 'Too many login attempts. Please try again later.');
+const otpRequestLimiter = createAuthLimiter(5, 'Too many reset-code requests. Please try again later.');
+const otpVerifyLimiter = createAuthLimiter(10, 'Too many code attempts. Please request a new code later.');
+const passwordResetLimiter = createAuthLimiter(5, 'Too many password reset attempts. Please try again later.');
+
+const hashResetToken = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
 // Generate JWT token
 const generateToken = (user) => {
@@ -17,12 +34,12 @@ const generateToken = (user) => {
       student_number: user.student_number 
     },
     process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRE || '1y' }
+    { expiresIn: process.env.JWT_EXPIRES_IN || process.env.JWT_EXPIRE || '12h' }
   );
 };
 
 // Student login
-router.post('/login/student', [
+router.post('/login/student', loginLimiter, [
   body('student_number').notEmpty().withMessage('Student number is required'),
   body('password').notEmpty().withMessage('Password is required')
 ], async (req, res) => {
@@ -80,7 +97,7 @@ router.post('/login/student', [
 });
 
 // Teacher/Admin login
-router.post('/login/staff', [
+router.post('/login/staff', loginLimiter, [
   body('email').isEmail().withMessage('Valid email is required'),
   body('password').notEmpty().withMessage('Password is required')
 ], async (req, res) => {
@@ -235,7 +252,7 @@ router.put('/change-password', [
 });
 
 // ─── Parent login (phone number based) ───────────────────────────────────────
-router.post('/login/parent', [
+router.post('/login/parent', loginLimiter, [
   body('phone_number').notEmpty().withMessage('Phone number is required'),
   body('password').notEmpty().withMessage('Password is required')
 ], async (req, res) => {
@@ -303,7 +320,7 @@ router.post('/login/parent', [
 });
 
 // ─── Parent forgot password – generate OTP ───────────────────────────────────
-router.post('/parent/forgot-password', [
+router.post('/parent/forgot-password', otpRequestLimiter, [
   body('phone_number').notEmpty().withMessage('Phone number is required')
 ], async (req, res) => {
   try {
@@ -322,32 +339,33 @@ router.post('/parent/forgot-password', [
     }
 
     const user = result.rows[0];
-    const otp = String(Math.floor(100000 + Math.random() * 900000));
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min
+    const otp = String(crypto.randomInt(100000, 1000000));
+    const otpHash = await bcrypt.hash(otp, parseInt(process.env.BCRYPT_ROUNDS) || 12);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     // Invalidate old OTPs for this number
     await db.query(`UPDATE parent_otps SET used=true WHERE phone_number=$1`, [user.phone_number]);
 
-    // Store new OTP
+    // Store only a one-way hash of the OTP.
     await db.query(`
       INSERT INTO parent_otps (phone_number, otp_code, expires_at)
       VALUES ($1, $2, $3)
-    `, [user.phone_number, otp, expiresAt]);
+    `, [user.phone_number, otpHash, expiresAt]);
 
     // Try SMS
     const { sendSMS } = require('../services/sms');
     const smsResult = await sendSMS(
       user.phone_number,
-      `Harmony Learning: Your password reset code is ${otp}. It expires in 15 minutes. Do not share this code.`
+      `Harmony Learning: Your password reset code is ${otp}. It expires in 10 minutes. Do not share this code.`
     );
 
-    console.log(`🔑 OTP for ${user.phone_number}: ${otp} (SMS: ${smsResult.method})`);
+    if (!smsResult.sent) {
+      console.warn('Parent password reset SMS could not be delivered');
+    }
 
     res.json({
       success: true,
       message: 'If that number is registered, a reset code has been sent.',
-      // Only expose OTP in dev/no-SMS mode so admin can relay it manually
-      ...(smsResult.method === 'not_configured' ? { dev_otp: otp, note: 'SMS not configured – share this code manually' } : {}),
     });
   } catch (error) {
     console.error('Forgot password error:', error);
@@ -356,9 +374,9 @@ router.post('/parent/forgot-password', [
 });
 
 // ─── Parent verify OTP ────────────────────────────────────────────────────────
-router.post('/parent/verify-otp', [
+router.post('/parent/verify-otp', otpVerifyLimiter, [
   body('phone_number').notEmpty(),
-  body('otp').notEmpty()
+  body('otp').isLength({ min: 6, max: 6 }).isNumeric()
 ], async (req, res) => {
   try {
     const rawPhone = req.body.phone_number || '';
@@ -366,30 +384,41 @@ router.post('/parent/verify-otp', [
     const { otp } = req.body;
 
     const result = await db.query(`
-      SELECT id FROM parent_otps
+      SELECT id, otp_code FROM parent_otps
       WHERE (phone_number=$1 OR phone_number=$2)
-        AND otp_code=$3
         AND used=false
         AND expires_at > NOW()
+        AND COALESCE(is_reset_token, false)=false
       ORDER BY created_at DESC LIMIT 1
-    `, [normalized, rawPhone, otp]);
+    `, [normalized, rawPhone]);
 
-    if (result.rows.length === 0) {
+    const otpMatches = result.rows.length > 0
+      ? await bcrypt.compare(String(otp), result.rows[0].otp_code)
+      : false;
+
+    if (!otpMatches) {
       return res.status(400).json({ message: 'Invalid or expired code. Please try again.' });
     }
 
-    // Mark OTP as used
-    await db.query(`UPDATE parent_otps SET used=true WHERE id=$1`, [result.rows[0].id]);
+    const consumedOtp = await db.query(`
+      UPDATE parent_otps
+      SET used=true
+      WHERE id=$1 AND used=false AND expires_at > NOW()
+      RETURNING id
+    `, [result.rows[0].id]);
+    if (consumedOtp.rows.length === 0) {
+      return res.status(400).json({ message: 'Invalid or expired code. Please try again.' });
+    }
 
     // Issue a short-lived reset token (store in DB)
-    const crypto = require('crypto');
     const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenHash = hashResetToken(resetToken);
     const resetExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
 
     await db.query(`
       INSERT INTO parent_otps (phone_number, otp_code, expires_at, is_reset_token)
       VALUES ($1, $2, $3, true)
-    `, [normalized || rawPhone, resetToken, resetExpiry]);
+    `, [normalized || rawPhone, resetTokenHash, resetExpiry]);
 
     res.json({ success: true, reset_token: resetToken });
   } catch (error) {
@@ -399,7 +428,7 @@ router.post('/parent/verify-otp', [
 });
 
 // ─── Parent reset password with token ────────────────────────────────────────
-router.post('/parent/reset-password', [
+router.post('/parent/reset-password', passwordResetLimiter, [
   body('phone_number').notEmpty(),
   body('reset_token').notEmpty(),
   body('new_password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
@@ -408,6 +437,7 @@ router.post('/parent/reset-password', [
     const rawPhone = req.body.phone_number || '';
     const normalized = rawPhone.replace(/[\s\-().+]/g, '').replace(/^0/, '27');
     const { reset_token, new_password } = req.body;
+    const resetTokenHash = hashResetToken(reset_token);
 
     const tokenResult = await db.query(`
       SELECT id FROM parent_otps
@@ -417,19 +447,26 @@ router.post('/parent/reset-password', [
         AND expires_at > NOW()
         AND is_reset_token=true
       LIMIT 1
-    `, [normalized, rawPhone, reset_token]);
+    `, [normalized, rawPhone, resetTokenHash]);
 
     if (tokenResult.rows.length === 0) {
       return res.status(400).json({ message: 'Reset session expired. Please start again.' });
     }
 
-    // Invalidate token
-    await db.query(`UPDATE parent_otps SET used=true WHERE id=$1`, [tokenResult.rows[0].id]);
+    const consumedToken = await db.query(`
+      UPDATE parent_otps
+      SET used=true
+      WHERE id=$1 AND used=false AND expires_at > NOW()
+      RETURNING id
+    `, [tokenResult.rows[0].id]);
+    if (consumedToken.rows.length === 0) {
+      return res.status(400).json({ message: 'Reset session expired. Please start again.' });
+    }
 
     // Update password
     const hashed = await bcrypt.hash(new_password, 12);
     const updateResult = await db.query(`
-      UPDATE users SET password=$1, must_change_password=false, temp_password_plain=NULL, updated_at=NOW()
+      UPDATE users SET password=$1, must_change_password=false, updated_at=NOW()
       WHERE (phone_number=$2 OR phone_number=$3) AND role='parent'
       RETURNING id
     `, [hashed, normalized, rawPhone]);

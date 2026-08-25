@@ -197,20 +197,20 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
 
   const handleDownload = async (documentId, fileName) => {
     try {
-      console.log('Attempting to download document:', { documentId, fileName });
-      
-      // Create a temporary link for download with token authentication
+      const response = await fetch(`/api/documents/download/${documentId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error('Failed to download document');
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = `/api/documents/download/${documentId}?token=${encodeURIComponent(token)}`;
+      link.href = blobUrl;
       link.download = fileName || 'document';
       link.style.display = 'none';
-      
-      // Add to DOM, click, and remove
       document.body.appendChild(link);
       link.click();
-      document.body.removeChild(link);
-      
-      console.log('Download initiated successfully');
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
     } catch (error) {
       console.error('Error downloading document:', error);
       alert('Failed to download document. Please try again.');
@@ -239,81 +239,26 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
   };
 
   const handleViewDocument = async (document) => {
-    console.log('🔍 Opening document in new tab:', document);
-    
+    const newWindow = window.open('about:blank', '_blank');
+    if (!newWindow) {
+      return toast.error('Popup blocked. Please allow popups for this site.');
+    }
+    newWindow.opener = null;
     try {
-      // Use direct URL approach like TaskDetails.js - create a URL that serves the file directly
-      const viewUrl = `/api/documents/view/${document.id}?token=${encodeURIComponent(token)}`;
-      
-      console.log('📖 View URL:', viewUrl);
-      
-      // For certain file types, create a blob URL for better browser handling
-      const ext = document.filename ? document.filename.split('.').pop().toLowerCase() : '';
-      const viewableInBrowser = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'txt'].includes(ext);
-      
-      if (viewableInBrowser) {
-        try {
-          // Fetch the file content first
-          const response = await fetch(viewUrl);
-          if (response.ok) {
-            const blob = await response.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            
-            // Open the blob URL in a new tab
-            const newWindow = window.open(blobUrl, '_blank');
-            
-            if (newWindow) {
-              toast.success('Document opened in new tab');
-              
-              // Clean up the blob URL after a delay
-              setTimeout(() => {
-                URL.revokeObjectURL(blobUrl);
-              }, 10000);
-            } else {
-              toast.error('Popup blocked. Please allow popups for this site.');
-              // Fallback to direct URL
-              window.open(viewUrl, '_blank');
-            }
-          } else {
-            throw new Error('Failed to fetch document');
-          }
-        } catch (fetchError) {
-          console.log('Fetch failed, falling back to direct URL:', fetchError);
-          // Fallback to direct URL approach
-          const newWindow = window.open(viewUrl, '_blank');
-          if (newWindow) {
-            toast.success('Document opened in new tab');
-          } else {
-            toast.error('Popup blocked. Please allow popups for this site.');
-          }
-        }
-      } else {
-        // For non-viewable files, use direct URL
-        const newWindow = window.open(viewUrl, '_blank');
-        
-        if (newWindow) {
-          toast.success('Document opened in new tab');
-        } else {
-          toast.error('Popup blocked. Please allow popups for this site.');
-          
-          // Try alternative approach by creating a link element
-          const a = document.createElement('a');
-          a.href = viewUrl;
-          a.target = '_blank';
-          a.rel = 'noopener noreferrer';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-        }
-      }
+      const response = await fetch(`/api/documents/view/${document.id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error('Failed to fetch document');
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      newWindow.location.href = blobUrl;
+      toast.success('Document opened in new tab');
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     } catch (error) {
+      newWindow.close();
       console.error('View document error:', error);
       toast.error('Failed to open document');
     }
-  };
-
-  const getDocumentUrl = (documentId) => {
-    return `/api/documents/view/${documentId}?token=${encodeURIComponent(token)}`;
   };
 
   const getFileExtension = (fileName) => {
@@ -797,15 +742,13 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
                 <p className="text-sm text-gray-600">{viewingDocument.description}</p>
               </div>
               <div className="flex items-center space-x-2">
-                <a
-                  href={getDocumentUrl(viewingDocument.id)}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  onClick={() => handleViewDocument(viewingDocument)}
                   className="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
                   title="Open in new tab"
                 >
                   <ExternalLink className="h-4 w-4" />
-                </a>
+                </button>
                 <button
                   onClick={() => handleDownload(viewingDocument.id, viewingDocument.filename)}
                   className="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"

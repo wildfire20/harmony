@@ -1,6 +1,5 @@
 /**
- * SMS Service – tries Twilio if configured, otherwise logs OTP to console/DB
- * for admin retrieval. The system works without SMS credentials.
+ * SMS Service – sends through Twilio when configured.
  */
 
 const sendSMS = async (phoneNumber, message) => {
@@ -17,7 +16,7 @@ const sendSMS = async (phoneNumber, message) => {
         from: fromNumber,
         to: phoneNumber,
       });
-      console.log(`✅ SMS sent to ${phoneNumber}`);
+      console.log('✅ SMS sent successfully');
       return { sent: true, method: 'sms' };
     } catch (err) {
       console.warn(`⚠️ Twilio SMS failed: ${err.message}`);
@@ -25,8 +24,7 @@ const sendSMS = async (phoneNumber, message) => {
     }
   }
 
-  // No Twilio configured – log for admin visibility
-  console.log(`📱 [SMS not configured] To: ${phoneNumber} | Message: ${message}`);
+  console.warn('⚠️ SMS service is not configured; message was not sent');
   return { sent: false, method: 'not_configured' };
 };
 

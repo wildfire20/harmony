@@ -1416,6 +1416,12 @@ router.delete('/clear-all', [
 
 // Database migration endpoint - SUPER ADMIN ONLY
 router.post('/migrate-database', [
+  (req, res, next) => {
+    if (process.env.ENABLE_HTTP_MIGRATIONS !== 'true' || process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ message: 'Not found' });
+    }
+    next();
+  },
   authenticate,
   authorize('super_admin')
 ], async (req, res) => {

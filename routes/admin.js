@@ -1,10 +1,12 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const { Parser } = require('json2csv');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logAudit, getIp } = require('../utils/auditLogger');
+const { generateKidFriendlyPassword } = require('../utils/passwordGenerator');
 
 const router = express.Router();
 
@@ -52,8 +54,8 @@ router.post('/students/bulk', [
             continue;
           }
 
-          // Generate password (hashed version of student number)
-          const password = await bcrypt.hash(student.student_number, parseInt(process.env.BCRYPT_ROUNDS) || 12);
+          const temporaryPassword = generateKidFriendlyPassword();
+          const password = await bcrypt.hash(temporaryPassword, parseInt(process.env.BCRYPT_ROUNDS) || 12);
 
           // Insert student
           const result = await client.query(`
@@ -73,7 +75,7 @@ router.post('/students/bulk', [
           const addedRow = result.rows[0];
           addedStudents.push({
             ...addedRow,
-            generated_password: student.student_number // For admin reference
+            generated_password: temporaryPassword
           });
 
           pendingAuditPayloads.push({
@@ -169,7 +171,7 @@ router.post('/students', [
     // Auto-generate student number if not provided
     if (!student_number) {
       const timestamp = Date.now().toString().slice(-6);
-      const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+      const random = crypto.randomInt(0, 1000).toString().padStart(3, '0');
       student_number = `STU${timestamp}${random}`;
       
       // Ensure uniqueness
@@ -180,7 +182,7 @@ router.post('/students', [
       
       if (existing.rows.length > 0) {
         // Try with additional random suffix
-        student_number = `STU${timestamp}${random}${Math.floor(Math.random() * 100)}`;
+        student_number = `STU${timestamp}${random}${crypto.randomInt(0, 100)}`;
       }
     } else {
       // Check if provided student number already exists
@@ -194,8 +196,8 @@ router.post('/students', [
       }
     }
 
-    // Generate password (hashed version of student number)
-    const password = await bcrypt.hash(student_number, parseInt(process.env.BCRYPT_ROUNDS) || 12);
+    const temporaryPassword = generateKidFriendlyPassword();
+    const password = await bcrypt.hash(temporaryPassword, parseInt(process.env.BCRYPT_ROUNDS) || 12);
 
     // Insert student
     const result = await db.query(`
@@ -231,7 +233,7 @@ router.post('/students', [
     res.status(201).json({
       message: 'Student added successfully',
       student: newStudent,
-      generated_password: student_number // For admin reference
+      generated_password: temporaryPassword
     });
 
   } catch (error) {
@@ -267,8 +269,7 @@ router.post('/teachers', [
 
     // Auto-generate password if not provided
     if (!password) {
-      const randomPassword = Math.random().toString(36).slice(-8);
-      password = randomPassword;
+      password = generateKidFriendlyPassword();
     }
 
     const client = await db.pool.connect();

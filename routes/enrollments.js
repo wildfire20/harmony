@@ -42,7 +42,9 @@ const initializeEnrollmentsTable = async () => {
   }
 };
 
-initializeEnrollmentsTable();
+if (process.env.ENABLE_STARTUP_SCHEMA_CHANGES === 'true') {
+  initializeEnrollmentsTable();
+}
 
 const enrollmentValidation = [
   body('parentFirstName').trim().isLength({ min: 2 }).withMessage('Parent first name must be at least 2 characters'),

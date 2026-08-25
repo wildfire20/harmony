@@ -3,6 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { generateKidFriendlyPassword } = require('../utils/passwordGenerator');
 
 const STAFF_ROLES = `'teacher','admin','super_admin','non_teaching_staff'`;
 
@@ -13,10 +14,7 @@ const roleLabel = (role) => {
 };
 
 const generatePassword = () => {
-  const adj = ['Happy','Brave','Swift','Bright','Calm','Kind','Bold','Wise'];
-  const nouns = ['Lion','Eagle','River','Stone','Tree','Star','Moon','Wind'];
-  const num = Math.floor(10 + Math.random() * 90);
-  return adj[Math.floor(Math.random() * adj.length)] + nouns[Math.floor(Math.random() * nouns.length)] + num;
+  return generateKidFriendlyPassword();
 };
 
 // POST /api/staff-attendance/scan — PUBLIC (kiosk use)

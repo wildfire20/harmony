@@ -11,7 +11,7 @@ const { logAudit, getIp } = require('../utils/auditLogger');
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin = [authenticate, authorize('admin', 'super_admin')];
 
-// ─── Multer setup (memory for S3, disk fallback) ─────────────────────────────
+// ─── Multer setup (memory for S3 or durable database storage) ────────────────
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
@@ -119,19 +119,6 @@ router.post('/', requireParent, upload.single('receipt'), async (req, res) => {
           console.warn('S3 upload failed, will use DB storage:', s3Err.message);
         }
       }
-      if (!receiptS3Key) {
-        // Also save to local disk as a fallback (best-effort; ephemeral on Railway)
-        try {
-          const localDir = path.join(__dirname, '../uploads/payment-proofs');
-          if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
-          const safeName = `${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
-          const fullPath = path.join(localDir, safeName);
-          fs.writeFileSync(fullPath, req.file.buffer);
-          receiptFilePath = `/uploads/payment-proofs/${safeName}`;
-        } catch (diskErr) {
-          console.warn('Local disk save failed (non-fatal, DB storage used):', diskErr.message);
-        }
-      }
     }
 
     const result = await db.query(`
@@ -224,13 +211,14 @@ router.get('/:id/receipt', authenticate, async (req, res) => {
     if (!result.rows.length) return res.status(404).json({ message: 'Not found' });
     const proof = result.rows[0];
 
-    // Access control
-    if (req.user.role === 'parent' && proof.parent_id !== req.user.id) {
+    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    const isOwningParent = req.user.role === 'parent' && proof.parent_id === req.user.id;
+    if (!isAdmin && !isOwningParent) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
     const mime = proof.receipt_mime_type || 'application/octet-stream';
-    const fileName = proof.receipt_file_name || 'receipt';
+    const fileName = String(proof.receipt_file_name || 'receipt').replace(/[\r\n"]/g, '_');
 
     // 1. Serve from database (most reliable — survives Railway redeploys)
     if (proof.receipt_data) {
@@ -240,17 +228,25 @@ router.get('/:id/receipt', authenticate, async (req, res) => {
       return res.send(proof.receipt_data);
     }
 
-    // 2. S3 signed URL
+    // 2. Proxy S3 content through this authenticated route.
     if (proof.receipt_s3_key && s3Service.isConfigValid) {
       try {
-        const url = await s3Service.getSignedUrl(proof.receipt_s3_key, 300);
-        return res.redirect(url);
-      } catch (e) { console.warn('S3 signed URL failed:', e.message); }
+        const fileContent = await s3Service.getFileContent(proof.receipt_s3_key);
+        res.setHeader('Content-Type', mime);
+        res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+        res.setHeader('Cache-Control', 'private, max-age=300');
+        return res.send(fileContent);
+      } catch (e) { console.warn('S3 receipt retrieval failed:', e.message); }
     }
 
-    // 3. Local disk (best-effort; only works if server hasn't been redeployed)
-    if (proof.receipt_file_path) {
-      const localPath = path.join(__dirname, '..', proof.receipt_file_path);
+    // 3. Strictly bounded legacy local-disk fallback.
+    const legacyMatch = /^\/uploads\/payment-proofs\/([A-Za-z0-9._-]+)$/.exec(proof.receipt_file_path || '');
+    if (legacyMatch) {
+      const legacyRoot = path.resolve(__dirname, '../uploads/payment-proofs');
+      const localPath = path.resolve(legacyRoot, legacyMatch[1]);
+      if (!localPath.startsWith(`${legacyRoot}${path.sep}`)) {
+        return res.status(404).json({ message: 'Receipt file not found' });
+      }
       if (fs.existsSync(localPath)) {
         res.setHeader('Content-Type', mime);
         res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);

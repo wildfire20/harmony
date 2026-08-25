@@ -16,19 +16,13 @@ const ParentForgotPassword = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [devOtp, setDevOtp] = useState(null);
 
   const handleSendOtp = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await api.post('/auth/parent/forgot-password', { phone_number: phone });
-      if (res.data.dev_otp) {
-        setDevOtp(res.data.dev_otp);
-        toast('SMS not configured – show the code to the parent.', { icon: '⚠️', duration: 8000 });
-      } else {
-        toast.success('A reset code has been sent via SMS.');
-      }
+      await api.post('/auth/parent/forgot-password', { phone_number: phone });
+      toast.success('If the number is registered, a reset code will be sent via SMS.');
       setStep(STEPS.OTP);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to send reset code');
@@ -152,15 +146,8 @@ const ParentForgotPassword = () => {
                   <h2 className="text-lg font-semibold text-gray-800 mb-1">Enter the reset code</h2>
                   <p className="text-gray-500 text-sm mb-4">
                     A 6-digit code was sent to <span className="font-medium text-gray-700">{phone}</span>.
-                    It expires in 15 minutes.
+                    It expires in 10 minutes.
                   </p>
-
-                  {devOtp && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
-                      <p className="text-amber-800 text-xs font-semibold mb-0.5">SMS not configured</p>
-                      <p className="text-amber-700 text-sm">Show this code to the parent: <span className="font-mono font-bold text-lg tracking-widest">{devOtp}</span></p>
-                    </div>
-                  )}
 
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">6-Digit Code</label>
                   <div className="relative">
@@ -188,7 +175,7 @@ const ParentForgotPassword = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setStep(STEPS.PHONE); setOtp(''); setDevOtp(null); }}
+                  onClick={() => { setStep(STEPS.PHONE); setOtp(''); }}
                   className="w-full text-sm text-gray-500 hover:text-gray-700 transition-colors"
                 >
                   Didn't receive it? Start over

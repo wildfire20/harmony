@@ -303,16 +303,6 @@ router.post('/upload', [
     const { title, description, document_type, grade_id, class_id, target_audience } = req.body;
     const user = req.user;
 
-    console.log('User:', JSON.stringify(user, null, 2));
-    console.log('S3 Environment Variables Check:', {
-      AWS_ACCESS_KEY_ID: !!process.env.AWS_ACCESS_KEY_ID,
-      AWS_SECRET_ACCESS_KEY: !!process.env.AWS_SECRET_ACCESS_KEY,
-      AWS_S3_BUCKET_NAME: process.env.AWS_S3_BUCKET_NAME,
-      AWS_REGION: process.env.AWS_REGION,
-      accessKeyStart: process.env.AWS_ACCESS_KEY_ID ? process.env.AWS_ACCESS_KEY_ID.substring(0, 8) : 'N/A',
-      secretKeyLength: process.env.AWS_SECRET_ACCESS_KEY ? process.env.AWS_SECRET_ACCESS_KEY.length : 0
-    });
-
     // Validate required fields based on user role
     if (!title || !document_type) {
       return res.status(400).json({ 
@@ -387,14 +377,6 @@ router.post('/upload', [
     
     // Check if S3 is configured (for testing purposes)
     const isS3Configured = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_S3_BUCKET_NAME;
-    console.log('🔍 S3 Configuration Check:', {
-      isS3Configured,
-      bucketName: process.env.AWS_S3_BUCKET_NAME,
-      region: process.env.AWS_REGION,
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID ? '[SET]' : '[NOT SET]',
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ? '[SET]' : '[NOT SET]'
-    });
-    
     if (!isS3Configured) {
       console.log('⚠️ S3 not configured properly');
       return res.status(500).json({
@@ -591,22 +573,16 @@ router.get('/download/:id', authenticateFlexible, async (req, res) => {
 
     // Handle file serving - S3 or local fallback
     if (document.s3_key) {
-      console.log('✅ Generating signed URL for S3 download:', document.s3_key);
-      
       try {
-        // Use the new getDownloadUrl method to force download behavior
-        const signedUrl = await s3Service.getDownloadUrl(
-          document.s3_key, 
-          document.original_file_name || document.file_name, 
-          300
-        );
-        console.log('✅ Download URL generated with attachment disposition');
-        
-        // Redirect directly to S3 signed URL with download headers
-        return res.redirect(signedUrl);
-        
+        const fileContent = await s3Service.getFileContent(document.s3_key);
+        const downloadName = String(document.original_file_name || document.file_name || 'document')
+          .replace(/[\r\n"]/g, '_');
+        res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
+        res.setHeader('Content-Type', document.mime_type || document.file_type || 'application/octet-stream');
+        res.setHeader('Cache-Control', 'private, no-store');
+        return res.send(fileContent);
       } catch (s3Error) {
-        console.log('❌ S3 download error:', s3Error);
+        console.log('❌ S3 download error:', s3Error.message);
         return res.status(404).json({ 
           message: 'Document file is temporarily unavailable',
           details: 'The file could not be accessed from cloud storage. Please try again later or contact an administrator.',
@@ -629,7 +605,9 @@ router.get('/download/:id', authenticateFlexible, async (req, res) => {
       }
       
       // Set appropriate headers for download
-      res.setHeader('Content-Disposition', `attachment; filename="${document.original_file_name || document.file_name}"`);
+      const downloadName = String(document.original_file_name || document.file_name || 'document')
+        .replace(/[\r\n"]/g, '_');
+      res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
       res.setHeader('Content-Type', 'application/octet-stream');
       
       // Stream the file

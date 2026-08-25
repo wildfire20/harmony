@@ -1105,8 +1105,10 @@ router.post('/init-tables', [
   }
 });
 
-// Public debug endpoint (no auth required) - for testing only
-router.get('/public-debug', async (req, res) => {
+router.get('/public-debug', authenticate, authorize('admin', 'super_admin'), async (req, res) => {
+  if (process.env.ENABLE_DEV_DEBUG_ROUTES !== 'true' || process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ message: 'Not found' });
+  }
   try {
     console.log('=== PUBLIC DEBUG ENDPOINT ===');
     

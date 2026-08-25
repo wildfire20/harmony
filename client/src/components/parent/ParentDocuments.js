@@ -56,16 +56,46 @@ const ParentDocuments = ({ child }) => {
 
   const filtered = filter === 'all' ? documents : documents.filter(d => d.document_type === filter);
 
-  const handleDownload = (doc) => {
+  const fetchDocument = async (path) => {
     const token = localStorage.getItem('parentToken');
-    const url = `/api/documents/download/${doc.id}?token=${encodeURIComponent(token)}`;
-    window.open(url, '_blank');
+    const response = await fetch(path, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new Error('Unable to retrieve document');
+    return response.blob();
   };
 
-  const handleView = (doc) => {
-    const token = localStorage.getItem('parentToken');
-    const url = `/api/documents/view/${doc.id}?token=${encodeURIComponent(token)}`;
-    window.open(url, '_blank');
+  const handleDownload = async (doc) => {
+    try {
+      const blob = await fetchDocument(`/api/documents/download/${doc.id}`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = doc.file_name || doc.filename || 'document';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleView = async (doc) => {
+    const opened = window.open('about:blank', '_blank');
+    if (!opened) {
+      return setError('Please allow popups to view this document');
+    }
+    opened.opener = null;
+    try {
+      const blob = await fetchDocument(`/api/documents/view/${doc.id}`);
+      const url = URL.createObjectURL(blob);
+      opened.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      opened.close();
+      setError(err.message);
+    }
   };
 
   const isViewable = (name = '') => {

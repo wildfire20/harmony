@@ -360,32 +360,26 @@ const initializeInvoiceSystem = async () => {
 
 const app = express();
 
-// Production security enhancements
 if (process.env.NODE_ENV === 'production') {
-  // Trust proxy for Heroku/Railway/Render
   app.set('trust proxy', 1);
-  
-  // Enhanced security headers for production
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-        fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        imgSrc: ["'self'", "data:", "https:"],
-        scriptSrc: ["'self'"],
-      },
-    },
-    hsts: {
-      maxAge: 31536000,
-      includeSubDomains: true,
-      preload: true
-    }
-  }));
 }
 
-// Security middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "https:"],
+      scriptSrc: ["'self'"],
+    },
+  },
+  hsts: process.env.NODE_ENV === 'production' ? {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  } : false
+}));
 
 // Rate limiting - more generous limits for better user experience
 const limiter = rateLimit({
@@ -401,61 +395,50 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// CORS configuration
+const normalizeOrigin = (value) => {
+  if (!value) return null;
+  const trimmed = value.trim().replace(/\/+$/, '');
+  if (!trimmed) return null;
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+};
+
+const configuredOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.CORS_ORIGIN,
+  ...(process.env.ALLOWED_ORIGINS || '').split(','),
+  process.env.RAILWAY_PUBLIC_DOMAIN,
+  process.env.REPLIT_DEV_DOMAIN,
+  ...(process.env.REPLIT_DOMAINS || '').split(','),
+].map(normalizeOrigin).filter(Boolean);
+
+if (process.env.NODE_ENV !== 'production') {
+  configuredOrigins.push('http://localhost:3000', 'http://localhost:3001');
+}
+
+const allowedOrigins = new Set(configuredOrigins);
+
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, etc.)
     if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      process.env.FRONTEND_URL || 'http://localhost:3000',
-      process.env.CORS_ORIGIN || 'http://localhost:3000',
-      'http://localhost:3000', // Development
-      'http://localhost:3001'  // Alternative development port
-    ];
-    
-    // In production, allow Railway domains and common deployment platforms
-    if (process.env.NODE_ENV === 'production') {
-      // Allow same-origin requests (when frontend and backend are served from same domain)
-      if (!origin) return callback(null, true);
-      
-      // Allow Railway.app domains
-      if (origin.includes('.railway.app')) {
-        return callback(null, true);
-      }
-      
-      // Allow custom domains if configured
-      if (process.env.ALLOWED_ORIGINS) {
-        const customOrigins = process.env.ALLOWED_ORIGINS.split(',');
-        allowedOrigins.push(...customOrigins);
-      }
-    }
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      // In production, be more permissive for same-origin requests
-      if (process.env.NODE_ENV === 'production') {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    }
+    if (allowedOrigins.has(normalizeOrigin(origin))) return callback(null, true);
+    const error = new Error('Origin not allowed');
+    error.code = 'CORS_NOT_ALLOWED';
+    callback(error);
   },
   credentials: true,
-  optionsSuccessStatus: 200 // Support legacy browsers
+  optionsSuccessStatus: 204
 };
 
 app.use(cors(corsOptions));
 
 // Body parser middleware
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '2mb' }));
 // Only parse urlencoded for non-multipart requests to avoid conflicts with multer
 app.use((req, res, next) => {
   if (req.get('content-type') && req.get('content-type').includes('multipart/form-data')) {
     return next();
   }
-  express.urlencoded({ extended: true, limit: '10mb' })(req, res, next);
+  express.urlencoded({ extended: true, limit: '2mb' })(req, res, next);
 });
 
 // Static files
@@ -489,17 +472,12 @@ app.use('/api/service-prices', servicePricesRoutes);
 app.use('/api/audit-logs', require('./routes/auditLogs'));
 app.use('/api', s3HealthRoutes);
 
-// Add migration endpoint for database setup
-const { createMigrationEndpoint } = require('./migration-endpoint');
-createMigrationEndpoint(app);
-
 // Health check endpoint (before static files)
 app.get('/api/health', async (req, res) => {
   const health = {
     status: 'OK', 
     timestamp: new Date().toISOString(),
     service: 'Harmony Learning Institute API',
-    environment: process.env.NODE_ENV || 'development',
     database: 'unknown'
   };
   
@@ -509,11 +487,15 @@ app.get('/api/health', async (req, res) => {
     health.status = 'HEALTHY';
   } catch (error) {
     health.database = 'disconnected';
-    health.database_error = error.message;
     health.status = 'DEGRADED';
   }
   
   res.json(health);
+});
+
+// Explicitly retire the former public migration path instead of serving the SPA fallback.
+app.all('/run-migration-once', (req, res) => {
+  res.status(404).json({ message: 'Not found' });
 });
 
 // API info endpoint (for debugging)
@@ -576,161 +558,11 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Debug endpoint to run SQL schema updates
-app.post('/api/debug/run-sql', async (req, res) => {
-  try {
-    console.log('Running database schema updates...');
-    
-    // Create documents table if not exists
-    await db.query(`CREATE TABLE IF NOT EXISTS documents (
-      id SERIAL PRIMARY KEY,
-      title VARCHAR(255) NOT NULL,
-      description TEXT,
-      document_type VARCHAR(50) NOT NULL,
-      file_name VARCHAR(255) NOT NULL,
-      file_path VARCHAR(500) NOT NULL,
-      file_size BIGINT NOT NULL,
-      grade_id INTEGER REFERENCES grades(id) ON DELETE CASCADE,
-      class_id INTEGER REFERENCES classes(id) ON DELETE CASCADE,
-      uploaded_by INTEGER REFERENCES users(id) ON DELETE CASCADE,
-      is_active BOOLEAN DEFAULT true,
-      uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
-    
-    // Create tasks table if not exists
-    await db.query(`CREATE TABLE IF NOT EXISTS tasks (
-      id SERIAL PRIMARY KEY,
-      title VARCHAR(255) NOT NULL,
-      description TEXT,
-      instructions TEXT,
-      due_date TIMESTAMP,
-      max_points INTEGER DEFAULT 100,
-      task_type VARCHAR(50) DEFAULT 'assignment' CHECK (task_type IN ('assignment', 'quiz')),
-      grade_id INTEGER NOT NULL REFERENCES grades(id) ON DELETE CASCADE,
-      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
-      created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      is_active BOOLEAN DEFAULT true,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
-    
-    // Create submissions table if not exists
-    await db.query(`CREATE TABLE IF NOT EXISTS submissions (
-      id SERIAL PRIMARY KEY,
-      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-      student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      content TEXT,
-      file_path VARCHAR(500),
-      quiz_answers JSONB,
-      score DECIMAL(5,2),
-      max_score DECIMAL(5,2),
-      feedback TEXT,
-      status VARCHAR(50) DEFAULT 'submitted' CHECK (status IN ('submitted', 'graded', 'returned')),
-      attempt_number INTEGER DEFAULT 1,
-      submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      graded_at TIMESTAMP,
-      UNIQUE(task_id, student_id, attempt_number)
-    )`);
-    
-    // Add submission_type column to tasks table if not exists
-    await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS submission_type VARCHAR(20) DEFAULT 'online'`);
-    
-    // Add submission_type column to submissions table
-    await db.query(`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS submission_type VARCHAR(20) DEFAULT 'online'`);
-    
-    // Add file_name column to submissions table
-    await db.query(`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS file_name VARCHAR(255)`);
-    
-    // Update existing tasks to have submission_type 'online' for assignments
-    await db.query(`UPDATE tasks SET submission_type = 'online' WHERE task_type = 'assignment' AND (submission_type IS NULL OR submission_type = '')`);
-    
-    // Create indexes for better performance
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_documents_grade_class ON documents(grade_id, class_id)`);
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(document_type)`);
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_documents_uploaded_by ON documents(uploaded_by)`);
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(is_active)`);
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_tasks_submission_type ON tasks(submission_type)`);
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_submissions_submission_type ON submissions(submission_type)`);
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_submissions_task_student ON submissions(task_id, student_id)`);
-    
-    console.log('✅ Database schema updated successfully');
-    
-    res.json({ 
-      success: true, 
-      message: 'Database schema updated successfully for all tables (documents, tasks, submissions)',
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('SQL update error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to update database schema',
-      error: error.message
-    });
-  }
-});
-
-// Debug endpoint to check database schema
-app.get('/api/debug/check-schema', async (req, res) => {
-  try {
-    console.log('Checking database schema...');
-    
-    // Check if tables exist
-    const tablesResult = await db.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-      AND table_name IN ('documents', 'tasks', 'submissions', 'users', 'grades', 'classes')
-      ORDER BY table_name
-    `);
-    
-    // Check documents table columns
-    const documentsColumns = await db.query(`
-      SELECT column_name, data_type, is_nullable, column_default
-      FROM information_schema.columns 
-      WHERE table_name = 'documents' AND table_schema = 'public'
-      ORDER BY ordinal_position
-    `);
-    
-    // Check tasks table columns
-    const tasksColumns = await db.query(`
-      SELECT column_name, data_type, is_nullable, column_default
-      FROM information_schema.columns 
-      WHERE table_name = 'tasks' AND table_schema = 'public'
-      ORDER BY ordinal_position
-    `);
-    
-    // Check submissions table columns
-    const submissionsColumns = await db.query(`
-      SELECT column_name, data_type, is_nullable, column_default
-      FROM information_schema.columns 
-      WHERE table_name = 'submissions' AND table_schema = 'public'
-      ORDER BY ordinal_position
-    `);
-    
-    res.json({
-      success: true,
-      timestamp: new Date().toISOString(),
-      tables: tablesResult.rows.map(row => row.table_name),
-      schema: {
-        documents: documentsColumns.rows,
-        tasks: tasksColumns.rows,
-        submissions: submissionsColumns.rows
-      }
-    });
-  } catch (error) {
-    console.error('Schema check error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to check database schema',
-      error: error.message
-    });
-  }
-});
-
 // Global error handler
 app.use((err, req, res, next) => {
+  if (err.code === 'CORS_NOT_ALLOWED') {
+    return res.status(403).json({ message: 'Request origin is not allowed' });
+  }
   console.error(err.stack);
   res.status(500).json({ 
     message: 'Something went wrong!', 
@@ -791,8 +623,16 @@ const startServer = async () => {
   // Initialize database asynchronously after server starts
   try {
     console.log('🔄 Initializing database connection...');
-    await db.initialize();
+    await db.query('SELECT 1');
     console.log('✅ Database connected successfully');
+
+    if (process.env.ENABLE_STARTUP_SCHEMA_CHANGES !== 'true') {
+      console.log('🔒 Startup schema/data changes are disabled');
+      return server;
+    }
+
+    await db.initialize();
+    console.log('⚠️ Startup schema/data changes explicitly enabled');
     
     try {
       await initializeDocumentsTable();
@@ -839,10 +679,9 @@ const startServer = async () => {
         CHECK (role IN ('student','teacher','admin','super_admin','parent'))
       `);
 
-      // Add phone_number, must_change_password, temp_password_plain columns to users
+      // Add parent authentication support columns
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30)`);
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false`);
-      await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS temp_password_plain VARCHAR(100)`);
       await db.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS description TEXT`);
 
       // Push notification subscriptions for parents
