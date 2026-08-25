@@ -1,0 +1,597 @@
+We are now beginning the controlled retirement of the Harmony Learning Institute Student Portal.
+
+Security Hardening Phase 1 has already been successfully deployed and verified in production.
+
+This task must REMOVE LEARNER LOGIN ACCESS while preserving the learner records that Admin, Staff, Parents, attendance, fees, reporting and school management depend on.
+
+IMPORTANT:
+
+DO NOT rebuild the management system.
+
+DO NOT:
+
+* delete student users
+* archive active students
+* set enrolled learners `is_active = false`
+* change `role = 'student'`
+* change learner IDs
+* create a new learners table
+* migrate learner records
+* modify parent/student relationships
+* remove attendance
+* remove grades/results
+* remove invoices or fee assignments
+* remove historical submissions
+* remove documents
+* remove class/grade assignments
+* alter Parent Portal functionality
+* alter Staff Portal functionality
+* alter Admin functionality
+
+The learner `users` rows must remain operational school records.
+
+The goal is ONLY:
+
+**Learners remain in the management system, but learners can no longer authenticate into a Student Portal.**
+
+---
+
+# 1. CREATE A ROLLBACK BASELINE
+
+Before making changes:
+
+* confirm the currently deployed security-hardened commit/version
+* create a new known-good Git commit/tag if appropriate
+* record the rollback commit
+* do not modify production database records
+
+Return the rollback version in the final report.
+
+---
+
+# 2. USE A GLOBAL STUDENT PORTAL FEATURE FLAG
+
+Do NOT add a database column during this phase unless absolutely necessary.
+
+Because Harmony is retiring learner login for all learners, implement a global environment/configuration feature flag:
+
+`STUDENT_PORTAL_ENABLED`
+
+Expected behavior:
+
+`STUDENT_PORTAL_ENABLED=true`
+= Student Portal operates normally.
+
+`STUDENT_PORTAL_ENABLED=false`
+= learner authentication and learner-facing access are disabled.
+
+Production will eventually use:
+
+`STUDENT_PORTAL_ENABLED=false`
+
+Choose a safe default.
+
+Prefer the default to preserve existing behavior if the environment variable is absent during development, unless there is a strong reason otherwise.
+
+Document the exact behavior.
+
+This flag must control student authentication independently from:
+
+* `users.is_active`
+* `users.role`
+* learner IDs
+* grade/class status
+
+Do not reuse `is_active` to disable learner login.
+
+---
+
+# 3. DISABLE STUDENT LOGIN
+
+Inspect the existing student authentication endpoint:
+
+`POST /api/auth/login/student`
+
+When:
+
+`STUDENT_PORTAL_ENABLED=false`
+
+student login must fail cleanly.
+
+Return an appropriate generic response such as:
+
+"Student Portal access is currently unavailable."
+
+Do not reveal account existence, passwords or internal details.
+
+IMPORTANT:
+
+Parent login must continue.
+
+Staff/Admin login must continue.
+
+No other user role should be affected.
+
+---
+
+# 4. BLOCK EXISTING STUDENT JWT SESSIONS
+
+Disabling NEW login is not enough.
+
+A learner who already has a valid JWT must no longer be able to continue using Student Portal features when:
+
+`STUDENT_PORTAL_ENABLED=false`
+
+Inspect the central authentication middleware.
+
+When an authenticated user has:
+
+`role = 'student'`
+
+and:
+
+`STUDENT_PORTAL_ENABLED=false`
+
+deny student-authenticated access.
+
+Do this centrally where practical so existing student JWTs are effectively invalidated without modifying learner database records.
+
+IMPORTANT:
+
+This check applies to the AUTHENTICATED USER being a student.
+
+It must NOT prevent Admin, Staff or Parent users from accessing records belonging to learners.
+
+For example:
+
+Teacher authenticated user → accesses learner attendance:
+ALLOW.
+
+Parent authenticated user → accesses linked child:
+ALLOW.
+
+Admin authenticated user → manages student record:
+ALLOW.
+
+Student authenticated user → attempts Student Portal/API:
+DENY.
+
+Be extremely careful with this distinction.
+
+---
+
+# 5. REMOVE STUDENT PORTAL FROM PUBLIC WEBSITE
+
+When Student Portal is disabled, remove or hide Student Portal access from:
+
+* public footer
+* Portal Login dropdown
+* mobile navigation/menu
+* public login-selection screen
+* any obvious Student Portal buttons or links
+
+KEEP:
+
+* Parent Portal
+* Staff Portal
+* Admin-related access where currently appropriate
+
+Do not disturb the approved public-site design.
+
+The public website should no longer advertise a portal learners cannot use.
+
+---
+
+# 6. HANDLE DIRECT STUDENT PORTAL URLS
+
+A visitor may still know an old URL such as:
+
+`/login?type=student`
+
+or may have bookmarked:
+
+`/dashboard`
+
+or another student-facing page.
+
+When the Student Portal is disabled:
+
+Do not show a broken page.
+
+For unauthenticated Student Portal entry points, either:
+
+* redirect to the main public website, OR
+* show a clean message that Student Portal access is no longer available.
+
+Use the least disruptive UX.
+
+Do not expose internal implementation details.
+
+---
+
+# 7. DO NOT DELETE SHARED STUDENT-RELATED FEATURES YET
+
+The previous audit confirmed that some apparently student-related modules contain data or functionality still needed by teachers, administrators and parents.
+
+Therefore, DO NOT permanently delete the underlying shared modules yet.
+
+Preserve:
+
+* tasks
+* quizzes
+* historical quiz attempts
+* submissions
+* historical learner work
+* grading/feedback
+* announcements
+* documents
+* calendar records
+* attendance
+* results
+* file attachments
+* reports
+
+Student-facing access to those areas may be blocked.
+
+Staff/Admin access must remain where currently supported.
+
+Historical learner data must remain intact.
+
+---
+
+# 8. STUDENT-ONLY FRONTEND COMPONENTS
+
+Do NOT aggressively delete StudentDashboard or other learner components during this deployment.
+
+Instead:
+
+* prevent them from being reachable when Student Portal is disabled
+* preserve the code temporarily for rollback
+* mark clearly which components are now unreachable
+* identify them for optional cleanup in a later phase
+
+This gives Harmony an easy rollback option.
+
+---
+
+# 9. TASKS / QUIZZES / SUBMISSIONS
+
+Pay special attention to these areas.
+
+Learners will no longer:
+
+* receive/use Student Portal task UI
+* submit assignments online through Student Portal
+* take quizzes through Student Portal
+* view Student Portal quiz results
+
+However, DO NOT delete:
+
+* teacher task creation
+* teacher grading
+* historical submissions
+* historical quiz attempts/results
+* teacher/admin reporting involving that data
+
+Ensure teacher/admin screens do not depend on the learner being able to authenticate.
+
+---
+
+# 10. PARENT PORTAL MUST REMAIN FULLY FUNCTIONAL
+
+Regression-test the Parent Portal carefully.
+
+Parents must still be able to:
+
+* log in
+* see linked children
+* switch between linked children if supported
+* view learner profiles
+* view attendance
+* view results/grades
+* view notices
+* view documents
+* view fees
+* view invoices
+* view payment information
+* upload/view payment proofs where supported
+
+Learners must remain:
+
+`role = 'student'`
+
+and:
+
+`is_active = true`
+
+for active enrolled learners.
+
+Do not modify `parent_students`.
+
+---
+
+# 11. STAFF / TEACHER PORTAL MUST REMAIN FULLY FUNCTIONAL
+
+Teachers must still be able to:
+
+* log in
+* see class lists
+* see learners
+* mark attendance
+* view attendance
+* record grades/results
+* access learner records
+* manage classes
+* access documents
+* manage notices
+* access historical assignments/submissions/results where currently supported
+
+Do not make teachers dependent on Student Portal availability.
+
+---
+
+# 12. ADMIN MUST REMAIN FULLY FUNCTIONAL
+
+Administration must still be able to:
+
+* search learners
+* create learners
+* edit learners
+* assign grade/class
+* promote learners
+* link parents
+* manage attendance
+* manage grades/results
+* manage fees
+* manage invoices
+* manage payments
+* manage documents
+* manage admissions
+* generate reports
+* reset relevant adult accounts
+* archive genuinely withdrawn/inactive learners using the existing process
+
+Student Portal retirement must NOT change the meaning of learner `is_active`.
+
+---
+
+# 13. NEW LEARNER CREATION
+
+Inspect the current learner-creation workflow.
+
+If creating a learner currently automatically generates a student login password:
+
+when `STUDENT_PORTAL_ENABLED=false`, determine the cleanest safe behavior.
+
+Preferred behavior:
+
+* still create the learner `users` row exactly as required by the management system
+* still assign `role='student'`
+* still assign student_number, grade, class and learner data
+* do not expose or distribute learner login credentials unnecessarily
+
+If the password column is database-required, generate/store an unusable secure random password/hash internally rather than redesigning the schema in this phase.
+
+Do not break learner creation just because learner login is disabled.
+
+Explain the chosen implementation in the report.
+
+---
+
+# 14. PASSWORD MANAGEMENT UI
+
+Because learners no longer authenticate, check Admin password/account-management screens.
+
+Avoid showing unnecessary controls implying that learner passwords need to be distributed.
+
+However:
+
+* do not redesign account management aggressively
+* do not remove staff/admin/parent password management
+* do not modify learner records
+
+If student-password UI can be hidden safely while Student Portal is disabled, do so.
+
+Otherwise document it for later cleanup.
+
+---
+
+# 15. ENVIRONMENT CONFIGURATION
+
+Add documentation/example configuration for:
+
+`STUDENT_PORTAL_ENABLED=true|false`
+
+Do not store production secrets.
+
+Do not modify Railway automatically.
+
+At the end, tell me exactly what value needs to be added to Railway.
+
+Expected production value:
+
+`STUDENT_PORTAL_ENABLED=false`
+
+But confirm that in the final report.
+
+---
+
+# 16. DATABASE SAFETY
+
+This implementation should preferably require:
+
+NO database schema migration.
+
+NO learner database updates.
+
+NO bulk student updates.
+
+If you believe any database write/migration is necessary, STOP and explain why before performing it.
+
+During automated validation:
+
+* do not delete learners
+* do not archive learners
+* do not alter learner IDs
+* do not alter roles
+* do not alter parent links
+* do not alter fees
+* do not alter attendance
+* do not alter grades
+* do not alter invoices
+
+Read-only checks are allowed.
+
+---
+
+# 17. SECURITY CHECK
+
+Verify that when Student Portal is disabled:
+
+* student login cannot obtain a new JWT
+* an existing valid student JWT cannot access protected Student Portal resources
+* changing URLs manually cannot bypass the block
+* Parent authentication is unaffected
+* Staff authentication is unaffected
+* Admin authentication is unaffected
+* adult users can still access learner data according to existing permissions
+
+Do not weaken any of the security hardening deployed previously.
+
+---
+
+# 18. REGRESSION TEST PLAN
+
+Run as many non-destructive automated tests as possible.
+
+ADMIN:
+
+* login/auth route remains valid
+* learner queries unchanged
+* class queries unchanged
+* attendance routes unchanged
+* fee/invoice queries unchanged
+* parent links unchanged
+
+STAFF:
+
+* authentication unchanged
+* class list endpoints function
+* attendance functions
+* grade/result endpoints remain available
+* shared content remains available
+
+PARENT:
+
+* authentication unchanged
+* linked learner retrieval works
+* attendance retrieval works
+* results retrieval works
+* fee/invoice retrieval works
+* document/notice retrieval works
+
+STUDENT:
+With flag TRUE:
+
+* existing student behavior should remain available for rollback/testing.
+
+With flag FALSE:
+
+* new student login blocked
+* existing student JWT blocked
+* direct Student Portal URL inaccessible
+* student-facing API access denied
+
+PUBLIC:
+
+* homepage HTTP 200
+* fees HTTP 200
+* gallery HTTP 200
+* admissions works
+* Parent Portal link remains
+* Staff Portal link remains
+* Student Portal link hidden when disabled
+
+DATABASE:
+
+* learner count unchanged
+* learner IDs unchanged
+* student roles unchanged
+* `is_active` unchanged
+* parent links unchanged
+* attendance unchanged
+* fees/invoices unchanged
+
+---
+
+# 19. DO NOT DEPLOY YET
+
+Complete the code implementation and tests.
+
+DO NOT push to the production Railway deployment branch yet unless explicitly instructed afterward.
+
+Return the report first.
+
+---
+
+# 20. FINAL REPORT
+
+Return:
+
+1. Executive Summary
+
+2. Rollback Commit
+
+3. Student Portal Feature Flag Implementation
+
+4. Student Login Changes
+
+5. Existing JWT / Session Handling
+
+6. Public Website Changes
+
+7. Student-Only Routes Blocked
+
+8. Shared Features Preserved
+
+9. Parent Portal Verification
+
+10. Staff Portal Verification
+
+11. Admin Verification
+
+12. Learner Creation Behavior
+
+13. Password Management Changes
+
+14. Files Changed
+
+15. Database Changes
+    Expected: NONE
+
+16. Automated Tests Performed
+
+17. Tests Passed
+
+18. Tests Requiring Manual Confirmation
+
+19. Risks / Unknowns
+
+20. Production Environment Variable Required
+
+21. Exact Deployment Instructions
+
+22. Rollback Instructions
+
+23. Final Verdict:
+
+SAFE TO RETIRE STUDENT PORTAL:
+YES / NO / WITH MANUAL ACTION
+
+IMPORTANT FINAL RULE:
+
+The successful outcome is NOT deleting students.
+
+The successful outcome is:
+
+**Learners remain fully active school records for Admin, Staff and Parents, while learner authentication and Student Portal access are disabled.**
