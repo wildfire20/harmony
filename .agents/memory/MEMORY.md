@@ -1,2 +1,3 @@
 - [Audit trail system](audit-trail.md) — audit_logs table + logAudit helper wired into all key admin routes
 - [Arrears-first manual payment](arrears-first-manual.md) — endpoint + UI button for applying payments to oldest unpaid invoice first
+- [Railway npm registry portability](railway-npm-registry.md) — verify client lockfiles contain no Replit-internal registry URLs before Railway deployment.
