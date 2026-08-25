@@ -4,7 +4,6 @@ const crypto = require('crypto');
 const router = express.Router();
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-const { sendSMS } = require('../services/sms');
 const { generateKidFriendlyPassword } = require('../utils/passwordGenerator');
 
 const requireParent = [authenticate, authorize('parent')];

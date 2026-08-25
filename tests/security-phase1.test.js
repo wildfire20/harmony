@@ -55,14 +55,16 @@ test('plaintext password fields and OTP response fallbacks are unused', () => {
   }
 });
 
-test('temporary passwords and OTPs use cryptographic randomness', () => {
+test('temporary passwords use cryptographic randomness and parent SMS recovery is removed', () => {
   const generator = read('utils/passwordGenerator.js');
   const auth = read('routes/auth.js');
+  const forgotPassword = read('client/src/components/parent/ParentForgotPassword.js');
   assert.match(generator, /crypto\.randomBytes/);
   assert.doesNotMatch(generator, /Math\.random/);
-  assert.match(auth, /crypto\.randomInt\(100000,\s*1000000\)/);
-  assert.match(auth, /bcrypt\.hash\(otp/);
-  assert.doesNotMatch(auth, /dev_otp|console\.log\([^)]*otp/i);
+  assert.equal(fs.existsSync(path.join(root, 'services/sms.js')), false);
+  assert.doesNotMatch(auth, /parent\/forgot-password|parent\/verify-otp|parent\/reset-password|sendSMS|parent_otps/);
+  assert.doesNotMatch(forgotPassword, /send reset code|verify code|reset_token|phone_number|\/auth\//i);
+  assert.match(forgotPassword, /contact the school office/i);
 });
 
 test('JWT default lifetime is bounded', () => {
