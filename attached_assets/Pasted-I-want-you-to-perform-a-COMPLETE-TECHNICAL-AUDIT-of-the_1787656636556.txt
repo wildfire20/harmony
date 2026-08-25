@@ -1,0 +1,840 @@
+I want you to perform a COMPLETE TECHNICAL AUDIT of the existing Harmony Learning Institute management system before we make any changes to the Student Portal.
+
+IMPORTANT:
+
+THIS IS AN AUDIT-ONLY TASK.
+
+DO NOT:
+
+* delete anything
+* disable anything
+* modify database records
+* change authentication
+* change routes
+* remove components
+* migrate the database
+* edit APIs
+* change Parent Portal functionality
+* change Staff Portal functionality
+* change Admin functionality
+* change application functionality
+* commit destructive changes
+* refactor the system yet
+
+Your job is to inspect the current application and explain exactly how everything is connected.
+
+The purpose of this audit is to determine whether the student-facing portal and student login system can safely be decommissioned while keeping learner records fully functional for:
+
+* Administration
+* Teachers/staff
+* Parents
+* Attendance
+* Grades/results
+* Fees
+* Classes
+* Reports
+* Documents
+* Admissions
+* Any other school-management functionality
+
+The final goal may eventually be:
+
+KEEP:
+Learner/student records and all relationships.
+
+REMOVE OR DISABLE:
+Student authentication and student-facing portal functionality.
+
+But DO NOT implement that yet.
+
+First determine whether that architecture is actually possible in the current system.
+
+---
+
+# 1. MAP THE ENTIRE SYSTEM ARCHITECTURE
+
+Inspect the project and identify:
+
+* frontend framework
+* backend framework
+* database technology
+* ORM/database access layer
+* authentication system
+* session/token handling
+* file storage
+* background jobs
+* APIs
+* portal architecture
+* major application modules
+
+Explain how the following areas communicate:
+
+Public website
+Admin portal
+Staff portal
+Parent portal
+Student portal
+Database
+Authentication
+File storage
+External services
+
+Provide a simple architecture diagram in text form.
+
+Example format:
+
+Public Site
+|
+Backend/API
+|
+Database
+|
+-
+
+|        |         |            |
+Admin   Staff     Parent      Student
+
+Use the ACTUAL system architecture rather than assuming this example is correct.
+
+---
+
+# 2. AUDIT USER AUTHENTICATION
+
+Inspect how users are stored and authenticated.
+
+Identify:
+
+* user/account database table/model
+* roles
+* role names
+* permissions
+* login endpoints
+* password storage
+* authentication middleware
+* sessions/tokens
+* role-based route protection
+
+Determine whether the system has roles similar to:
+
+admin
+staff
+teacher
+parent
+student
+
+or whether it uses another structure.
+
+For each role explain:
+
+* how the account is created
+* how it logs in
+* where it is redirected
+* what permissions it has
+* what database records it connects to
+
+---
+
+# 3. STUDENT RECORD VS STUDENT ACCOUNT
+
+This is the MOST IMPORTANT part of the audit.
+
+Determine whether:
+
+STUDENT RECORD
+
+and
+
+STUDENT USER ACCOUNT
+
+are separate concepts in the database.
+
+For example, determine whether the architecture resembles:
+
+users
+
+* id
+* email
+* password
+* role
+
+students
+
+* id
+* first_name
+* last_name
+* grade
+* parent_id
+
+with some relationship between them.
+
+OR whether the student's user account itself contains or controls essential learner information.
+
+Report exactly what exists.
+
+Identify:
+
+* student/learner table or model
+* student-user account table/model
+* foreign keys
+* relationship tables
+* identifiers connecting student and account
+* whether a learner can exist without a student login account
+
+Answer clearly:
+
+CAN A STUDENT/LEARNER RECORD EXIST WITHOUT A STUDENT LOGIN ACCOUNT?
+
+YES / NO / PARTIALLY
+
+Then explain why.
+
+---
+
+# 4. TRACE EVERY DEPENDENCY ON STUDENT ACCOUNTS
+
+Search the entire codebase and database structure for anything that relies specifically on:
+
+student user IDs
+student login accounts
+student authentication
+student role
+student email
+student username
+student password
+student portal routes
+
+For every dependency, identify:
+
+* filename
+* component/module
+* API endpoint
+* database table/model
+* purpose
+* what would happen if student login were disabled
+* whether the dependency should remain
+
+Do not just search the frontend.
+
+Inspect backend code and database relationships too.
+
+---
+
+# 5. PARENT PORTAL DEPENDENCIES
+
+This section is critical.
+
+Determine exactly how parents are connected to learners.
+
+Identify:
+
+* parent model/table
+* student/learner model/table
+* relationship method
+* foreign keys
+* linking tables
+* API endpoints
+
+Determine whether the Parent Portal obtains learner information through:
+
+student records
+
+OR
+
+student user accounts.
+
+Inspect parent access to:
+
+* learner profile
+* attendance
+* grades/results
+* fees
+* documents
+* notices
+* invoices
+* any other learner data
+
+Answer explicitly:
+
+IF STUDENT LOGIN IS DISABLED, WILL THE PARENT PORTAL CONTINUE TO WORK?
+
+Explain each dependency.
+
+---
+
+# 6. STAFF / TEACHER PORTAL DEPENDENCIES
+
+Trace how staff and teachers interact with learners.
+
+Inspect:
+
+* class lists
+* attendance
+* grades
+* assessments
+* reports
+* learner profiles
+* assignments
+* documents
+* notices
+* behaviour/discipline if applicable
+* any other functionality
+
+Determine whether teachers access:
+
+student records
+
+or
+
+student user accounts.
+
+Answer explicitly:
+
+IF STUDENT LOGIN IS DISABLED, WILL STAFF/TEACHER FUNCTIONALITY CONTINUE TO WORK?
+
+Identify anything that would break.
+
+---
+
+# 7. ADMIN PORTAL DEPENDENCIES
+
+Trace how administration manages learners.
+
+Inspect functionality such as:
+
+* creating learners
+* editing learners
+* assigning grades/classes
+* parent relationships
+* fees
+* attendance
+* results
+* admissions
+* reports
+* documents
+* deleting/archive learners
+* account creation
+* password/reset functionality
+* bulk import
+* promotion to next grade
+
+Determine whether learner administration depends on student login accounts.
+
+Answer:
+
+IF STUDENT LOGIN IS DISABLED, WILL ADMINISTRATION CONTINUE TO WORK?
+
+---
+
+# 8. STUDENT PORTAL INVENTORY
+
+Create a complete inventory of functionality that exists ONLY for students.
+
+Examples could include:
+
+* student dashboard
+* login
+* student profile
+* assignments
+* homework
+* document downloads
+* notices
+* notifications
+* submissions
+* grades
+* timetable
+* learning resources
+* messaging
+
+Use only what actually exists in the project.
+
+For every student-only feature classify it as:
+
+A. UNUSED / SAFE TO REMOVE EVENTUALLY
+
+B. SHARED WITH OTHER PORTALS — MUST PRESERVE
+
+C. UNCERTAIN — NEEDS INVESTIGATION
+
+D. REQUIRED BY SYSTEM — CANNOT REMOVE WITHOUT REFACTORING
+
+---
+
+# 9. STUDENT LOGIN ROUTES
+
+Identify every student-related route.
+
+Examples might include:
+
+/student
+/student/login
+/student/dashboard
+/api/student/...
+/login
+
+but inspect the real routes.
+
+For each route report:
+
+* frontend route
+* backend route
+* authentication requirements
+* components used
+* APIs called
+* whether another portal depends on it
+
+Determine which routes could eventually be disabled safely.
+
+---
+
+# 10. DATABASE DEPENDENCY AUDIT
+
+Inspect all database models/tables that relate to learners.
+
+Create a relationship map covering, where applicable:
+
+students
+users
+parents
+staff
+classes
+grades
+attendance
+fees
+invoices
+payments
+assignments
+documents
+notifications
+reports
+enrolments
+applications
+subjects
+
+Identify:
+
+PRIMARY KEYS
+
+FOREIGN KEYS
+
+RELATIONSHIPS
+
+CASCADE DELETE RULES
+
+This is extremely important.
+
+Look specifically for dangerous situations such as:
+
+Deleting a student user could automatically delete:
+
+* student record
+* attendance
+* grades
+* parent relationship
+* invoices
+* documents
+
+because of cascade rules.
+
+Clearly report any such risks.
+
+DO NOT test destructive operations.
+
+---
+
+# 11. FILE STORAGE AUDIT
+
+Determine whether student portal functionality stores files.
+
+Examples:
+
+* assignment uploads
+* homework submissions
+* student documents
+* profile images
+* downloadable learning material
+
+Identify:
+
+* where files are stored
+* whether AWS/S3 is involved
+* database references
+* approximate role of the files
+
+Also investigate the existing warning:
+
+AWS_ACCESS_KEY_ID is missing
+
+Explain:
+
+* what functionality currently expects AWS/S3
+* whether Student Portal features depend on it
+* whether Parent/Admin/Staff functionality depends on it
+* whether disabling Student Portal would change the storage requirements
+
+Do not configure AWS yet.
+
+---
+
+# 12. BACKGROUND JOBS / NOTIFICATIONS
+
+Search for anything automatically triggered for student accounts.
+
+Examples:
+
+* notifications
+* reminder jobs
+* assignment notifications
+* scheduled emails
+* database jobs
+* cron jobs
+* websocket events
+* push notifications
+
+Determine whether unused student features are generating background activity.
+
+Report whether removing the Student Portal would produce any meaningful performance/resource benefit.
+
+Do not assume that it will.
+
+---
+
+# 13. PERFORMANCE IMPACT
+
+Evaluate whether Student Portal functionality is actually creating significant system load.
+
+Inspect things such as:
+
+* frontend bundle size
+* server routes
+* database queries
+* storage
+* background jobs
+* notifications
+* unused dependencies
+* student accounts
+* files
+* scheduled processes
+
+Tell me honestly whether decommissioning the Student Portal would:
+
+SIGNIFICANTLY improve performance
+
+SLIGHTLY improve performance
+
+or
+
+have LITTLE runtime performance effect.
+
+Also explain other benefits such as:
+
+* reduced maintenance
+* smaller security surface
+* simpler UI
+* cleaner code
+* reduced authentication complexity
+
+---
+
+# 14. SECURITY IMPACT
+
+Analyse the security implications of keeping hundreds of unused learner accounts active.
+
+Look for:
+
+* unused credentials
+* weak/default passwords
+* shared passwords
+* unnecessary login endpoints
+* password reset functionality
+* account enumeration
+* unused authentication routes
+* role permission vulnerabilities
+
+Do not perform offensive security testing.
+
+Only analyse the existing implementation.
+
+Explain whether disabling student authentication could reduce security risk.
+
+---
+
+# 15. PUBLIC WEBSITE IMPACT
+
+The public website currently includes portal navigation.
+
+Determine what happens if the Student Portal is eventually removed.
+
+Recommend whether:
+
+"Student Portal"
+
+should simply disappear from:
+
+* footer
+* Portal Login menu
+* navigation
+* other public pages
+
+Do not change it yet.
+
+---
+
+# 16. DATA THAT MUST NEVER BE DELETED
+
+Based on the audit, create a list titled:
+
+CRITICAL LEARNER DATA TO PRESERVE
+
+This should include every learner-related record required by:
+
+Admin
+Staff
+Parents
+Reporting
+Fees
+Attendance
+Academics
+Admissions
+
+Be very specific.
+
+---
+
+# 17. POSSIBLE DECOMMISSIONING STRATEGIES
+
+After understanding the architecture, compare these approaches:
+
+OPTION A — Hide Student Portal only
+
+Remove public links but keep student login technically active.
+
+OPTION B — Disable Student authentication
+
+Learner records remain, but student accounts cannot log in.
+
+OPTION C — Archive student accounts
+
+Keep historical accounts/database references but mark login accounts inactive.
+
+OPTION D — Separate learner records from user accounts
+
+Refactor if the current system mixes student identity with authentication.
+
+OPTION E — Completely delete student accounts/features
+
+Only recommend this if the architecture proves it is safe.
+
+For each option provide:
+
+* advantages
+* disadvantages
+* technical difficulty
+* risk level
+* impact on Admin
+* impact on Staff
+* impact on Parent Portal
+* impact on learner data
+* reversibility
+
+---
+
+# 18. YOUR RECOMMENDATION
+
+After completing the entire audit, recommend the safest architecture for Harmony Learning Institute.
+
+The target concept is likely:
+
+LEARNER RECORD
+remains central to the system.
+
+ADMIN
+can manage learner.
+
+STAFF
+can manage learner.
+
+PARENT
+can view learner.
+
+STUDENT
+does not need to log in.
+
+But only recommend this architecture if it is technically compatible with the current system.
+
+Explain any refactoring required.
+
+---
+
+# 19. DECOMMISSIONING PLAN
+
+If student login can be removed safely, produce a STEP-BY-STEP IMPLEMENTATION PLAN.
+
+DO NOT EXECUTE IT.
+
+The plan should include stages such as:
+
+Phase 1 — Backups
+
+Phase 2 — Remove public Student Portal navigation
+
+Phase 3 — Disable authentication
+
+Phase 4 — Preserve/migrate relationships
+
+Phase 5 — Remove unused frontend features
+
+Phase 6 — Remove unused backend functionality
+
+Phase 7 — clean unused storage/background jobs
+
+Phase 8 — regression testing
+
+Phase 9 — monitoring
+
+Phase 10 — optional permanent cleanup after a safe waiting period
+
+Adapt the phases to the actual architecture you discover.
+
+---
+
+# 20. ROLLBACK PLAN
+
+Create a rollback strategy.
+
+If disabling student login unexpectedly breaks something, explain how the system could quickly return to its previous state.
+
+Include:
+
+* database backups
+* Git commit/tag
+* feature flags if appropriate
+* account-status reversal
+* route restoration
+
+---
+
+# 21. TESTING PLAN
+
+Create a regression-testing checklist that would need to pass before deploying any Student Portal decommissioning.
+
+Test at minimum:
+
+ADMIN
+
+* learner search
+* learner profile
+* create/edit learner
+* attendance
+* classes
+* grades/results
+* fees
+* reports
+* parent linking
+
+STAFF
+
+* class lists
+* attendance
+* grades
+* learner records
+* relevant documents
+
+PARENT
+
+* login
+* linked children
+* attendance
+* results
+* fees
+* documents
+* notices
+
+PUBLIC WEBSITE
+
+* application
+* admissions
+* Parent Portal
+* Staff Portal
+
+DATABASE
+
+* relationships preserved
+* no orphan records
+* historical information intact
+
+Add any additional tests required by the actual project.
+
+---
+
+# 22. FINAL AUDIT REPORT FORMAT
+
+Return a detailed report using these headings:
+
+1. Executive Summary
+
+2. Current System Architecture
+
+3. Authentication Architecture
+
+4. Student Record vs Student Account
+
+5. Student Portal Features
+
+6. Database Relationships
+
+7. Parent Portal Dependencies
+
+8. Staff Portal Dependencies
+
+9. Admin Portal Dependencies
+
+10. Student-Specific Dependencies
+
+11. File Storage / AWS Dependencies
+
+12. Background Processes
+
+13. Performance Impact
+
+14. Security Impact
+
+15. What Would Break if Student Login Were Disabled Today?
+
+16. What Would NOT Break?
+
+17. Critical Learner Data That Must Be Preserved
+
+18. Decommissioning Options Comparison
+
+19. Recommended Approach
+
+20. Required Refactoring
+
+21. Proposed Implementation Plan
+
+22. Rollback Plan
+
+23. Regression Test Plan
+
+24. Risk Rating
+
+25. Files / Components / Database Tables Affected
+
+26. Questions or Unknowns Requiring Human Confirmation
+
+27. Final Recommendation
+
+Also include a simple final statement:
+
+SAFE TO DISABLE STUDENT PORTAL NOW:
+YES / NO / WITH CHANGES FIRST
+
+and explain why.
+
+Again:
+
+DO NOT CHANGE THE SYSTEM.
+
+DO NOT IMPLEMENT THE RECOMMENDATION.
+
+ONLY AUDIT, ANALYSE AND REPORT.
