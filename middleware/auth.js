@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const db = require('../config/database');
+const { isStudentPortalEnabled } = require('../config/features');
 
 const authenticate = async (req, res, next) => {
   try {
@@ -46,6 +47,11 @@ const authenticate = async (req, res, next) => {
     }
 
     req.user = result.rows[0];
+
+    if (req.user.role === 'student' && !isStudentPortalEnabled()) {
+      return res.status(403).json({ message: 'Student Portal access is currently unavailable.' });
+    }
+
     next();
   } catch (error) {
     console.error('❌ Authentication error:', error);

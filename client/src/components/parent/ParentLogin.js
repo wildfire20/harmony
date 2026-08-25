@@ -3,8 +3,10 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Eye, EyeOff, BookOpen, ArrowLeft, Phone } from 'lucide-react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
+import { useAppConfig } from '../../contexts/AppConfigContext';
 
 const ParentLogin = () => {
+  const { studentPortalEnabled } = useAppConfig();
   const navigate = useNavigate();
   const [form, setForm] = useState({ phone_number: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
@@ -125,12 +127,12 @@ const ParentLogin = () => {
                 First time? Contact the school office for your temporary password.
               </p>
               <p className="text-center text-xs text-gray-400">
-                Staff or student?{' '}
+                {studentPortalEnabled ? 'Staff or student?' : 'Staff member?'}{' '}
                 <button
                   onClick={() => navigate('/login')}
                   className="text-blue-600 hover:underline font-medium"
                 >
-                  Use the staff/student portal
+                  {studentPortalEnabled ? 'Use the staff/student portal' : 'Use the staff portal'}
                 </button>
               </p>
             </div>

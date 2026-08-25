@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff, GraduationCap, Users } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
 import HarmonyLogo from '../common/HarmonyLogo';
+import { useAppConfig } from '../../contexts/AppConfigContext';
 
 const Login = () => {
-  const [userType, setUserType] = useState('student');
+  const { studentPortalEnabled } = useAppConfig();
+  const [searchParams] = useSearchParams();
+  const requestedStudentPortal = searchParams.get('type') === 'student';
+  const [userType, setUserType] = useState(studentPortalEnabled ? 'student' : 'staff');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
@@ -34,6 +38,23 @@ const Login = () => {
     }
   };
 
+  if (!studentPortalEnabled && requestedStudentPortal) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-lg border border-gray-100">
+          <HarmonyLogo size={80} showText={false} />
+          <h1 className="mt-6 text-2xl font-bold text-gray-900">Student Portal unavailable</h1>
+          <p className="mt-3 text-sm leading-6 text-gray-600">
+            Student Portal access is no longer available. Please contact the school office if you need assistance.
+          </p>
+          <Link to="/" className="mt-6 inline-flex w-full justify-center rounded-lg bg-blue-700 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-800">
+            Return to Harmony Learning
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
@@ -55,7 +76,7 @@ const Login = () => {
           <form className="space-y-6" onSubmit={handleSubmit(onSubmit)}>
             {/* User Type Selection Tabs */}
             <div className="flex rounded-lg overflow-hidden border border-gray-200">
-              <button
+              {studentPortalEnabled && <button
                 type="button"
                 onClick={() => {
                   console.log('Student button clicked');
@@ -73,7 +94,7 @@ const Login = () => {
               >
                 <GraduationCap className="h-4 w-4" />
                 <span>Student</span>
-              </button>
+              </button>}
               <button
                 type="button"
                 onClick={() => {

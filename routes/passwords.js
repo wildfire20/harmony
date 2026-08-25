@@ -4,9 +4,14 @@ const bcrypt = require('bcryptjs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { generatePasswordForUser, generateKidFriendlyPassword } = require('../utils/passwordGenerator');
+const { isStudentPortalEnabled } = require('../config/features');
 
 router.get('/students', authenticate, authorize('admin', 'super_admin'), async (req, res) => {
   try {
+    if (!isStudentPortalEnabled()) {
+      return res.status(404).json({ success: false, message: 'Student password management is unavailable.' });
+    }
+
     const { search, grade_id, class_id } = req.query;
     
     let query = `
@@ -103,6 +108,9 @@ router.post('/reset/:userId', authenticate, authorize('admin', 'super_admin'), a
     if (user.role === 'super_admin' || user.role === 'admin') {
       return res.status(403).json({ success: false, message: 'Cannot reset admin passwords through this portal. Admins must reset their own passwords.' });
     }
+    if (user.role === 'student' && !isStudentPortalEnabled()) {
+      return res.status(403).json({ success: false, message: 'Student password management is unavailable.' });
+    }
 
     let newPassword;
     if (customPassword && customPassword.trim()) {
@@ -153,6 +161,7 @@ router.post('/bulk-reset', authenticate, authorize('admin', 'super_admin'), asyn
         const user = userResult.rows[0];
         
         if (user.role === 'super_admin' || user.role === 'admin') continue;
+        if (user.role === 'student' && !isStudentPortalEnabled()) continue;
 
         const newPassword = generatePasswordForUser();
         const hashedPassword = await bcrypt.hash(newPassword, parseInt(process.env.BCRYPT_ROUNDS) || 12);

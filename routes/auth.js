@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate } = require('../middleware/auth');
+const { isStudentPortalEnabled } = require('../config/features');
 
 const router = express.Router();
 
@@ -33,7 +34,12 @@ const generateToken = (user) => {
 };
 
 // Student login
-router.post('/login/student', loginLimiter, [
+router.post('/login/student', loginLimiter, (req, res, next) => {
+  if (!isStudentPortalEnabled()) {
+    return res.status(403).json({ message: 'Student Portal access is currently unavailable.' });
+  }
+  next();
+}, [
   body('student_number').notEmpty().withMessage('Student number is required'),
   body('password').notEmpty().withMessage('Password is required')
 ], async (req, res) => {

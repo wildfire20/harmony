@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import HashScroll from './HashScroll';
+import { useAppConfig } from '../../contexts/AppConfigContext';
 
 const HOME_IMAGE = '/images/homepage/';
 
@@ -60,6 +61,7 @@ const Check = () => (
 export const Header = () => {
   const [open, setOpen] = useState(false);
   const [portalOpen, setPortalOpen] = useState(false);
+  const { studentPortalEnabled } = useAppConfig();
 
   const closeMenu = () => setOpen(false);
   const closePortal = () => setPortalOpen(false);
@@ -112,7 +114,7 @@ export const Header = () => {
                 {portalOpen && (
                   <div role="menu" className="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl">
                     <p className="px-4 pt-4 pb-2 text-[10px] font-extrabold tracking-[0.14em] uppercase text-slate-400">Select your portal</p>
-                    <PortalLink to="/login?type=student" tone="emerald" title="Student Portal" description="Access assignments & quizzes" onClick={closePortal} />
+                     {studentPortalEnabled && <PortalLink to="/login?type=student" tone="emerald" title="Student Portal" description="Access assignments & quizzes" onClick={closePortal} />}
                     <PortalLink to="/parent/login" tone="blue" title="Parent Portal" description="Track your child's progress" onClick={closePortal} />
                     <PortalLink to="/login" tone="red" title="Staff Portal" description="Teachers & administration" onClick={closePortal} />
                   </div>
@@ -153,7 +155,7 @@ export const Header = () => {
               <div className="mt-2 px-1 pt-3 border-t border-slate-100">
                 <p className="px-2 pb-2 text-[10px] font-extrabold tracking-[0.14em] uppercase text-slate-400">Portal Login</p>
                 <div className="space-y-2">
-                  <MobilePortalLink to="/login?type=student" tone="emerald" title="Student Portal" description="Assignments & quizzes" onClick={closeMenu} />
+                   {studentPortalEnabled && <MobilePortalLink to="/login?type=student" tone="emerald" title="Student Portal" description="Assignments & quizzes" onClick={closeMenu} />}
                   <MobilePortalLink to="/parent/login" tone="blue" title="Parent Portal" description="Track your child's progress" onClick={closeMenu} />
                   <MobilePortalLink to="/login" tone="red" title="Staff Portal" description="Teachers & administration" onClick={closeMenu} />
                 </div>
@@ -727,8 +729,11 @@ const Field = ({ label, error, children, optional = false }) => (
   </label>
 );
 
-export const Footer = () => (
-  <footer className="bg-blue-950 text-white">
+export const Footer = () => {
+  const { studentPortalEnabled } = useAppConfig();
+
+  return (
+    <footer className="bg-blue-950 text-white">
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 grid md:grid-cols-[1.3fr_0.7fr_1fr] gap-10">
       <div>
         <div className="flex items-center gap-3">
@@ -747,7 +752,7 @@ export const Footer = () => (
           <li><Link to="/gallery" className="hover:text-white">Gallery</Link></li>
           <li><a href="#admissions" className="hover:text-white">Admissions</a></li>
           <li><Link to="/parent/login" className="hover:text-white">Parent Portal</Link></li>
-          <li><Link to="/login?type=student" className="hover:text-white">Student Portal</Link></li>
+          {studentPortalEnabled && <li><Link to="/login?type=student" className="hover:text-white">Student Portal</Link></li>}
            <li><Link to="/login" className="hover:text-white">Staff Portal</Link></li>
         </ul>
       </div>
@@ -771,8 +776,9 @@ export const Footer = () => (
         <a href="https://auto-m8.co.za/" target="_blank" rel="noopener noreferrer" className="hover:text-white">Powered by AutoM8</a>
       </div>
     </div>
-  </footer>
-);
+    </footer>
+  );
+};
 
 export const WhatsAppButton = () => (
   <a href="https://wa.me/27711679620" target="_blank" rel="noopener noreferrer" aria-label="Chat with Harmony Learning Institute on WhatsApp" className="fixed bottom-5 right-5 z-40 w-14 h-14 rounded-full bg-green-600 text-white shadow-lg hover:bg-green-700 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 transition flex items-center justify-center">

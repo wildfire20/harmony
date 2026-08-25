@@ -7,6 +7,7 @@ const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logAudit, getIp } = require('../utils/auditLogger');
 const { generateKidFriendlyPassword } = require('../utils/passwordGenerator');
+const { isStudentPortalEnabled } = require('../config/features');
 
 const router = express.Router();
 
@@ -75,7 +76,7 @@ router.post('/students/bulk', [
           const addedRow = result.rows[0];
           addedStudents.push({
             ...addedRow,
-            generated_password: temporaryPassword
+            ...(isStudentPortalEnabled() ? { generated_password: temporaryPassword } : {})
           });
 
           pendingAuditPayloads.push({
@@ -233,7 +234,7 @@ router.post('/students', [
     res.status(201).json({
       message: 'Student added successfully',
       student: newStudent,
-      generated_password: temporaryPassword
+      ...(isStudentPortalEnabled() ? { generated_password: temporaryPassword } : {})
     });
 
   } catch (error) {
@@ -622,6 +623,10 @@ router.get('/students/export-credentials', [
   authorize('admin', 'super_admin')
 ], async (req, res) => {
   try {
+    if (!isStudentPortalEnabled()) {
+      return res.status(404).json({ message: 'Student credential export is unavailable.' });
+    }
+
     const { grade_id, class_id } = req.query;
 
     let whereClause = "WHERE u.role = 'student'";

@@ -3,9 +3,11 @@ import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { passwordsAPI, adminAPI } from '../../services/api';
 import { Key, RefreshCw, Search, Users, GraduationCap, Copy, Check, AlertCircle } from 'lucide-react';
 import LoadingSpinner from '../common/LoadingSpinner';
+import { useAppConfig } from '../../contexts/AppConfigContext';
 
 const PasswordManagement = () => {
-  const [activeTab, setActiveTab] = useState('students');
+  const { studentPortalEnabled } = useAppConfig();
+  const [activeTab, setActiveTab] = useState(studentPortalEnabled ? 'students' : 'teachers');
   const [search, setSearch] = useState('');
   const [selectedGrade, setSelectedGrade] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
@@ -28,8 +30,8 @@ const PasswordManagement = () => {
         class_id: selectedClass || undefined 
       });
     },
-    { 
-      enabled: activeTab === 'students',
+     {
+       enabled: studentPortalEnabled && activeTab === 'students',
       onError: (error) => console.error('Student passwords error:', error)
     }
   );
@@ -157,7 +159,7 @@ const PasswordManagement = () => {
       </div>
 
       <div className="flex space-x-4">
-        <button
+         {studentPortalEnabled && <button
           onClick={() => { setActiveTab('students'); setSelectedUsers([]); setBulkResetResults(null); }}
           className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-colors ${
             activeTab === 'students'
@@ -167,7 +169,7 @@ const PasswordManagement = () => {
         >
           <GraduationCap className="h-5 w-5" />
           <span>Students</span>
-        </button>
+         </button>}
         <button
           onClick={() => { setActiveTab('teachers'); setSelectedUsers([]); setBulkResetResults(null); }}
           className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-colors ${

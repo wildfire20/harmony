@@ -16,6 +16,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
+  const [studentPortalBlocked, setStudentPortalBlocked] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -33,6 +34,10 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
     } catch (error) {
       console.error('Token verification failed:', error);
+      setStudentPortalBlocked(
+        error.response?.status === 403
+        && error.response?.data?.message === 'Student Portal access is currently unavailable.'
+      );
       localStorage.removeItem('token');
       setToken(null);
       setLoading(false);
@@ -47,6 +52,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('token', newToken);
       setToken(newToken);
       setUser(user);
+      setStudentPortalBlocked(false);
       
       toast.success(`Welcome back, ${user.first_name}!`);
       return { success: true };
@@ -66,6 +72,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.removeItem('token');
       setToken(null);
       setUser(null);
+      setStudentPortalBlocked(false);
       toast.success('Logged out successfully');
     }
   };
@@ -81,6 +88,7 @@ export const AuthProvider = ({ children }) => {
     login,
     logout,
     updateUser,
+    studentPortalBlocked,
     isAuthenticated: !!user,
     isStudent: user?.role === 'student',
     isTeacher: user?.role === 'teacher',

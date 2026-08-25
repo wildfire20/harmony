@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './components/common/ThemeProvider';
+import { AppConfigProvider, useAppConfig } from './contexts/AppConfigContext';
 
 // Components
 import Login from './components/auth/Login';
@@ -54,14 +55,23 @@ const queryClient = new QueryClient({
 
 // Protected Route Component
 const ProtectedRoute = ({ children, roles = [] }) => {
-  const { user, loading } = useAuth();
+  const { user, loading, studentPortalBlocked } = useAuth();
+  const { studentPortalEnabled } = useAppConfig();
 
   if (loading) {
     return <LoadingSpinner />;
   }
 
+  if (studentPortalBlocked) {
+    return <Navigate to="/login?type=student" replace />;
+  }
+
   if (!user) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (user.role === 'student' && !studentPortalEnabled) {
+    return <Navigate to="/" replace />;
   }
 
   if (roles.length > 0 && !roles.includes(user.role)) {
@@ -74,12 +84,13 @@ const ProtectedRoute = ({ children, roles = [] }) => {
 // Public Route Component (redirects to dashboard if logged in)
 const PublicRoute = ({ children }) => {
   const { user, loading } = useAuth();
+  const { studentPortalEnabled } = useAppConfig();
 
   if (loading) {
     return <LoadingSpinner />;
   }
 
-  if (user) {
+  if (user && !(user.role === 'student' && !studentPortalEnabled)) {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -89,12 +100,13 @@ const PublicRoute = ({ children }) => {
 // Landing Route - Shows landing for non-authenticated, dashboard redirect for authenticated
 const LandingRoute = () => {
   const { user, loading } = useAuth();
+  const { studentPortalEnabled } = useAppConfig();
 
   if (loading) {
     return <LoadingSpinner />;
   }
 
-  if (user) {
+  if (user && !(user.role === 'student' && !studentPortalEnabled)) {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -103,6 +115,12 @@ const LandingRoute = () => {
 
 // Main App Component
 const AppContent = () => {
+  const { configLoading } = useAppConfig();
+
+  if (configLoading) {
+    return <LoadingSpinner />;
+  }
+
   return (
     <Routes>
       <Route path="/" element={<LandingRoute />} />
@@ -202,12 +220,13 @@ const AppContent = () => {
 const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <ThemeProvider>
-          <Router>
-            <div className="min-h-screen">
-              <AppContent />
-              <Toaster
+      <AppConfigProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <Router>
+              <div className="min-h-screen">
+                <AppContent />
+                <Toaster
                 position="top-right"
                 toastOptions={{
                   duration: 4000,
@@ -233,11 +252,12 @@ const App = () => {
                     },
                   },
                 }}
-              />
-            </div>
-          </Router>
-        </ThemeProvider>
-      </AuthProvider>
+                />
+              </div>
+            </Router>
+          </ThemeProvider>
+        </AuthProvider>
+      </AppConfigProvider>
     </QueryClientProvider>
   );
 };

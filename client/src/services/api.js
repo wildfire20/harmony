@@ -15,6 +15,10 @@ const api = axios.create({
   withCredentials: true, // Include cookies for CORS
 });
 
+export const publicConfigAPI = {
+  get: () => api.get('/config/public'),
+};
+
 // Request interceptor to add token
 api.interceptors.request.use(
   (config) => {
