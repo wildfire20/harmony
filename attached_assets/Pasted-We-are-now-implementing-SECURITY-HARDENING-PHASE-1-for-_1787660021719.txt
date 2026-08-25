@@ -1,0 +1,485 @@
+We are now implementing SECURITY HARDENING PHASE 1 for the Harmony Learning Institute system.
+
+This is based on the technical audit you previously completed.
+
+IMPORTANT:
+This task is authorised to make code/configuration changes, but it must be a CONTROLLED SECURITY HARDENING deployment.
+
+DO NOT decommission the Student Portal yet.
+
+DO NOT:
+- delete student users
+- archive active students
+- set active learners is_active = false
+- change student roles
+- change learner IDs
+- change grade/class relationships
+- modify parent_students relationships
+- remove Student Portal routes yet
+- alter fee, attendance, parent, staff or admin business logic unless necessary for security
+- make destructive database changes
+
+The goal of this deployment is to address the HIGH-PRIORITY SECURITY findings from the previous audit BEFORE we disable learner login access.
+
+==================================================
+1. CREATE A SAFE BASELINE FIRST
+==================================================
+
+Before making changes:
+
+1. Confirm the current production/development branch and working state.
+2. Create a Git commit/snapshot representing the current known-good version.
+3. Record current database schema/migrations related to:
+   - users
+   - parent_otps
+   - authentication
+4. Do not modify learner data during this task.
+
+At the end, report the rollback commit/version.
+
+==================================================
+2. SECURE PUBLIC DEBUG / DATABASE ROUTES
+==================================================
+
+The previous audit identified:
+
+POST /api/debug/run-sql
+GET /api/debug/check-schema
+
+and a migration route similar to:
+
+/run-migration-once?key=...
+
+These must NOT remain publicly usable in production.
+
+Inspect the exact implementation first.
+
+Preferred behaviour:
+
+PRODUCTION:
+- debug SQL execution endpoints must be completely unavailable
+- schema inspection endpoints must not expose database structure publicly
+- HTTP migration endpoints must not execute migrations through public requests
+- hard-coded query-string migration secrets must be removed
+
+DEVELOPMENT:
+- if debug tooling is genuinely useful locally, it may remain available only in a safe development environment
+- it must never be reachable in production
+
+Do not replace one weak hard-coded secret with another weak secret.
+
+If a maintenance function is still genuinely required, use an authenticated super-admin/internal mechanism rather than a public query-string key.
+
+Return appropriate 404/403 behaviour without revealing sensitive database information.
+
+==================================================
+3. REMOVE PLAINTEXT / DISPLAY PASSWORD STORAGE
+==================================================
+
+The audit identified routes/passwords.js and display_password behaviour.
+
+Inspect all places where passwords are:
+
+- stored
+- generated
+- returned
+- displayed
+- logged
+- reset
+- bulk reset
+
+Passwords must remain bcrypt hashed for authentication.
+
+STOP storing reusable plaintext/display passwords.
+
+Do not expose existing passwords to admins, students, teachers or parents.
+
+If the system needs an admin-created temporary password:
+
+- generate a strong random temporary password
+- display/return it only once at creation/reset time if required by the existing workflow
+- never store the plaintext version
+- store only its bcrypt hash
+- never log it
+- never include it in later API responses
+
+Where practical, add a mechanism requiring the user to change a temporary password after first login.
+
+IMPORTANT:
+Do not break Admin's ability to create/reset accounts.
+
+If implementing forced password change would require a large architectural change, do NOT attempt a risky rewrite. Instead:
+- remove persistent plaintext password storage now
+- document forced-password-change as a separate follow-up task
+
+Remove or safely migrate obsolete display_password functionality.
+
+Do not delete historical database columns destructively unless clearly safe.
+An unused legacy column can remain temporarily if removing it risks production stability.
+
+==================================================
+4. REMOVE PREDICTABLE STUDENT PASSWORD GENERATION
+==================================================
+
+The previous audit found evidence that learner initial passwords may be predictable, possibly based on student numbers.
+
+Inspect the real implementation.
+
+For any NEW password generation:
+
+Use cryptographically secure random generation.
+
+Use Node's crypto APIs, not Math.random().
+
+Do NOT derive passwords from:
+- student number
+- birth date
+- name
+- phone number
+- sequential IDs
+- other predictable learner information
+
+Do not bulk reset existing accounts during this deployment unless absolutely necessary.
+
+Existing learner authentication will be retired in the next phase anyway.
+
+==================================================
+5. HARDEN JWT AUTHENTICATION
+==================================================
+
+Inspect the JWT implementation carefully before modifying it.
+
+The audit found:
+- token lifetime may default to one year
+- tokens may be accepted through query parameters
+- logout is client-side only
+- no revocation store was found
+
+Implement the safest low-risk improvements possible.
+
+A. STOP accepting authentication JWTs through URL/query parameters.
+
+Authentication tokens should be accepted through the existing Authorization Bearer mechanism or another established secure transport already used by the application.
+
+Do not put JWTs in URLs.
+
+B. Review JWT expiry.
+
+If the system currently falls back to a one-year expiry when configuration is missing, replace that fallback with a significantly shorter sensible production default.
+
+Prefer an environment-configurable setting such as:
+
+JWT_EXPIRES_IN
+
+Use a conservative default such as 12h or 24h if no value is configured.
+
+Document the chosen value.
+
+Do NOT hard-code a new secret.
+
+JWT signing secret must remain an environment variable.
+
+C. Do not build a complicated token revocation service in this deployment unless necessary.
+
+The Student Portal retirement phase will separately address existing student sessions.
+
+D. Make sure Admin, Staff and Parent login still work after these changes.
+
+==================================================
+6. HARDEN PARENT OTP
+==================================================
+
+The audit identified:
+
+- OTP generation using Math.random()
+- plaintext OTP storage
+- no visible attempt throttle
+- possible development fallback exposing OTP
+
+Fix this carefully without breaking Parent password reset.
+
+A. OTP GENERATION
+
+Use Node's crypto module.
+
+Generate OTP values cryptographically securely.
+
+Example concept:
+crypto.randomInt(...)
+
+Do NOT use Math.random().
+
+B. OTP STORAGE
+
+Do not store OTP values in plaintext.
+
+Store a hash of the OTP.
+
+When the parent enters an OTP:
+- hash/verify securely
+- compare against the stored value
+- never expose the stored hash
+
+C. OTP EXPIRATION
+
+Ensure OTPs have a short expiration period.
+
+If an existing appropriate expiry exists, preserve it.
+
+If not, use a reasonable short expiry such as approximately 10 minutes.
+
+D. ATTEMPT LIMITING
+
+Introduce reasonable limits against OTP guessing.
+
+For example:
+- limit verification attempts per OTP/request
+- invalidate after repeated failures
+- rate limit OTP requests by phone/account/IP where practical
+
+Do not implement limits so aggressively that normal parents are locked out unnecessarily.
+
+E. GENERIC RESPONSES
+
+Avoid revealing whether a specific parent/mobile number exists where possible.
+
+F. DEVELOPMENT FALLBACK
+
+OTP values must NEVER be returned to the browser/client or included in API responses in production.
+
+Do not log OTP codes in production.
+
+Any development-only testing behaviour must be strictly gated by NODE_ENV !== 'production'.
+
+==================================================
+7. SECURITY HEADERS / BASIC API HARDENING
+==================================================
+
+Inspect whether Express already uses appropriate middleware.
+
+If not already configured, safely add or improve:
+
+- helmet or equivalent HTTP security headers
+- sensible request body size limits
+- CORS configuration appropriate to Harmony's real frontend domains
+- rate limiting for authentication endpoints
+- rate limiting for OTP/reset endpoints
+
+DO NOT accidentally block the deployed Harmony frontend.
+
+Do not set wildcard production CORS unnecessarily.
+
+If Railway/reverse proxy behaviour must be considered, account for it correctly.
+
+==================================================
+8. PROTECT SENSITIVE INFORMATION
+==================================================
+
+Search the repository for accidentally committed:
+
+- API keys
+- JWT secrets
+- AWS keys
+- Gmail credentials
+- Twilio credentials
+- database passwords
+- migration keys
+- private tokens
+
+DO NOT print those secrets in the final report.
+
+If actual credentials appear hard-coded:
+
+- replace their use with environment variables
+- report the VARIABLE NAME only
+- state that the real credential should be rotated
+
+Do not expose secret values in output.
+
+Review .gitignore and environment handling.
+
+Ensure .env files and secret files are not committed.
+
+==================================================
+9. AWS WARNING
+==================================================
+
+The audit identified missing AWS_ACCESS_KEY_ID.
+
+Do NOT configure fake AWS credentials.
+
+Do NOT disable parent/staff document workflows merely because AWS is unavailable.
+
+Instead:
+
+- inspect the existing fallback behaviour
+- confirm the application continues safely using whatever current supported storage path exists
+- report which functionality requires S3
+- clearly state what Railway environment variables will eventually need configuration
+
+Do not expose AWS credentials.
+
+==================================================
+10. DO NOT YET DECOMMISSION STUDENT LOGIN
+==================================================
+
+This security deployment must leave Student Portal behaviour unchanged except where general security improvements affect all authentication consistently.
+
+Do NOT yet add the planned student authentication eligibility flag.
+
+Do NOT hide Student Portal navigation yet.
+
+Do NOT remove StudentDashboard.
+
+Do NOT remove student APIs.
+
+We will perform that as SECURITY/PORTAL PHASE 2 after verifying this deployment.
+
+==================================================
+11. REGRESSION TEST EVERYTHING
+==================================================
+
+After implementation, test:
+
+PUBLIC WEBSITE
+- homepage
+- fees
+- admissions
+- enrolment submission
+- gallery
+- social links
+
+ADMIN
+- login
+- dashboard
+- learner search
+- learner view
+- learner create/edit
+- parent linking
+- classes
+- grades
+- attendance
+- invoices
+- fees
+- reports
+- password reset/account management
+
+STAFF
+- staff login
+- class lists
+- learner access
+- attendance
+- tasks
+- grades
+- documents
+
+PARENT
+- parent login
+- parent password reset
+- OTP flow
+- linked children
+- attendance
+- results
+- fees
+- invoices
+- documents
+- notices
+- payment proofs
+
+STUDENT
+For now:
+- existing student login should still function
+- dashboard should still function
+- existing student routes should remain available
+
+AUTHENTICATION
+- invalid JWT rejected
+- expired JWT rejected
+- JWT query parameter no longer accepted
+- Authorization Bearer token still works
+- role protections still work
+- production debug endpoints unavailable
+
+DATABASE
+- no learner IDs changed
+- no learner roles changed
+- no is_active changes
+- no parent links removed
+- no attendance records affected
+- no financial records affected
+
+==================================================
+12. DO A PRODUCTION-SAFETY REVIEW
+==================================================
+
+Before declaring success, search the project again for:
+
+run-sql
+check-schema
+run-migration
+display_password
+Math.random
+JWT query token handling
+console.log containing passwords/OTP/tokens
+hard-coded secrets
+
+Explain what remains and why.
+
+==================================================
+13. FINAL REPORT
+==================================================
+
+Return a report with:
+
+1. Executive Summary
+
+2. Backup / rollback version created
+
+3. Security vulnerabilities fixed
+
+4. Debug/migration endpoint changes
+
+5. Password handling changes
+
+6. JWT changes
+
+7. Parent OTP changes
+
+8. Rate limiting/security middleware changes
+
+9. Secrets/environment-variable findings
+
+10. AWS/storage findings
+
+11. Files changed
+
+12. Database/schema changes, if any
+
+13. Regression tests performed
+
+14. Tests passed
+
+15. Tests failed or requiring manual confirmation
+
+16. Anything deliberately NOT changed
+
+17. Production environment variables requiring attention
+   - give variable names ONLY
+   - NEVER output secret values
+
+18. Security risks still remaining
+
+19. Recommended next actions
+
+20. Final verdict:
+
+SAFE TO DEPLOY SECURITY HARDENING:
+YES / NO / WITH MANUAL ACTION REQUIRED
+
+If manual action is required, explain exactly what I need to do.
+
+IMPORTANT FINAL INSTRUCTION:
+
+Do not begin Student Portal decommissioning during this task.
+
+Complete and test the security-hardening deployment first.
