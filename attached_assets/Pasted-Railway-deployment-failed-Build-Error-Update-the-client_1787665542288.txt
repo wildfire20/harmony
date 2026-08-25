@@ -1,0 +1,32 @@
+Railway deployment failed — Build Error
+
+Update the client/package-lock.json file so it does not reference an internal Replit npm proxy, since that registry is unreachable from Railway's build environment. The build failed while running npm ci inside the client directory because npm tried to fetch react-router-dom from http://package-firewall.replit.local, an internal Replit-only host, resulting in an ENOTFOUND error and exit code 1.
+
+Repository: https://github.com/wildfire20/harmony
+Branch: master · Commit: 964754f — Finalize production security readiness
+Deployment ID: 79565185-e794-4ddb-84e2-2cb3f19e0e90
+Service ID: 9ede4dd3-f526-4ce2-80d9-c79200a4e160
+Environment ID: 2fa833f5-7fd8-46f6-bb44-a5f075dade27
+
+---
+
+## Problem
+The deployment (id 79565185-e794-4ddb-84e2-2cb3f19e0e90, service 'web', REPO type, builder NIXPACKS) failed at the BUILD_IMAGE stage. Build logs show:
+```
+[6/8] RUN cd client && npm ci --legacy-peer-deps --registry=https://registry.npmjs.org/
+npm error code ENOTFOUND
+npm error network request to http://package-firewall.replit.local/npm/react-router-dom/-/react-router-dom-6.30.6.tgz failed, reason: getaddrinfo ENOTFOUND package-firewall.replit.local
+Build Failed: build daemon returned an error < failed to solve: process "/bin/sh -c cd client && npm ci --legacy-peer-deps --registry=https://registry.npmjs.org/" did not complete successfully: exit code: 1 >
+```
+The SNAPSHOT_CODE step completed successfully; the failure occurs entirely during the client dependency install step of the Docker build (Dockerfile at repo root, and an equivalent nixpacks.toml also exists).
+
+## Diagnosis
+`npm ci` resolves and downloads packages using the exact `resolved` URLs stored inside package-lock.json, ignoring the `--registry` flag when those URLs are already present in the lockfile. The checked-in `client/package-lock.json` contains resolved URLs pointing at `http://package-firewall.replit.local`, an internal-only host used by Replit's own npm proxy during development. This host is not reachable from Railway's build environment, so `getaddrinfo` fails with ENOTFOUND. Both the Dockerfile and nixpacks.toml in the repo already contain a comment acknowledging this: "the checked-in lockfile contains Replit-internal package URLs that are not reachable from Railway," confirming the maintainers were aware of the problem but the lockfile itself was never regenerated to point at the public registry. This is a code/dependency issue baked into the repo, not a transient infra problem or a Railway config issue.
+
+## Fix
+1. File: `client/package-lock.json` (sha b079249b67f9985089189c25bd0b1d3f92438a20)
+   - Current: This lockfile's `resolved` fields point to the internal Replit proxy host (`package-firewall.replit.local`) instead of the public npm registry for at least the react-router-dom package (and potentially other packages installed while the Replit proxy was active).
+   - Replacement: Regenerate the lockfile from a clean environment using the public registry, e.g. run `cd client && rm -f package-lock.json && npm install --registry=https://registry.npmjs.org/` (or `npm install --package-lock-only --registry=https://registry.npmjs.org/`), then commit the resulting `package-lock.json` which will have all `resolved` fields pointing at `https://registry.npmjs.org/...`.
+   - Why: This directly removes all references to the unreachable internal host, allowing `npm ci` to fetch every package from the public registry during the Railway build, matching what the Dockerfile author intended.
+
+Note: Regenerating a lockfile requires running an npm command and cannot be done as a pure text edit, so this fix is not auto-fixable via file edits alone.
