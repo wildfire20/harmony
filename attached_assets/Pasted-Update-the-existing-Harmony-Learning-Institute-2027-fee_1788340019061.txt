@@ -1,0 +1,374 @@
+Update the existing Harmony Learning Institute 2027 fees, admissions information and fee estimator using the NEW verified information below.
+
+IMPORTANT:
+This information comes directly from Harmony management and supersedes earlier partial fee information where there is a conflict.
+
+Do NOT redesign the website.
+Do NOT change Parent, Staff, Admin or authentication functionality.
+Do NOT touch learner records or database relationships.
+
+========================
+VERIFIED 2027 FEES
+========================
+
+Baby Class (0–2 years):
+R1,900 per month
+
+Toddlers to Grade R (3–6 years):
+R1,850 per month
+
+Grades 1–7:
+R2,350 per month
+
+Registration:
+Baby Class through Grade R:
+R650
+
+Grades 1–7:
+R800
+
+Re-registration:
+Grades 1–7:
+R500
+
+Do not invent a Baby–Grade R re-registration fee because it was not provided.
+
+Boarding:
+
+Baby Class through Grade R:
+R3,650 per month
+
+Grades 1–7:
+R3,950 per month
+
+IMPORTANT:
+Boarding fees INCLUDE:
+- school fees
+- boarding fees
+- aftercare
+
+Therefore:
+DO NOT add normal tuition or aftercare on top of boarding.
+
+Transport:
+R650 per month
+
+Transport currently applies only to:
+- Onverwacht
+- Kotas
+
+Do not claim transport is available outside these areas.
+
+Saturday Classes:
+Free for currently enrolled Harmony learners.
+
+========================
+PAYMENT OPTIONS
+========================
+
+School fees are payable monthly from January to December.
+
+Verified payment discounts:
+
+Half-year upfront:
+50% discount on the 6th month's fee.
+
+Full-year upfront:
+100% discount on the 12th month's fee.
+
+Sibling discount:
+Harmony has confirmed a R150 discount per learner when more than one learner from the same family attends.
+
+IMPORTANT:
+The source does not clearly state whether the sibling discount is monthly or once-off.
+
+Therefore DO NOT automatically calculate the sibling discount yet.
+
+Show it as:
+
+"Sibling discount available: R150 per learner. Please confirm with Harmony how this discount is applied."
+
+========================
+ADMISSION REQUIREMENTS
+========================
+
+For Baby Class through Grade 7:
+
+- Copy of learner birth certificate
+- Copies of Parent/Guardian ID
+- Road to Health / Clinic Card
+
+For Grades 1–7 additionally:
+
+- Latest school progress report
+- Transfer from previous school
+
+Create a clear admissions checklist.
+
+Do not invent any other requirements.
+
+========================
+BOARDING REQUIREMENTS
+========================
+
+Use the same currently verified documentation list:
+
+Baby Class through Grade 7:
+
+- Copy of birth certificate
+- Parent/Guardian ID copies
+- Road to Health / Clinic Card
+
+Grades 1–7 additionally:
+
+- Latest school progress report
+- Transfer from previous school
+
+Do not invent clothing lists, medical rules, collection times or boarding policies.
+
+========================
+BANKING DETAILS
+========================
+
+Harmony has authorised the following banking information for public display:
+
+Bank:
+FNB / First National Bank
+
+Account Holder:
+Harmony Learning Institute
+
+Account Number:
+63035320265
+
+Branch Code:
+250655
+
+The reference supplied by management was:
+
+HAR***
+
+This reference format is not sufficiently clear.
+
+DO NOT invent or expand it.
+
+For now either:
+- omit the reference field from the public website, OR
+- display "Payment reference: Please confirm with Harmony"
+
+Do not expose any additional banking information.
+
+========================
+2027 ADMISSIONS
+========================
+
+2027 admissions are open.
+
+Keep the strong existing 2027 Admissions calls to action.
+
+========================
+FEE ESTIMATOR UPDATE
+========================
+
+Update the existing 2027 Fee Estimator.
+
+Learner category:
+
+- Baby Class (0–2)
+- Toddlers / Preschool (3–6)
+- Grade R
+- Grades 1–7
+
+Base monthly fees:
+
+Baby Class:
+R1,900
+
+Toddlers / Preschool:
+R1,850
+
+Grade R:
+R1,850
+
+Grades 1–7:
+R2,350
+
+Boarding:
+
+If selected for Baby Class / Toddlers / Grade R:
+monthly total becomes R3,650.
+
+If selected for Grades 1–7:
+monthly total becomes R3,950.
+
+Because boarding includes tuition and aftercare:
+
+DO NOT add base tuition again.
+DO NOT add aftercare again.
+
+If boarding is selected, hide or disable the normal aftercare add-on and explain:
+
+"Aftercare is already included in the boarding fee."
+
+Transport:
+
+Allow:
+- No transport
+- Onverwacht
+- Kotas
+
+If Onverwacht or Kotas selected:
+add R650/month.
+
+Do not allow other routes to be priced.
+
+Registration:
+
+Baby–Grade R:
+R650 for new applicants.
+
+Grades 1–7:
+R800 for new applicants.
+
+Returning Grades 1–7:
+R500 re-registration.
+
+Do not invent Baby–Grade R re-registration pricing.
+
+========================
+UPFRONT PAYMENT ESTIMATES
+========================
+
+Add an optional payment-plan section.
+
+Monthly:
+normal monthly pricing Jan–Dec.
+
+6 months upfront:
+calculate the first six months with 50% off month 6.
+
+12 months upfront:
+calculate twelve months with month 12 free.
+
+Clearly label:
+
+"Estimated payment amount based on Harmony's published 2027 discount structure."
+
+Do not automatically apply the sibling discount.
+
+========================
+FEES PAGE
+========================
+
+Update /fees so that it clearly presents:
+
+Early Learning
+- Baby Class
+- Toddlers / Preschool
+- Grade R
+
+Primary School
+- Grades 1–7
+
+Boarding
+
+Transport
+
+Registration
+
+Payment Discounts
+
+Sibling Discount
+
+Saturday Classes
+
+Admission Requirements
+
+Use the existing professional Harmony design.
+
+========================
+FAQ UPDATE
+========================
+
+Add/update FAQ questions such as:
+
+How much is Baby Class?
+R1,900/month.
+
+How much are Toddlers and Grade R?
+R1,850/month.
+
+How much are Grades 1–7?
+R2,350/month.
+
+How much is boarding?
+R3,650 for Baby–Grade R and R3,950 for Grades 1–7.
+
+Does boarding include tuition?
+Yes. Boarding includes school fees and aftercare.
+
+How much is transport?
+R650/month.
+
+Where is transport currently available?
+Onverwacht and Kotas.
+
+Are Saturday classes charged separately?
+No. Saturday classes are free for enrolled Harmony learners.
+
+Are sibling discounts available?
+Yes. Harmony offers a R150 discount per learner for families with more than one learner enrolled. Contact the school to confirm how it is applied.
+
+What documents are required?
+Use the verified checklist supplied above.
+
+========================
+DATA SOURCE
+========================
+
+Update the shared 2027 fees data/config source rather than hardcoding these values in multiple components.
+
+This should remain the source of truth for:
+- Fees page
+- Fee Estimator
+- Admissions FAQ
+- future Harmony AI Assistant
+
+========================
+MEDIA
+========================
+
+Harmony management said additional photos can be obtained from Donell.
+
+Do not add placeholders or stock photos.
+
+Keep the current strongest school photos until new verified media is supplied.
+
+========================
+TESTING
+========================
+
+Test:
+
+- Baby fee calculation
+- Preschool fee calculation
+- Grade R calculation
+- Grade 1–7 calculation
+- Baby boarding
+- Grade R boarding
+- Grade 1–7 boarding
+- boarding does not double-charge tuition
+- boarding does not double-charge aftercare
+- Onverwacht transport adds R650
+- Kotas transport adds R650
+- 6-month upfront discount
+- 12-month upfront discount
+- registration logic
+- no unverified re-registration amount
+- no sibling discount auto-calculation
+
+Run production build.
+
+Do not change any school-management portal functionality.
+
+Return a concise implementation report when complete.

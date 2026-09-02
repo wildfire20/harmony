@@ -11,6 +11,7 @@
     "build": "npm run install-client && npm run build-client",
     "build-client": "cd client && npm run build",
     "test:security": "node --test tests/security-phase1.test.js tests/student-portal-retirement.test.js",
+    "test:fees": "cd client && CI=true npm test -- --watchAll=false --runTestsByPath src/data/fees2027.test.js",
     "install-client": "cd client && npm install",
     "heroku-postbuild": "npm run build",
     "railway-build": "npm run install-client && npm run build-client",

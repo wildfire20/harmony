@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import HashScroll from './HashScroll';
 import { useAppConfig } from '../../contexts/AppConfigContext';
+import { ADMISSIONS_FAQS_2027 } from '../../data/fees2027';
 
 const HOME_IMAGE = '/images/homepage/';
 
@@ -513,16 +514,7 @@ const MediaShowcase = () => (
 );
 
 const AdmissionsGuide = () => {
-  const faqs = [
-    ['When are 2027 applications open?', '2027 admissions are currently open.'],
-    ['How much are Grade R fees?', 'Grade R fees are R1,850 per month for 2027.'],
-    ['How much are Grades 1–7?', 'Grades 1–7 fees are R2,350 per month for 2027.'],
-    ['Does boarding include school fees?', 'Yes. The published 2027 boarding amounts include school fees.'],
-    ['How much is aftercare?', 'Aftercare is R550 per month.'],
-    ['Are there registration fees?', 'New applicants pay a non-refundable R800 registration fee. Re-registration for existing learners is R500.'],
-    ['How are fees paid?', 'The published fee structure states that fees are payable over 12 months, January through December. Annual payment in advance qualifies for a one-month fee discount; contact the school for the confirmed annual amount.'],
-    ['Does Harmony offer transport?', 'Please contact Harmony regarding transport routes, availability and pricing. Transport pricing depends on the route and availability.'],
-  ];
+  const faqs = ADMISSIONS_FAQS_2027;
 
   return (
     <section id="admissions" className="scroll-mt-28 py-20 sm:py-28 bg-white">
