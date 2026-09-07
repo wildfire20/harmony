@@ -13,6 +13,15 @@ test('admissions migration is additive and preserves legacy statuses', () => {
   assert.match(migration, /CREATE TABLE IF NOT EXISTS enrollment_status_history/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS admissions_email_log/);
   assert.match(migration, /registration_token_hash CHAR\(64\)/);
+  assert.match(migration, /SET LOCAL lock_timeout = '5s'/);
+  assert.match(migration, /SET LOCAL statement_timeout = '60s'/);
+  assert.match(migration, /ALTER TABLE enrollments ALTER COLUMN status SET DEFAULT 'pending'/);
+  assert.match(migration, /WHERE application_reference IS NULL/);
+  assert.match(migration, /ROW_NUMBER\(\) OVER \(ORDER BY created_at NULLS LAST, id\)/);
+  assert.match(migration, /SELECT setval\(/);
+  assert.match(migration, /GREATEST\(highest_reference\.highest_number \+ 1, current_sequence\.next_number, 1\)/);
+  assert.match(migration, /CASE WHEN is_called THEN last_value \+ 1 ELSE last_value END/);
+  assert.match(migration, /admissions_migration_id_snapshot/);
   assert.doesNotMatch(migration, /\b(?:DELETE FROM|TRUNCATE|DROP TABLE)\b/i);
   for (const legacy of ['pending', 'approved', 'rejected', 'waitlisted']) {
     assert.match(migration, new RegExp(`'${legacy}'`));
@@ -24,6 +33,10 @@ test('release has an explicit migration command and schema readiness guard', () 
   const route = read('routes/enrollments.js');
   assert.match(script, /admissions_management_phase\.sql/);
   assert.match(script, /Admissions migration applied and verified/);
+  assert.match(script, /null_references/);
+  assert.match(script, /duplicate_references/);
+  assert.match(script, /next_sequence_is_safe/);
+  assert.match(script, /statusDefault: 'pending'/);
   assert.match(route, /requireAdmissionsSchema/);
   assert.match(route, /res\.status\(503\)/);
 });

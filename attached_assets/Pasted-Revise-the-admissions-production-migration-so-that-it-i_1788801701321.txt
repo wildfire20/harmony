@@ -1,0 +1,268 @@
+Revise the admissions production migration so that it is SAFE and BACKWARDS-COMPATIBLE with the currently deployed Harmony application.
+
+Do NOT run the production migration yet.
+
+The previous migration-safety review identified two issues:
+
+1. Existing applications are not backfilled with application references.
+2. Changing the enrollments.status default from `pending` to `NEW` before the new application code is deployed creates a compatibility gap.
+
+Fix these issues.
+
+==================================================
+1. KEEP THE CURRENT STATUS DEFAULT DURING MIGRATION
+==================================================
+
+The production migration must NOT change the database default from:
+
+pending
+
+to:
+
+NEW
+
+during the schema migration.
+
+Keep the existing default:
+
+pending
+
+The new admissions backend, once deployed, should explicitly insert:
+
+NEW
+
+for new applications.
+
+Do not rely on the database default for new controlled admissions statuses.
+
+This ensures that if the schema migration runs before the new code is deployed, the currently deployed application continues behaving normally.
+
+==================================================
+2. ALLOW BOTH LEGACY AND NEW STATUSES
+==================================================
+
+The status constraint should safely allow BOTH:
+
+LEGACY:
+- pending
+- approved
+- rejected
+- waitlisted
+
+NEW:
+- NEW
+- UNDER_REVIEW
+- MORE_INFORMATION_REQUIRED
+- APPROVED
+- REGISTRATION_PENDING
+- REGISTERED
+- NOT_ACCEPTED
+
+Do NOT rewrite existing legacy application statuses during the migration.
+
+Existing records should remain exactly as they are.
+
+The new Admin interface can continue displaying legacy statuses appropriately until they are intentionally transitioned.
+
+==================================================
+3. BACKFILL APPLICATION REFERENCES
+==================================================
+
+Existing applications must receive proper unique references.
+
+Backfill historical applications safely using the existing PostgreSQL sequence.
+
+Preferred format:
+
+HLI-2027-0001
+HLI-2027-0002
+etc.
+
+Requirements:
+
+- Never overwrite a valid existing application_reference.
+- Only assign references where application_reference IS NULL or empty.
+- Backfill in a stable order such as application ID / created_at.
+- Ensure every assigned reference is unique.
+- Preserve existing application IDs.
+- Do not renumber any record that already has a valid reference.
+
+After backfill, align the sequence so the next new application receives a number greater than every existing assigned reference.
+
+Example:
+
+Existing references:
+HLI-2027-0001
+HLI-2027-0002
+HLI-2027-0003
+
+Next generated application:
+HLI-2027-0004
+
+Do not risk duplicate sequence values.
+
+==================================================
+4. MAKE BACKFILL IDEMPOTENT
+==================================================
+
+Running the migration more than once must not:
+
+- generate new references for records that already have references;
+- create duplicate references;
+- reset the sequence;
+- duplicate tables;
+- duplicate indexes;
+- duplicate status-history records;
+- overwrite existing statuses.
+
+After every run, verify reference coverage and uniqueness.
+
+==================================================
+5. ADD MIGRATION VERIFICATION
+==================================================
+
+After migration, automatically verify:
+
+- total application count;
+- number of applications with NULL references;
+- number of duplicate application references;
+- highest assigned application reference;
+- next sequence value is safe;
+- current status counts;
+- existing application IDs unchanged.
+
+Expected:
+
+NULL references = 0
+duplicate references = 0
+
+Do not expose private application details in logs.
+
+==================================================
+6. NEW BACKEND INSERT BEHAVIOR
+==================================================
+
+Update the new admissions backend so that once the new code is deployed:
+
+New application inserts explicitly set:
+
+status = 'NEW'
+
+Do not depend on the database default.
+
+This allows the database default to remain `pending` for backward compatibility during rollout.
+
+==================================================
+7. CURRENT CODE COMPATIBILITY
+==================================================
+
+Confirm that after the revised migration but BEFORE deploying the new admissions code:
+
+- existing applications remain readable;
+- new applications submitted through the OLD live website still receive `pending`;
+- old Admin pending filters continue working;
+- old approval/rejection actions continue working;
+- Parent/Staff/Admin authentication remains unaffected.
+
+The migration should be safe to leave in place for a short period before code deployment.
+
+==================================================
+8. NEW CODE COMPATIBILITY
+==================================================
+
+Confirm that after deploying the new admissions code:
+
+- new applications receive NEW explicitly;
+- historical legacy statuses remain visible;
+- Admin can intentionally move legacy applications into the controlled workflow;
+- new references work for both historical and new applications;
+- confirmation and status email logic works.
+
+==================================================
+9. LOCKING / TIMEOUT SAFETY
+==================================================
+
+Keep the migration transactional.
+
+Use conservative lock_timeout and statement_timeout values so the migration aborts rather than blocking production indefinitely.
+
+If a lock cannot be obtained safely:
+
+ROLL BACK THE TRANSACTION.
+
+Do not leave a partially migrated schema.
+
+==================================================
+10. ROLLBACK SIMPLIFICATION
+==================================================
+
+The purpose of this revision is to make the schema migration itself backward-compatible.
+
+After the revised migration:
+
+If the new application deployment fails before controlled statuses are used, rolling back the application code should NOT require an immediate database rollback.
+
+Document the remaining rollback requirement only for cases where records have already been transitioned into new controlled statuses.
+
+Do not drop additive admissions columns/tables during normal rollback.
+
+==================================================
+11. PRODUCTION ROLLOUT PLAN
+==================================================
+
+Return an exact recommended order.
+
+Preferred structure:
+
+1. Verify production database backup/recovery.
+2. Run revised backwards-compatible admissions migration.
+3. Verify migration.
+4. Confirm existing production application still works.
+5. Deploy new admissions code.
+6. Verify homepage/Admin/application routes.
+7. Submit one authorised real test application.
+8. Confirm HLI reference.
+9. Confirm parent confirmation email.
+10. Confirm internal Admin email.
+11. Admin changes New → Under Review.
+12. Confirm parent status email.
+13. Admin changes Under Review → Approved.
+14. Confirm approval email.
+15. Verify Parent/Staff/Admin portals again.
+
+==================================================
+12. DO NOT ADD NEW FEATURES
+==================================================
+
+Do not start:
+
+- registration portal;
+- document uploads;
+- AI;
+- Zapier;
+- WhatsApp;
+- Parent app changes.
+
+Only make the migration and deployment compatibility fixes described above.
+
+==================================================
+13. FINAL REPORT
+==================================================
+
+Return:
+
+1. Revised migration behavior
+2. Historical reference backfill behavior
+3. Sequence alignment behavior
+4. Legacy/new status compatibility
+5. Idempotency verification
+6. Locking/timeouts
+7. Old-code compatibility after migration
+8. New-code compatibility
+9. Rollback behavior
+10. Automated tests
+11. Exact production deployment order
+12. Final verdict:
+
+SAFE TO MIGRATE BEFORE CODE DEPLOYMENT:
+YES / NO
