@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import HashScroll from './HashScroll';
-import { useAppConfig } from '../../contexts/AppConfigContext';
 import { ADMISSIONS_FAQS_2027 } from '../../data/fees2027';
 
 const HOME_IMAGE = '/images/homepage/';
@@ -62,7 +61,6 @@ const Check = () => (
 export const Header = () => {
   const [open, setOpen] = useState(false);
   const [portalOpen, setPortalOpen] = useState(false);
-  const { studentPortalEnabled } = useAppConfig();
 
   const closeMenu = () => setOpen(false);
   const closePortal = () => setPortalOpen(false);
@@ -115,7 +113,6 @@ export const Header = () => {
                 {portalOpen && (
                   <div role="menu" className="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl">
                     <p className="px-4 pt-4 pb-2 text-[10px] font-extrabold tracking-[0.14em] uppercase text-slate-400">Select your portal</p>
-                     {studentPortalEnabled && <PortalLink to="/login?type=student" tone="emerald" title="Student Portal" description="Access assignments & quizzes" onClick={closePortal} />}
                     <PortalLink to="/parent/login" tone="blue" title="Parent Portal" description="Track your child's progress" onClick={closePortal} />
                     <PortalLink to="/login" tone="red" title="Staff Portal" description="Teachers & administration" onClick={closePortal} />
                   </div>
@@ -156,7 +153,6 @@ export const Header = () => {
               <div className="mt-2 px-1 pt-3 border-t border-slate-100">
                 <p className="px-2 pb-2 text-[10px] font-extrabold tracking-[0.14em] uppercase text-slate-400">Portal Login</p>
                 <div className="space-y-2">
-                   {studentPortalEnabled && <MobilePortalLink to="/login?type=student" tone="emerald" title="Student Portal" description="Assignments & quizzes" onClick={closeMenu} />}
                   <MobilePortalLink to="/parent/login" tone="blue" title="Parent Portal" description="Track your child's progress" onClick={closeMenu} />
                   <MobilePortalLink to="/login" tone="red" title="Staff Portal" description="Teachers & administration" onClick={closeMenu} />
                 </div>
@@ -593,6 +589,7 @@ const ParentPortal = () => (
 
 const EnrollmentSection = () => {
   const [submitted, setSubmitted] = useState(false);
+  const [applicationReference, setApplicationReference] = useState('');
   const [loading, setLoading] = useState(false);
   const { register, handleSubmit, formState: { errors }, reset } = useForm();
 
@@ -628,6 +625,7 @@ const EnrollmentSection = () => {
         if (result.errors && result.errors.length > 0) throw new Error(result.errors.map((error) => error.msg).join('. '));
         throw new Error(result.message || 'Failed to submit application');
       }
+      setApplicationReference(result.enrollment?.application_reference || '');
       setSubmitted(true);
       toast.success('Application submitted successfully!');
       reset();
@@ -649,7 +647,8 @@ const EnrollmentSection = () => {
             </div>
             <p className="mt-5 text-xs font-extrabold tracking-[0.16em] uppercase text-red-700">Application received</p>
             <h2 className="mt-3 text-3xl font-black text-blue-950">Thank you for choosing Harmony.</h2>
-             <p className="mt-4 text-slate-600 text-lg">Our admissions team will contact you after reviewing your application.</p>
+             {applicationReference && <div className="mx-auto mt-6 max-w-sm rounded-xl bg-blue-50 p-4"><p className="text-xs font-extrabold uppercase tracking-wider text-blue-700">Application reference</p><p className="mt-1 font-mono text-2xl font-black text-blue-950">{applicationReference}</p></div>}
+             <p className="mt-4 text-slate-600 text-lg">Our admissions team will contact you after reviewing your application. Please keep your reference for future communication.</p>
             <button type="button" onClick={() => setSubmitted(false)} className="mt-8 min-h-12 px-5 rounded-lg bg-red-700 text-white font-extrabold hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-700 focus:ring-offset-2">
               Submit another application
             </button>
@@ -722,7 +721,6 @@ const Field = ({ label, error, children, optional = false }) => (
 );
 
 export const Footer = () => {
-  const { studentPortalEnabled } = useAppConfig();
 
   return (
     <footer className="bg-blue-950 text-white">
@@ -744,7 +742,6 @@ export const Footer = () => {
           <li><Link to="/gallery" className="hover:text-white">Gallery</Link></li>
           <li><a href="#admissions" className="hover:text-white">Admissions</a></li>
           <li><Link to="/parent/login" className="hover:text-white">Parent Portal</Link></li>
-          {studentPortalEnabled && <li><Link to="/login?type=student" className="hover:text-white">Student Portal</Link></li>}
            <li><Link to="/login" className="hover:text-white">Staff Portal</Link></li>
         </ul>
       </div>

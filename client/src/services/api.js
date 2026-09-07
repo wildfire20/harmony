@@ -234,7 +234,6 @@ export const enrollmentsAPI = {
   getAll: (params) => api.get('/enrollments', { params }),
   getOne: (id) => api.get(`/enrollments/${id}`),
   updateStatus: (id, data) => api.put(`/enrollments/${id}/status`, data),
-  delete: (id) => api.delete(`/enrollments/${id}`),
 };
 
 // Manual Payments API

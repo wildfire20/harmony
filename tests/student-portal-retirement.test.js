@@ -158,15 +158,16 @@ test('server exposes the non-secret flag state to the frontend', () => {
   assert.match(context, /studentPortalEnabled/);
 });
 
-test('public and direct student portal entry points are gated without deleting portal code', () => {
+test('public student portal entry points are removed without deleting direct retirement handling', () => {
   const landing = read('client/src/components/public/LandingPage.js');
   const login = read('client/src/components/auth/Login.js');
   const app = read('client/src/App.js');
   const authContext = read('client/src/contexts/AuthContext.js');
 
-  assert.match(landing, /studentPortalEnabled && <PortalLink[^>]+Student Portal/);
-  assert.match(landing, /studentPortalEnabled && <MobilePortalLink[^>]+Student Portal/);
-  assert.match(landing, /studentPortalEnabled && <li><Link[\s\S]{0,160}Student Portal/);
+  assert.doesNotMatch(landing, /title="Student Portal"/);
+  assert.doesNotMatch(landing, />Student Portal<\/Link>/);
+  assert.match(landing, /title="Parent Portal"/);
+  assert.match(landing, /title="Staff Portal"/);
   assert.match(login, /!studentPortalEnabled && requestedStudentPortal/);
   assert.match(login, /Student Portal unavailable/);
   assert.match(app, /user\.role === 'student' && !studentPortalEnabled/);

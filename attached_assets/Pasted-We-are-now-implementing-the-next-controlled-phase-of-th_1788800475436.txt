@@ -1,0 +1,510 @@
+We are now implementing the next controlled phase of the Harmony Learning Institute platform.
+
+The public website, Fees page, Fee Estimator, admissions form, Parent Portal, Staff/Admin system, security hardening, and Student Portal authentication retirement are already working.
+
+DO NOT redesign the website.
+
+DO NOT rebuild the school management system.
+
+DO NOT change learner IDs, learner records, parent relationships, attendance, fees, classes, authentication architecture, or existing Parent/Staff/Admin functionality.
+
+This task focuses on:
+
+1. Final Student Portal public UI cleanup
+2. Application reference numbers
+3. Admissions status management
+4. Automatic application confirmation emails
+5. Automatic admissions status emails
+6. Preparing the Approved → Registration workflow
+7. Improving the Admin admissions experience
+
+==================================================
+1. REMOVE REMAINING STUDENT PORTAL PUBLIC UI
+==================================================
+
+Student authentication has already been retired successfully.
+
+Remove/hide every PUBLIC-facing Student Portal entry point from:
+
+- homepage navigation
+- portal dropdowns
+- mobile navigation
+- footer
+- login-selection screens
+- landing-page buttons
+
+KEEP:
+
+- Parent Portal
+- Staff Portal
+
+Do NOT delete learner records.
+Do NOT delete old Student Portal code yet.
+Do NOT alter Student Portal retirement/authentication logic.
+
+This is UI cleanup only.
+
+==================================================
+2. APPLICATION REFERENCE NUMBERS
+==================================================
+
+Every new admissions application should receive a unique human-readable reference.
+
+Preferred format:
+
+HLI-2027-0001
+HLI-2027-0002
+HLI-2027-0003
+
+Requirements:
+
+- Reference must be unique.
+- Do not rely only on frontend-generated numbers.
+- Generate/persist it safely on the backend/database.
+- Existing applications without a reference must not break.
+- Do not renumber historical applications destructively.
+
+The application reference should be visible in:
+
+- Admin admissions view
+- Application confirmation screen
+- Parent confirmation email
+- Future status emails
+
+If implementation requires a safe database migration, inspect the existing enrollments schema first.
+
+Use a non-destructive migration only.
+
+Do NOT modify learner/student operational records.
+
+==================================================
+3. ADMISSIONS STATUS SYSTEM
+==================================================
+
+Inspect the current enrollments/application model.
+
+Add or improve admissions statuses using a controlled set such as:
+
+NEW
+UNDER_REVIEW
+MORE_INFORMATION_REQUIRED
+APPROVED
+REGISTRATION_PENDING
+REGISTERED
+NOT_ACCEPTED
+
+Use existing statuses if the application already has an equivalent structure rather than creating duplicates.
+
+Admin should be able to change application status from the admissions management area.
+
+Show clear readable labels in the UI:
+
+New
+Under Review
+More Information Required
+Approved
+Registration Pending
+Registered
+Not Accepted
+
+Do not expose internal database naming to parents.
+
+Record status changes safely.
+
+Where an audit/history mechanism already exists, use it.
+
+==================================================
+4. ADMIN ADMISSIONS DASHBOARD
+==================================================
+
+Improve the existing Admin admissions/application area.
+
+Provide useful filters:
+
+- All
+- New
+- Under Review
+- More Information Required
+- Approved
+- Registration Pending
+- Registered
+- Not Accepted
+
+Include:
+
+- Application reference
+- Learner name
+- Applying for / grade category
+- Parent/guardian
+- Contact details
+- Application date
+- Current status
+
+Add search by:
+
+- reference number
+- learner name
+- parent name
+- email/phone where appropriate
+
+Do not expose sensitive information unnecessarily.
+
+Preserve the existing Admin design.
+
+==================================================
+5. APPLICATION RECEIVED CONFIRMATION
+==================================================
+
+When a new application is successfully submitted:
+
+FIRST:
+save the application successfully.
+
+ONLY AFTER successful persistence:
+send the confirmation.
+
+Do not claim the learner has been accepted.
+
+Parent email:
+
+Subject:
+Harmony Learning Institute — Application Received
+
+Suggested wording:
+
+Thank you for applying to Harmony Learning Institute for the 2027 academic year.
+
+We have successfully received your application.
+
+Application Reference:
+[REFERENCE]
+
+Our admissions team will review the application and contact you regarding the next steps.
+
+Please keep your application reference for future communication.
+
+Harmony Learning Institute
+
+Use the parent/guardian email supplied in the application.
+
+Do NOT send:
+- passwords
+- private student portal credentials
+- sensitive documents
+- banking credentials
+- internal notes
+
+If email sending fails, DO NOT delete or roll back the successfully submitted application.
+
+Log the email failure safely for Admin follow-up.
+
+==================================================
+6. INTERNAL NEW-APPLICATION NOTIFICATION
+==================================================
+
+When an application is received, send an internal notification to the configured Harmony admissions/admin email if the application already supports this.
+
+Include:
+
+- Application reference
+- Learner name
+- Grade/programme
+- Parent name
+- Submission date
+
+Include a link to the Admin application where safely possible.
+
+Do not expose sensitive information unnecessarily in email.
+
+==================================================
+7. STATUS CHANGE EMAILS
+==================================================
+
+When Admin intentionally changes an application status, send an appropriate parent email.
+
+Do NOT send an email when:
+- an application is merely opened/viewed
+- internal notes change
+- the same status is saved again
+
+UNDER REVIEW:
+
+Subject:
+Harmony Application Update — [REFERENCE]
+
+Message:
+Your application is currently being reviewed by our admissions team.
+
+MORE INFORMATION REQUIRED:
+
+Subject:
+Additional Information Required — [REFERENCE]
+
+Message:
+Harmony requires additional information before the application can proceed.
+
+If the Admin system already supports a safe message/note field intended for parents, allow Admin to include a short explanation.
+
+Do not send private/internal Admin notes.
+
+APPROVED:
+
+Subject:
+Application Approved — Harmony Learning Institute
+
+Message:
+
+We are pleased to inform you that the application referenced [REFERENCE] has been approved.
+
+The next step is to complete the registration process.
+
+Further registration instructions will be provided through the secure Harmony registration process.
+
+IMPORTANT:
+Approval must ONLY be triggered by an Admin changing the status to APPROVED.
+
+Submitting an application must NEVER automatically approve it.
+
+REGISTERED:
+
+Subject:
+Welcome to Harmony Learning Institute — [REFERENCE]
+
+Use a simple welcome message.
+
+Do not invent:
+- start dates
+- teacher assignments
+- class placement
+- transport route
+- boarding room
+unless those details exist and have been verified in the system.
+
+NOT ACCEPTED:
+
+Use respectful neutral language.
+
+Do not include internal reasons unless Admin explicitly provides parent-safe text.
+
+==================================================
+8. PREPARE APPROVED → REGISTRATION FLOW
+==================================================
+
+Do NOT build a huge registration system blindly.
+
+First inspect the current admissions/enrollment database and application form.
+
+Prepare the architecture for:
+
+Approved application
+       ↓
+Secure registration link
+       ↓
+Parent completes additional registration details
+       ↓
+Required documents uploaded later
+       ↓
+Admin reviews registration
+       ↓
+Registered
+
+For this task:
+
+- create the safest foundation for a secure registration link if practical
+- do NOT expose registration by predictable application ID
+- use a cryptographically secure token
+- token must be tied to one application
+- do not expose another applicant's information
+- define a reasonable expiration/reissue mechanism
+
+If this requires substantial schema work, STOP after designing the schema and report the recommended implementation rather than introducing risky changes.
+
+The registration workflow itself can be completed in the next phase.
+
+==================================================
+9. VERIFIED DOCUMENT REQUIREMENTS
+==================================================
+
+The school has now verified these requirements:
+
+Baby Class through Grade 7:
+
+- Copy of learner birth certificate
+- Parent/Guardian ID copies
+- Road to Health / Clinic Card
+
+Grades 1–7 additionally:
+
+- Latest school progress report
+- Transfer from previous school
+
+Use these ONLY if needed for preparing the registration architecture.
+
+Do not invent other documents.
+
+Do not implement insecure public uploads.
+
+==================================================
+10. EMAIL CONFIGURATION
+==================================================
+
+Inspect the existing Gmail/email service already used by Harmony.
+
+Reuse the existing secure server-side email service where appropriate.
+
+Do NOT introduce Zapier for these core emails.
+
+Do NOT expose Gmail passwords/API credentials.
+
+Configuration must come from environment variables.
+
+Email failure must not destroy application data.
+
+==================================================
+11. ZAPIER FREE PLAN PREPARATION
+==================================================
+
+Harmony is currently staying on Zapier Free.
+
+Do NOT build paid Zapier webhook integrations.
+
+Do NOT make Zapier the source of truth.
+
+The Harmony PostgreSQL database remains the official source of:
+
+- applications
+- statuses
+- registration progress
+
+If useful, structure confirmation/admin emails consistently so that a future FREE Zap such as:
+
+Gmail application email
+→
+Google Sheets row
+
+can be created later.
+
+Do not implement paid-webhook dependencies.
+
+==================================================
+12. DATA / SECURITY RULES
+==================================================
+
+Do NOT:
+
+- delete applications
+- delete learners
+- change learner roles
+- modify active learner relationships
+- change Parent Portal authentication
+- change Staff/Admin authentication
+- expose application data publicly
+- put sensitive data into URLs
+- generate predictable registration tokens
+- automatically approve applications
+- send internal Admin notes to parents
+
+Preserve all existing security hardening.
+
+==================================================
+13. TESTING
+==================================================
+
+Test at minimum:
+
+APPLICATION:
+
+- new application saves correctly
+- unique reference generated
+- reference visible in Admin
+- application confirmation displayed
+- email generated only after successful submission
+
+STATUS:
+
+- New → Under Review
+- Under Review → More Information Required
+- Under Review → Approved
+- Approved → Registration Pending
+- Registration Pending → Registered
+- appropriate emails trigger
+- saving same status twice does not duplicate email
+
+ADMIN:
+
+- search application
+- filter by status
+- open application
+- update status
+- existing application data still accessible
+
+PUBLIC:
+
+- Student Portal link absent
+- Parent Portal link remains
+- Staff Portal link remains
+- homepage works
+- fees works
+- admissions works
+
+PORTALS:
+
+- Parent login works
+- Staff login works
+- Admin login works
+
+DATABASE:
+
+- no learner operational records changed
+- no parent links changed
+- no attendance changed
+- no fees/invoices changed
+
+Run production build.
+
+Check browser/server console.
+
+==================================================
+14. DO NOT OVERBUILD
+==================================================
+
+This phase is specifically:
+
+APPLICATION MANAGEMENT + COMMUNICATION.
+
+Do NOT yet build:
+
+- AI Assistant
+- WhatsApp AI
+- paid Zapier workflows
+- full document upload registration system
+- school-tour booking
+- Parent mobile app
+- online payment gateway
+
+Those remain future phases.
+
+==================================================
+15. FINAL REPORT
+==================================================
+
+Return:
+
+1. Executive summary
+2. Files changed
+3. Database/schema changes
+4. Application reference implementation
+5. Admissions status implementation
+6. Admin dashboard changes
+7. Email automation implemented
+8. Student Portal UI cleanup
+9. Registration-link preparation
+10. Security considerations
+11. Tests performed
+12. Tests passed
+13. Manual tests required
+14. Environment variables required
+15. Risks/unknowns
+16. Recommended next phase
+
+Do NOT deploy automatically unless explicitly authorised.

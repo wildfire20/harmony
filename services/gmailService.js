@@ -1,49 +1,40 @@
-// Gmail service — uses @replit/connectors-sdk proxy (google-mail integration)
-// The SDK handles OAuth2 token refresh and auth headers automatically.
+// Gmail service — uses @replit/connectors-sdk proxy (google-mail integration).
 const { ReplitConnectors } = require('@replit/connectors-sdk');
+const { STATUS_LABELS } = require('../utils/admissions');
+
+const escapeHtml = (value = '') => String(value)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#039;');
 
 function createEmailMessage(to, subject, htmlBody) {
-  const messageParts = [
+  const message = [
     `To: ${to}`,
     'Content-Type: text/html; charset=utf-8',
     'MIME-Version: 1.0',
     `Subject: ${subject}`,
     '',
-    htmlBody
-  ];
+    htmlBody,
+  ].join('\n');
 
-  const message = messageParts.join('\n');
-  return Buffer.from(message)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  return Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 async function sendEmail(to, subject, htmlBody) {
   try {
-    // Never cache the connectors instance — tokens expire
     const connectors = new ReplitConnectors();
-    const encodedMessage = createEmailMessage(to, subject, htmlBody);
-
-    const response = await connectors.proxy(
-      'google-mail',
-      '/gmail/v1/users/me/messages/send',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw: encodedMessage })
-      }
-    );
-
+    const response = await connectors.proxy('google-mail', '/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw: createEmailMessage(to, subject, htmlBody) }),
+    });
     const data = await response.json();
-
     if (!response.ok) {
-      console.error('Gmail API error:', JSON.stringify(data));
+      console.error('Gmail API error:', data?.error?.message || 'Gmail API error');
       return { success: false, error: data?.error?.message || 'Gmail API error' };
     }
-
-    console.log('✅ Email sent successfully, message ID:', data.id);
     return { success: true, messageId: data.id };
   } catch (error) {
     console.error('Error sending email:', error.message);
@@ -51,84 +42,76 @@ async function sendEmail(to, subject, htmlBody) {
   }
 }
 
-async function sendEnrollmentNotification(enrollmentData) {
+const emailShell = (title, content) => `<!doctype html>
+<html><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172554">
+<div style="max-width:620px;margin:0 auto;padding:24px">
+<div style="background:#172554;color:#fff;padding:22px;border-radius:12px 12px 0 0"><h1 style="margin:0;font-size:22px">${escapeHtml(title)}</h1></div>
+<div style="background:#fff;border:1px solid #e2e8f0;padding:24px;line-height:1.65">${content}</div>
+<div style="background:#b91c1c;color:#fff;padding:14px;text-align:center;border-radius:0 0 12px 12px">Harmony Learning Institute</div>
+</div></body></html>`;
+
+async function sendApplicationConfirmation(enrollment) {
+  const ref = escapeHtml(enrollment.application_reference);
+  return sendEmail(
+    enrollment.parent_email,
+    'Harmony Learning Institute — Application Received',
+    emailShell('Application received', `
+      <p>Dear ${escapeHtml(enrollment.parent_first_name)},</p>
+      <p>Thank you for applying to Harmony Learning Institute for the 2027 academic year.</p>
+      <p>We have successfully received your application.</p>
+      <p><strong>Application Reference:</strong><br><span style="font-size:20px">${ref}</span></p>
+      <p>Our admissions team will review the application and contact you regarding the next steps.</p>
+      <p>Please keep your application reference for future communication.</p>
+    `),
+  );
+}
+
+async function sendEnrollmentNotification(enrollment) {
   const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'harmonylearninginstitute@gmail.com';
+  const ref = escapeHtml(enrollment.application_reference);
+  return sendEmail(
+    adminEmail,
+    `New Harmony Application — ${ref}`,
+    emailShell('New admissions application', `
+      <p><strong>Reference:</strong> ${ref}</p>
+      <p><strong>Learner:</strong> ${escapeHtml(enrollment.student_first_name)} ${escapeHtml(enrollment.student_last_name)}</p>
+      <p><strong>Grade/programme:</strong> ${escapeHtml(enrollment.grade_applying)}</p>
+      <p><strong>Parent/guardian:</strong> ${escapeHtml(enrollment.parent_first_name)} ${escapeHtml(enrollment.parent_last_name)}</p>
+      <p><strong>Submitted:</strong> ${escapeHtml(new Date(enrollment.created_at).toLocaleString('en-ZA'))}</p>
+      <p>Please sign in to the Harmony Admin portal to review the application.</p>
+    `),
+  );
+}
 
-  const subject = `New Enrollment Application - ${enrollmentData.student_first_name} ${enrollmentData.student_last_name}`;
+const statusEmailContent = (status, reference, parentMessage) => {
+  const safeRef = escapeHtml(reference);
+  const safeMessage = parentMessage ? `<p><strong>Message from Admissions:</strong> ${escapeHtml(parentMessage)}</p>` : '';
+  const content = {
+    UNDER_REVIEW: ['Harmony Application Update', 'Your application is currently being reviewed by our admissions team.'],
+    MORE_INFORMATION_REQUIRED: ['Additional Information Required', 'Harmony requires additional information before the application can proceed.'],
+    APPROVED: ['Application Approved — Harmony Learning Institute', `We are pleased to inform you that the application referenced ${safeRef} has been approved.<br><br>The next step is to complete the registration process. Further registration instructions will be provided through the secure Harmony registration process.`],
+    REGISTRATION_PENDING: ['Harmony Registration Update', 'Your approved application is now awaiting completion of the registration process.'],
+    REGISTERED: ['Welcome to Harmony Learning Institute', 'Registration has been completed. Welcome to Harmony Learning Institute.'],
+    NOT_ACCEPTED: ['Harmony Application Update', 'Thank you for your interest in Harmony Learning Institute. We are unable to offer placement for this application at this time.'],
+  }[status];
+  if (!content) return null;
+  return {
+    subject: `${content[0]} — ${reference}`,
+    html: emailShell(STATUS_LABELS[status], `<p>Application Reference: <strong>${safeRef}</strong></p><p>${content[1]}</p>${safeMessage}`),
+  };
+};
 
-  const htmlBody = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background: linear-gradient(135deg, #dc2626, #1e40af); color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
-        .content { background: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; }
-        .section { margin-bottom: 20px; }
-        .section-title { font-weight: bold; color: #1e40af; margin-bottom: 10px; border-bottom: 2px solid #dc2626; padding-bottom: 5px; }
-        .field { margin: 8px 0; }
-        .label { font-weight: bold; color: #6b7280; }
-        .value { color: #111827; }
-        .footer { background: #1e40af; color: white; padding: 15px; text-align: center; border-radius: 0 0 8px 8px; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <h1>New Enrollment Application</h1>
-          <p>Harmony Learning Institute</p>
-        </div>
-
-        <div class="content">
-          <div class="section">
-            <div class="section-title">Student Information</div>
-            <div class="field"><span class="label">Name:</span> <span class="value">${enrollmentData.student_first_name} ${enrollmentData.student_last_name}</span></div>
-            <div class="field"><span class="label">Date of Birth:</span> <span class="value">${new Date(enrollmentData.student_date_of_birth).toLocaleDateString('en-ZA')}</span></div>
-            <div class="field"><span class="label">Grade Applying For:</span> <span class="value">${enrollmentData.grade_applying}</span></div>
-            <div class="field"><span class="label">Boarding:</span> <span class="value">${enrollmentData.boarding_option ? 'Yes' : 'No'}</span></div>
-          </div>
-
-          <div class="section">
-            <div class="section-title">Parent/Guardian Information</div>
-            <div class="field"><span class="label">Name:</span> <span class="value">${enrollmentData.parent_first_name} ${enrollmentData.parent_last_name}</span></div>
-            <div class="field"><span class="label">Email:</span> <span class="value">${enrollmentData.parent_email}</span></div>
-            <div class="field"><span class="label">Phone:</span> <span class="value">${enrollmentData.parent_phone}</span></div>
-          </div>
-
-          ${enrollmentData.previous_school ? `
-          <div class="section">
-            <div class="section-title">Previous School</div>
-            <div class="field"><span class="value">${enrollmentData.previous_school}</span></div>
-          </div>
-          ` : ''}
-
-          ${enrollmentData.additional_notes ? `
-          <div class="section">
-            <div class="section-title">Additional Notes</div>
-            <div class="field"><span class="value">${enrollmentData.additional_notes}</span></div>
-          </div>
-          ` : ''}
-
-          <div class="section" style="text-align: center;">
-            <p><strong>Application submitted on:</strong> ${new Date().toLocaleString('en-ZA')}</p>
-            <p>Please log in to the admin portal to review this application.</p>
-          </div>
-        </div>
-
-        <div class="footer">
-          <p>Harmony Learning Institute</p>
-          <p>2 Skilferdoring Street, Onverwacht, Lephalale</p>
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
-
-  return await sendEmail(adminEmail, subject, htmlBody);
+async function sendAdmissionsStatusEmail(enrollment, status, parentMessage) {
+  const content = statusEmailContent(status, enrollment.application_reference, parentMessage);
+  if (!content) return { success: true, skipped: true };
+  return sendEmail(enrollment.parent_email, content.subject, content.html);
 }
 
 module.exports = {
   sendEmail,
-  sendEnrollmentNotification
+  sendEnrollmentNotification,
+  sendApplicationConfirmation,
+  sendAdmissionsStatusEmail,
+  statusEmailContent,
+  escapeHtml,
 };
