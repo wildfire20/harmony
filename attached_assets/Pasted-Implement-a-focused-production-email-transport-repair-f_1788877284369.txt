@@ -1,0 +1,276 @@
+Implement a focused production email transport repair for Harmony Learning Institute.
+
+The Admissions Management system is already live and working correctly in production.
+
+Confirmed working:
+- application submission
+- application reference generation
+- Admin application retrieval
+- status changes
+- admissions email logging
+- persistence when email fails
+
+The ONLY current production problem is email delivery.
+
+Root cause already confirmed:
+services/gmailService.js currently sends email through:
+
+new ReplitConnectors().proxy('google-mail', ...)
+
+This requires Replit runtime identity and therefore fails on Railway.
+
+DO NOT:
+- change the admissions database schema
+- rerun or modify admissions migrations
+- modify learner, parent, staff, attendance, fee, invoice or enrollment data
+- redesign the website
+- redesign Admin UI
+- change Student Portal retirement
+- add Zapier
+- build registration workflow yet
+
+==================================================
+1. CREATE A PORTABLE EMAIL TRANSPORT
+==================================================
+
+Replace the production dependency on the Replit-only Gmail connector with a Railway-compatible SMTP transport.
+
+Preferred production configuration:
+
+GMAIL_USER
+GMAIL_APP_PASSWORD
+
+Use Gmail SMTP securely.
+
+Inspect whether nodemailer already exists in the project.
+
+If already installed, reuse it.
+
+If not installed, add only the minimum required stable package.
+
+Recommended SMTP settings:
+
+Host:
+smtp.gmail.com
+
+Use either:
+
+Port 465 with secure TLS
+
+OR
+
+Port 587 with STARTTLS
+
+Choose one standard secure configuration and document it.
+
+Do not disable TLS certificate verification.
+
+==================================================
+2. PROVIDER ABSTRACTION
+==================================================
+
+Keep the existing higher-level admissions functions such as:
+
+sendApplicationConfirmation()
+sendEnrollmentNotification()
+sendAdmissionsStatusEmail()
+
+The rest of the admissions system should not need to know which email provider is being used.
+
+Refactor sendEmail() so production can use SMTP cleanly.
+
+If useful for Replit development only, the existing Replit connector may remain as an optional development fallback.
+
+However:
+
+PRODUCTION MUST NOT DEPEND ON Replit runtime identity.
+
+Prefer SMTP when GMAIL_USER and GMAIL_APP_PASSWORD are configured.
+
+==================================================
+3. ENVIRONMENT VARIABLES
+==================================================
+
+Production SMTP requires:
+
+GMAIL_USER
+GMAIL_APP_PASSWORD
+
+Optional existing variable:
+
+ADMIN_NOTIFICATION_EMAIL
+
+Never hardcode these values.
+
+Never commit them.
+
+Never log their values.
+
+Add safe placeholders/documentation to .env.example if appropriate.
+
+Do not put secrets into .env.production or Git.
+
+==================================================
+4. SAFE STARTUP DIAGNOSTIC
+==================================================
+
+At server startup, determine whether SMTP configuration is available.
+
+Safe logging examples:
+
+Admissions email transport: Gmail SMTP configured
+
+or:
+
+Admissions email transport: unavailable — missing GMAIL_USER/GMAIL_APP_PASSWORD
+
+Never print either variable value.
+
+Do NOT crash the whole Harmony website if email configuration is unavailable.
+
+Admissions must still save successfully.
+
+==================================================
+5. EMAIL CONNECTION VERIFICATION
+==================================================
+
+Create a non-sending diagnostic script such as:
+
+npm run verify:email
+
+It should use the actual SMTP transport and perform a transport/authentication verification if supported.
+
+It must:
+
+- not send an email
+- not change admissions data
+- not print credentials
+- return a non-zero exit code if SMTP authentication fails
+- return success if the transport authenticates correctly
+
+Sanitize provider errors.
+
+==================================================
+6. PRESERVE EXISTING EMAIL FLOWS
+==================================================
+
+New application:
+
+Application saved
+→ parent confirmation email attempted
+→ internal Admin notification attempted
+
+Status change:
+
+Status saved
+→ correct parent status email attempted
+
+Preserve:
+
+- direct NEW → APPROVED approval email
+- duplicate status saves do not resend
+- internal Admin notes never appear in parent emails
+- email failure never rolls back application/status data
+
+==================================================
+7. SANITIZE ERROR LOGGING
+==================================================
+
+The current implementation stores/logs raw provider errors.
+
+Replace raw provider errors with sanitized categories/details.
+
+Examples:
+
+SMTP_AUTH_FAILED
+SMTP_CONNECTION_FAILED
+SMTP_TIMEOUT
+EMAIL_REJECTED
+EMAIL_CONFIGURATION_MISSING
+UNKNOWN_EMAIL_FAILURE
+
+Store only enough information for Admin/technical diagnosis.
+
+Never store or log:
+
+- Gmail password
+- Gmail App Password
+- SMTP authentication payload
+- OAuth tokens
+- connection strings
+- sensitive provider responses containing credentials
+
+Keep admissions_email_log as the source of email delivery history.
+
+==================================================
+8. RESEND BACKEND CAPABILITY
+==================================================
+
+Add a small authenticated Admin-only resend endpoint if this can be done safely without UI redesign.
+
+It should allow Admin to resend a known failed admissions email for a specific application/email type.
+
+Requirements:
+
+- Admin authentication required
+- application must exist
+- email type must be from an allowlist
+- recipient must come from the application/system data
+- caller cannot supply an arbitrary external recipient
+- resend attempt must be logged
+
+Do NOT build the Resend button UI yet.
+
+Document the endpoint for the future Admin UI cleanup.
+
+==================================================
+9. TESTS
+==================================================
+
+Add/update tests for:
+
+- application persists before email
+- application confirmation calls SMTP transport
+- internal Admin notification calls SMTP transport
+- approval persists before email
+- approval email calls SMTP transport
+- duplicate status save does not resend
+- internal Admin notes excluded from parent email
+- SMTP failure does not revert application/status
+- SMTP errors are sanitized
+- missing email configuration does not crash application
+- resend endpoint rejects unauthenticated users
+- resend endpoint cannot send to arbitrary recipients
+
+Run:
+
+- production client build
+- admissions tests
+- security tests
+- email-specific tests
+
+Do not claim real Gmail delivery unless actual credentials are configured and an authorised manual test is performed.
+
+==================================================
+10. DO NOT DEPLOY AUTOMATICALLY
+==================================================
+
+Complete the code repair and testing first.
+
+Return:
+
+1. Files changed
+2. SMTP implementation
+3. Packages added, if any
+4. Required Railway variables
+5. Startup behavior
+6. Email diagnostic command
+7. Error sanitization
+8. Resend endpoint, if implemented
+9. Test results
+10. Exact manual Railway steps required
+11. Whether a deployment is required
+12. Final verdict:
+
+READY FOR RAILWAY EMAIL CONFIGURATION:
+YES / NO

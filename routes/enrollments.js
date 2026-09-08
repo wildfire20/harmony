@@ -41,10 +41,10 @@ const requireAdmissionsSchema = async (req, res, next) => {
 
 router.use(requireAdmissionsSchema);
 
-const logEmailDelivery = async (enrollmentId, emailType, result) => {
+const logEmailDelivery = async (enrollmentId, emailType, result, executor = db, required = false) => {
   const deliveryStatus = result?.skipped ? 'skipped' : result?.success ? 'sent' : 'failed';
   try {
-    await db.query(`
+    await executor.query(`
       INSERT INTO admissions_email_log
         (enrollment_id, email_type, delivery_status, message_id, error_message)
       VALUES ($1, $2, $3, $4, $5)
@@ -57,6 +57,7 @@ const logEmailDelivery = async (enrollmentId, emailType, result) => {
     ]);
   } catch (error) {
     console.error(`Email delivery log failed for enrollment ${enrollmentId}:`, error.message);
+    if (required) throw error;
   }
 };
 
@@ -171,6 +172,10 @@ router.post('/', enrollmentValidation, async (req, res) => {
 });
 
 const requireAdmin = (req, res) => {
+  if (!req.user) {
+    res.status(401).json({ message: 'Authentication required.' });
+    return false;
+  }
   if (!['admin', 'super_admin'].includes(req.user.role)) {
     res.status(403).json({ message: 'Access denied. Admin privileges required.' });
     return false;
@@ -258,12 +263,17 @@ router.get('/:id', authenticate, async (req, res) => {
         ) AS status_history,
         (
           SELECT COALESCE(json_agg(json_build_object(
-            'email_type', email_type,
-            'delivery_status', delivery_status,
-            'created_at', created_at
-          ) ORDER BY created_at DESC), '[]')
-          FROM admissions_email_log
-          WHERE enrollment_id = e.id
+            'email_type', latest.email_type,
+            'delivery_status', latest.delivery_status,
+            'created_at', latest.created_at
+          ) ORDER BY latest.created_at DESC), '[]')
+          FROM (
+            SELECT DISTINCT ON (email_type)
+              email_type, delivery_status, created_at
+            FROM admissions_email_log
+            WHERE enrollment_id = e.id
+            ORDER BY email_type, created_at DESC, id DESC
+          ) latest
         ) AS email_delivery
       FROM enrollments e
       LEFT JOIN enrollment_status_history h ON h.enrollment_id = e.id
@@ -344,4 +354,92 @@ router.put('/:id/status', authenticate, async (req, res) => {
   }
 });
 
+const createAdmissionsEmailResendHandler = ({
+  database = db,
+  sendConfirmation = sendApplicationConfirmation,
+  sendAdminNotification = sendEnrollmentNotification,
+  sendStatusEmail = sendAdmissionsStatusEmail,
+} = {}) => async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const emailType = typeof req.body?.emailType === 'string' ? req.body.emailType : '';
+  const enrollmentId = Number(req.params.id);
+  if (!Number.isSafeInteger(enrollmentId) || enrollmentId < 1) {
+    return res.status(400).json({ message: 'Invalid enrollment ID' });
+  }
+  const resendableEmailTypes = Object.freeze({
+    application_confirmation: { send: sendConfirmation },
+    new_application_admin: { send: sendAdminNotification },
+    status_under_review: { status: 'UNDER_REVIEW' },
+    status_more_information_required: { status: 'MORE_INFORMATION_REQUIRED' },
+    status_approved: { status: 'APPROVED' },
+    status_registration_pending: { status: 'REGISTRATION_PENDING' },
+    status_registered: { status: 'REGISTERED' },
+    status_not_accepted: { status: 'NOT_ACCEPTED' },
+  });
+  const resendDefinition = resendableEmailTypes[emailType];
+  if (!resendDefinition) return res.status(400).json({ message: 'Invalid admissions email type' });
+
+  let client;
+  try {
+    client = await database.pool.connect();
+    await client.query('BEGIN');
+    const lockResult = await client.query(
+      'SELECT pg_try_advisory_xact_lock($1, hashtext($2)) AS acquired',
+      [enrollmentId, emailType],
+    );
+    if (!lockResult.rows[0]?.acquired) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ message: 'A resend for this email is already in progress' });
+    }
+
+    const enrollmentResult = await client.query(
+      'SELECT * FROM enrollments WHERE id = $1',
+      [enrollmentId],
+    );
+    if (!enrollmentResult.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Enrollment not found' });
+    }
+    const enrollment = enrollmentResult.rows[0];
+    const latestAttempt = await client.query(`
+      SELECT delivery_status
+      FROM admissions_email_log
+      WHERE enrollment_id = $1 AND email_type = $2
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `, [enrollment.id, emailType]);
+    if (latestAttempt.rows[0]?.delivery_status !== 'failed') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ message: 'This email does not have an unresolved failed delivery' });
+    }
+    if (resendDefinition.status && enrollment.status !== resendDefinition.status) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ message: 'Application status has changed since this email failed' });
+    }
+
+    const emailResult = resendDefinition.send
+      ? await resendDefinition.send(enrollment)
+      : await sendStatusEmail(enrollment, resendDefinition.status, enrollment.parent_status_message || null);
+    await logEmailDelivery(enrollment.id, emailType, emailResult, client, true);
+    await client.query('COMMIT');
+
+    if (!emailResult.success) {
+      return res.status(502).json({
+        message: 'Admissions email could not be delivered',
+        error: emailResult.error,
+      });
+    }
+    return res.json({ message: 'Admissions email delivered', emailSent: true });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('Admissions email resend failed: UNKNOWN_EMAIL_FAILURE');
+    return res.status(500).json({ message: 'Failed to resend admissions email' });
+  } finally {
+    if (client) client.release();
+  }
+};
+
+router.post('/:id/email/resend', authenticate, createAdmissionsEmailResendHandler());
+
 module.exports = router;
+module.exports.createAdmissionsEmailResendHandler = createAdmissionsEmailResendHandler;

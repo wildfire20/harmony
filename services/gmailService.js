@@ -1,6 +1,67 @@
-// Gmail service — uses @replit/connectors-sdk proxy (google-mail integration).
-const { ReplitConnectors } = require('@replit/connectors-sdk');
+const nodemailer = require('nodemailer');
 const { STATUS_LABELS } = require('../utils/admissions');
+
+const EMAIL_ERROR_CATEGORIES = Object.freeze({
+  AUTH: 'SMTP_AUTH_FAILED',
+  CONNECTION: 'SMTP_CONNECTION_FAILED',
+  TIMEOUT: 'SMTP_TIMEOUT',
+  REJECTED: 'EMAIL_REJECTED',
+  CONFIGURATION: 'EMAIL_CONFIGURATION_MISSING',
+  UNKNOWN: 'UNKNOWN_EMAIL_FAILURE',
+});
+
+const getSmtpConfig = (environment = process.env) => {
+  const user = String(environment.GMAIL_USER || '').trim();
+  const appPassword = String(environment.GMAIL_APP_PASSWORD || '').replace(/\s/g, '');
+  return {
+    configured: Boolean(user && appPassword),
+    user,
+    appPassword,
+  };
+};
+
+const sanitizeEmailError = (error) => {
+  const code = String(error?.code || '').toUpperCase();
+  const responseCode = Number(error?.responseCode || 0);
+  if (code === 'EAUTH' || responseCode === 534 || responseCode === 535) {
+    return EMAIL_ERROR_CATEGORIES.AUTH;
+  }
+  if (code === 'ETIMEDOUT' || code === 'ETIMEOUT') {
+    return EMAIL_ERROR_CATEGORIES.TIMEOUT;
+  }
+  if (['ECONNECTION', 'ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EDNS', 'ESOCKET'].includes(code)) {
+    return EMAIL_ERROR_CATEGORIES.CONNECTION;
+  }
+  if (code === 'EENVELOPE' || responseCode >= 500) {
+    return EMAIL_ERROR_CATEGORIES.REJECTED;
+  }
+  return EMAIL_ERROR_CATEGORIES.UNKNOWN;
+};
+
+const createSmtpTransport = (environment = process.env) => {
+  const config = getSmtpConfig(environment);
+  if (!config.configured) return null;
+  return nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 30000,
+    auth: {
+      user: config.user,
+      pass: config.appPassword,
+    },
+  });
+};
+
+const logEmailTransportStatus = () => {
+  if (getSmtpConfig().configured) {
+    console.log('Admissions email transport: Gmail SMTP configured');
+  } else {
+    console.warn('Admissions email transport: unavailable — missing GMAIL_USER/GMAIL_APP_PASSWORD');
+  }
+};
 
 const escapeHtml = (value = '') => String(value)
   .replace(/&/g, '&amp;')
@@ -9,36 +70,41 @@ const escapeHtml = (value = '') => String(value)
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#039;');
 
-function createEmailMessage(to, subject, htmlBody) {
-  const message = [
-    `To: ${to}`,
-    'Content-Type: text/html; charset=utf-8',
-    'MIME-Version: 1.0',
-    `Subject: ${subject}`,
-    '',
-    htmlBody,
-  ].join('\n');
+async function sendEmail(to, subject, htmlBody) {
+  const config = getSmtpConfig();
+  if (!config.configured) {
+    console.error(`Admissions email failed: ${EMAIL_ERROR_CATEGORIES.CONFIGURATION}`);
+    return { success: false, error: EMAIL_ERROR_CATEGORIES.CONFIGURATION };
+  }
 
-  return Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  try {
+    const transport = createSmtpTransport();
+    const result = await transport.sendMail({
+      from: {
+        name: 'Harmony Learning Institute',
+        address: config.user,
+      },
+      to,
+      subject,
+      html: htmlBody,
+    });
+    return { success: true, messageId: result.messageId };
+  } catch (error) {
+    const category = sanitizeEmailError(error);
+    console.error(`Admissions email failed: ${category}`);
+    return { success: false, error: category };
+  }
 }
 
-async function sendEmail(to, subject, htmlBody) {
+async function verifyEmailTransport() {
+  if (!getSmtpConfig().configured) {
+    return { success: false, error: EMAIL_ERROR_CATEGORIES.CONFIGURATION };
+  }
   try {
-    const connectors = new ReplitConnectors();
-    const response = await connectors.proxy('google-mail', '/gmail/v1/users/me/messages/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ raw: createEmailMessage(to, subject, htmlBody) }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      console.error('Gmail API error:', data?.error?.message || 'Gmail API error');
-      return { success: false, error: data?.error?.message || 'Gmail API error' };
-    }
-    return { success: true, messageId: data.id };
+    await createSmtpTransport().verify();
+    return { success: true };
   } catch (error) {
-    console.error('Error sending email:', error.message);
-    return { success: false, error: error.message };
+    return { success: false, error: sanitizeEmailError(error) };
   }
 }
 
@@ -108,10 +174,16 @@ async function sendAdmissionsStatusEmail(enrollment, status, parentMessage) {
 }
 
 module.exports = {
+  EMAIL_ERROR_CATEGORIES,
+  createSmtpTransport,
+  getSmtpConfig,
+  logEmailTransportStatus,
+  sanitizeEmailError,
   sendEmail,
   sendEnrollmentNotification,
   sendApplicationConfirmation,
   sendAdmissionsStatusEmail,
   statusEmailContent,
   escapeHtml,
+  verifyEmailTransport,
 };

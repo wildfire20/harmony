@@ -7,6 +7,8 @@ require('dotenv').config();
 
 // Optimize logging for production/Railway
 require('./utils/productionLogging');
+const { logEmailTransportStatus } = require('./services/gmailService');
+logEmailTransportStatus();
 
 // Updated with clickable links functionality - v1.0.1
 // Validate environment in production
