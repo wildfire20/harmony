@@ -1,0 +1,361 @@
+We have now deployed and successfully tested the Harmony Learning Institute Admissions Management phase in production.
+
+The production admissions migration has completed successfully.
+
+A real authorised test application was submitted and received:
+
+HLI-2027-0019
+
+Confirmed working:
+- Application submission
+- Application reference generation
+- Admin application retrieval
+- Boarding value persistence
+- Status management
+- New → Approved status transition
+- Existing applications preserved
+
+THE CURRENT PROBLEM IS EMAIL DELIVERY ONLY.
+
+The Admin application modal correctly displays:
+
+"Email follow-up required
+One or more admissions emails could not be delivered."
+
+The applicant did NOT receive:
+1. Application Received email
+2. Approved/Application Approved email
+
+Therefore perform a focused EMAIL DELIVERY DIAGNOSTIC AND REPAIR.
+
+DO NOT redesign the website.
+DO NOT redesign the Admin UI.
+DO NOT change the admissions database schema.
+DO NOT rerun or modify the production admissions migration.
+DO NOT modify learner, parent, staff, attendance, fee or invoice data.
+DO NOT build registration workflow yet.
+DO NOT add Zapier.
+DO NOT touch Student Portal retirement.
+
+==================================================
+1. AUDIT THE CURRENT EMAIL IMPLEMENTATION
+==================================================
+
+Inspect:
+
+services/gmailService.js
+
+and every place that calls it from:
+
+routes/enrollments.js
+
+or related admissions services.
+
+Map exactly:
+
+Application submitted
+→ application persisted
+→ parent confirmation email attempted
+
+and:
+
+Admin changes status
+→ status persisted
+→ appropriate parent email attempted
+
+Confirm whether both pathways are calling the same underlying Gmail/email transport.
+
+==================================================
+2. IDENTIFY THE ACTUAL FAILURE
+==================================================
+
+Inspect the current error handling and determine what provider/transport error is occurring.
+
+Possible areas to investigate include, but are not limited to:
+
+- missing production environment variables
+- environment variable name mismatch
+- invalid Gmail credentials
+- invalid/revoked App Password
+- SMTP authentication failure
+- Gmail API OAuth/token failure
+- sender/from-address mismatch
+- production-only configuration issue
+- TLS/SMTP configuration
+- Gmail service initialization failure
+
+DO NOT guess.
+
+Determine the failure from the actual implementation and available logs.
+
+NEVER print:
+- passwords
+- App Passwords
+- OAuth tokens
+- access tokens
+- refresh tokens
+- API secrets
+
+You may report ENVIRONMENT VARIABLE NAMES and whether each is:
+
+PRESENT
+MISSING
+or
+UNUSED
+
+but never report secret values.
+
+==================================================
+3. CHECK PRODUCTION CONFIG REQUIREMENTS
+==================================================
+
+Return the exact environment variable names the current Gmail implementation expects.
+
+For example, ONLY if actually used by this project:
+
+GMAIL_USER
+GMAIL_APP_PASSWORD
+
+or OAuth equivalents.
+
+Do not invent new variable names if the code already uses another configuration.
+
+Compare the variables expected by the code with the configuration documented in the project.
+
+Identify any mismatch that would explain why Railway production cannot send email.
+
+==================================================
+4. HARDEN EMAIL INITIALIZATION
+==================================================
+
+Make email configuration predictable.
+
+When the server starts, it should safely determine whether the admissions email service is available.
+
+Logging may state:
+
+Admissions email service: configured
+
+or:
+
+Admissions email service: unavailable — missing required configuration
+
+But NEVER log credential values.
+
+Do not crash the whole Harmony application simply because email is unavailable.
+
+Admissions must continue to save successfully even if email fails.
+
+==================================================
+5. TEST THE EMAIL TRANSPORT SAFELY
+==================================================
+
+Create a non-destructive email diagnostic function/script if useful.
+
+It should:
+
+- initialize the actual production email transport
+- verify authentication/connection
+- report success or sanitized provider failure
+- never expose secrets
+- never modify admissions data
+
+If a connection verification method exists for the email library, use it.
+
+Do not send mass test emails.
+
+If an actual test message is necessary, make the recipient explicitly configurable and do not hardcode a personal email address.
+
+==================================================
+6. APPLICATION RECEIVED EMAIL
+==================================================
+
+Verify that after a successful NEW application:
+
+the parent receives:
+
+Subject:
+Harmony Learning Institute — Application Received
+
+Containing:
+
+- application reference
+- confirmation that the application was received
+- explanation that Admissions will review it
+
+DO NOT say they have been accepted.
+
+Email failure must NOT undo the application.
+
+==================================================
+7. STATUS EMAIL
+==================================================
+
+Verify status email behavior.
+
+When Admin intentionally changes:
+
+NEW → UNDER_REVIEW
+
+send the Under Review email.
+
+When Admin intentionally changes:
+
+UNDER_REVIEW → APPROVED
+
+send the approval email.
+
+If Admin changes:
+
+NEW → APPROVED
+
+directly, the Approved email should still be sent.
+
+Do not send duplicate email if the same status is saved again.
+
+==================================================
+8. EMAIL DELIVERY LOG
+==================================================
+
+The existing admissions_email_log should remain the audit source.
+
+For each attempted admissions email record appropriate safe information such as:
+
+- application ID/reference
+- email type
+- attempted timestamp
+- success/failure
+- sanitized error category/provider error code where appropriate
+
+Do NOT store passwords/tokens.
+
+Do not store unnecessarily detailed private provider responses.
+
+==================================================
+9. ADMIN FOLLOW-UP WARNING
+==================================================
+
+Preserve the existing:
+
+"Email follow-up required"
+
+warning.
+
+It is working correctly and is useful.
+
+Once a later email is successfully delivered/resolved, ensure the Admin experience accurately represents the current delivery state rather than permanently showing an obsolete warning where practical.
+
+Do NOT redesign this UI in this task.
+
+==================================================
+10. OPTIONAL RESEND FOUNDATION
+==================================================
+
+Inspect whether there is already a safe way to retry a failed admissions email.
+
+If not, prepare a simple authenticated backend capability that could later support:
+
+"Resend email"
+
+from Admin.
+
+Do NOT redesign the Admin UI now.
+
+If this can be safely implemented with a small authenticated endpoint, implement it.
+
+Otherwise document it for the UI phase.
+
+It must never allow an unauthenticated user to send arbitrary emails.
+
+==================================================
+11. BOARDING CHECKBOX — DO NOT FIX YET
+==================================================
+
+The test parent reported that the Boarding checkbox did not visually appear checked on mobile.
+
+However, the submitted application correctly appeared in Admin with:
+
+Boarding
+
+Therefore the data logic is working.
+
+Do NOT change it during this email-repair task.
+
+Document this as:
+
+"Boarding checkbox visual feedback / accessibility issue — data submission works."
+
+We will repair that in the upcoming UI/UX cleanup.
+
+==================================================
+12. TESTS
+==================================================
+
+Run:
+
+- production build
+- admissions tests
+- security tests
+
+Add email-specific tests covering:
+
+Application received:
+- successful application persists
+- email function called
+- email failure does not remove application
+
+Approved:
+- status persists
+- approval email called
+- email failure does not revert status
+
+Duplicate status:
+- no duplicate email
+
+Internal notes:
+- never appear in parent email
+
+Provider failure:
+- safely logged
+- secrets never exposed
+
+==================================================
+13. IMPORTANT PRODUCTION RULE
+==================================================
+
+Do NOT automatically deploy.
+
+Do NOT make another database migration.
+
+First return a diagnostic report.
+
+If the only remaining production issue is a missing/incorrect Railway environment variable or Gmail credential, tell me EXACTLY:
+
+1. Which VARIABLE NAME requires attention
+2. What TYPE of value I need to provide
+3. Where in Railway I should configure it
+
+NEVER show or request the existing secret value in the report.
+
+==================================================
+14. FINAL REPORT
+==================================================
+
+Return:
+
+1. Root cause of email failure
+2. Email implementation currently used
+3. Environment variable names required
+4. Variables currently missing/mismatched if determinable
+5. Code changes made
+6. Application confirmation-email verification
+7. Approval-email verification
+8. Email logging behavior
+9. Tests passed
+10. Any Railway manual configuration required
+11. Whether another deployment is required
+12. Boarding checkbox issue documented separately
+13. Final verdict:
+
+ADMISSIONS EMAIL AUTOMATION READY:
+YES / NO / REQUIRES RAILWAY CONFIGURATION
