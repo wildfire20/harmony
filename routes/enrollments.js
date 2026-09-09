@@ -5,6 +5,8 @@ const { authenticate } = require('../middleware/auth');
 const { logAudit, getIp } = require('../utils/auditLogger');
 const { ADMISSIONS_STATUSES } = require('../utils/admissions');
 const {
+  EMAIL_ERROR_CATEGORIES,
+  normalizeEmailResult,
   sendApplicationConfirmation,
   sendEnrollmentNotification,
   sendAdmissionsStatusEmail,
@@ -12,6 +14,7 @@ const {
 
 const router = express.Router();
 const LEGACY_STATUSES = ['pending', 'approved', 'rejected', 'waitlisted'];
+const EMAIL_COMPATIBLE_LEGACY_STATUSES = ['approved', 'rejected', 'waitlisted'];
 let admissionsSchemaReady = false;
 
 const requireAdmissionsSchema = async (req, res, next) => {
@@ -42,7 +45,8 @@ const requireAdmissionsSchema = async (req, res, next) => {
 router.use(requireAdmissionsSchema);
 
 const logEmailDelivery = async (enrollmentId, emailType, result, executor = db, required = false) => {
-  const deliveryStatus = result?.skipped ? 'skipped' : result?.success ? 'sent' : 'failed';
+  const safeResult = normalizeEmailResult(result);
+  const deliveryStatus = safeResult.skipped ? 'skipped' : safeResult.success ? 'sent' : 'failed';
   try {
     await executor.query(`
       INSERT INTO admissions_email_log
@@ -52,8 +56,8 @@ const logEmailDelivery = async (enrollmentId, emailType, result, executor = db, 
       enrollmentId,
       emailType,
       deliveryStatus,
-      result?.messageId || null,
-      result?.error ? String(result.error).slice(0, 500) : null,
+      safeResult.messageId || null,
+      safeResult.error || null,
     ]);
   } catch (error) {
     console.error(`Email delivery log failed for enrollment ${enrollmentId}:`, error.message);
@@ -149,8 +153,8 @@ router.post('/', enrollmentValidation, async (req, res) => {
     const emailTypes = ['application_confirmation', 'new_application_admin'];
     await Promise.all(emailResults.map(async (outcome, index) => {
       const result = outcome.status === 'fulfilled'
-        ? outcome.value
-        : { success: false, error: outcome.reason?.message || 'Email send failed' };
+        ? normalizeEmailResult(outcome.value)
+        : { success: false, error: EMAIL_ERROR_CATEGORIES.UNKNOWN };
       await logEmailDelivery(enrollment.id, emailTypes[index], result);
       if (!result.success) {
         console.error(`Application ${enrollment.application_reference} saved; ${emailTypes[index]} email failed`);
@@ -293,7 +297,9 @@ router.put('/:id/status', authenticate, async (req, res) => {
   const { status } = req.body;
   const adminNotes = typeof req.body.adminNotes === 'string' ? req.body.adminNotes.trim().slice(0, 4000) : '';
   const parentMessage = typeof req.body.parentMessage === 'string' ? req.body.parentMessage.trim().slice(0, 1000) : '';
-  if (!ADMISSIONS_STATUSES.includes(status)) return res.status(400).json({ message: 'Invalid status' });
+  if (!ADMISSIONS_STATUSES.includes(status) && !EMAIL_COMPATIBLE_LEGACY_STATUSES.includes(status)) {
+    return res.status(400).json({ message: 'Invalid status' });
+  }
 
   const client = await db.pool.connect();
   try {
@@ -334,7 +340,14 @@ router.put('/:id/status', authenticate, async (req, res) => {
       ipAddress: getIp(req),
     });
 
-    const emailResult = await sendAdmissionsStatusEmail(enrollment, status, parentMessage || null);
+    let emailResult;
+    try {
+      emailResult = normalizeEmailResult(
+        await sendAdmissionsStatusEmail(enrollment, status, parentMessage || null),
+      );
+    } catch {
+      emailResult = { success: false, error: EMAIL_ERROR_CATEGORIES.UNKNOWN };
+    }
     await logEmailDelivery(enrollment.id, `status_${status.toLowerCase()}`, emailResult);
     if (!emailResult.success) {
       console.error(`Status updated for ${enrollment.application_reference}; parent email failed`);
@@ -375,6 +388,8 @@ const createAdmissionsEmailResendHandler = ({
     status_registration_pending: { status: 'REGISTRATION_PENDING' },
     status_registered: { status: 'REGISTERED' },
     status_not_accepted: { status: 'NOT_ACCEPTED' },
+    status_waitlisted: { status: 'waitlisted' },
+    status_rejected: { status: 'rejected' },
   });
   const resendDefinition = resendableEmailTypes[emailType];
   if (!resendDefinition) return res.status(400).json({ message: 'Invalid admissions email type' });
@@ -417,9 +432,14 @@ const createAdmissionsEmailResendHandler = ({
       return res.status(409).json({ message: 'Application status has changed since this email failed' });
     }
 
-    const emailResult = resendDefinition.send
-      ? await resendDefinition.send(enrollment)
-      : await sendStatusEmail(enrollment, resendDefinition.status, enrollment.parent_status_message || null);
+    let emailResult;
+    try {
+      emailResult = normalizeEmailResult(resendDefinition.send
+        ? await resendDefinition.send(enrollment)
+        : await sendStatusEmail(enrollment, resendDefinition.status, enrollment.parent_status_message || null));
+    } catch {
+      emailResult = { success: false, error: EMAIL_ERROR_CATEGORIES.UNKNOWN };
+    }
     await logEmailDelivery(enrollment.id, emailType, emailResult, client, true);
     await client.query('COMMIT');
 

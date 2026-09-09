@@ -1,65 +1,107 @@
-const nodemailer = require('nodemailer');
+const { google } = require('googleapis');
 const { STATUS_LABELS } = require('../utils/admissions');
 
+const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+const REQUIRED_SENDER_ADDRESS = 'autom8streamlining@gmail.com';
+const SENDER_NAME = 'Harmony Learning Institute Admissions — powered by AutoM8';
+const REPLY_TO = 'harmonylearninginstitute@gmail.com';
+
 const EMAIL_ERROR_CATEGORIES = Object.freeze({
-  AUTH: 'SMTP_AUTH_FAILED',
-  CONNECTION: 'SMTP_CONNECTION_FAILED',
-  TIMEOUT: 'SMTP_TIMEOUT',
+  AUTH: 'EMAIL_AUTH_FAILED',
+  PERMISSION: 'EMAIL_PERMISSION_DENIED',
+  API: 'EMAIL_API_FAILED',
+  TIMEOUT: 'EMAIL_API_TIMEOUT',
+  RATE_LIMITED: 'EMAIL_RATE_LIMITED',
   REJECTED: 'EMAIL_REJECTED',
+  SENDER: 'EMAIL_SENDER_MISMATCH',
   CONFIGURATION: 'EMAIL_CONFIGURATION_MISSING',
   UNKNOWN: 'UNKNOWN_EMAIL_FAILURE',
 });
+const SAFE_EMAIL_ERRORS = new Set(Object.values(EMAIL_ERROR_CATEGORIES));
 
-const getSmtpConfig = (environment = process.env) => {
+const getGmailApiConfig = (environment = process.env) => {
+  const clientId = String(environment.GOOGLE_GMAIL_CLIENT_ID || '').trim();
+  const clientSecret = String(environment.GOOGLE_GMAIL_CLIENT_SECRET || '').trim();
+  const refreshToken = String(environment.GOOGLE_GMAIL_REFRESH_TOKEN || '').trim();
   const user = String(environment.GMAIL_USER || '').trim();
-  const appPassword = String(environment.GMAIL_APP_PASSWORD || '').replace(/\s/g, '');
   return {
-    configured: Boolean(user && appPassword),
+    configured: Boolean(clientId && clientSecret && refreshToken && user),
+    senderValid: user === REQUIRED_SENDER_ADDRESS,
+    clientId,
+    clientSecret,
+    refreshToken,
     user,
-    appPassword,
   };
 };
 
 const sanitizeEmailError = (error) => {
-  const code = String(error?.code || '').toUpperCase();
-  const responseCode = Number(error?.responseCode || 0);
-  if (code === 'EAUTH' || responseCode === 534 || responseCode === 535) {
+  const code = String(error?.code || error?.cause?.code || '').toUpperCase();
+  const statusCode = Number(error?.response?.status || error?.status || error?.code || 0);
+  const providerStatus = String(error?.response?.data?.error?.status || '').toUpperCase();
+  const providerError = String(
+    error?.response?.data?.error
+    || error?.response?.data?.error_description
+    || error?.message
+    || '',
+  ).toLowerCase();
+  if (statusCode === 401 || providerStatus === 'UNAUTHENTICATED' || providerError.includes('invalid_grant')) {
     return EMAIL_ERROR_CATEGORIES.AUTH;
   }
-  if (code === 'ETIMEDOUT' || code === 'ETIMEOUT') {
+  if (statusCode === 403 || providerStatus === 'PERMISSION_DENIED') {
+    return EMAIL_ERROR_CATEGORIES.PERMISSION;
+  }
+  if (statusCode === 429 || providerStatus === 'RESOURCE_EXHAUSTED') {
+    return EMAIL_ERROR_CATEGORIES.RATE_LIMITED;
+  }
+  if (code === 'ETIMEDOUT' || code === 'ETIMEOUT' || code === 'ECONNABORTED') {
     return EMAIL_ERROR_CATEGORIES.TIMEOUT;
   }
-  if (['ECONNECTION', 'ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EDNS', 'ESOCKET'].includes(code)) {
-    return EMAIL_ERROR_CATEGORIES.CONNECTION;
+  if (statusCode >= 500) {
+    return EMAIL_ERROR_CATEGORIES.API;
   }
-  if (code === 'EENVELOPE' || responseCode >= 500) {
+  if (statusCode === 400 || providerStatus === 'INVALID_ARGUMENT') {
     return EMAIL_ERROR_CATEGORIES.REJECTED;
   }
   return EMAIL_ERROR_CATEGORIES.UNKNOWN;
 };
 
-const createSmtpTransport = (environment = process.env) => {
-  const config = getSmtpConfig(environment);
+const normalizeEmailResult = (result) => {
+  if (result?.success) {
+    return {
+      success: true,
+      ...(result.skipped ? { skipped: true } : {}),
+      ...(result.messageId ? { messageId: String(result.messageId) } : {}),
+    };
+  }
+  const error = SAFE_EMAIL_ERRORS.has(result?.error)
+    ? result.error
+    : EMAIL_ERROR_CATEGORIES.UNKNOWN;
+  return { success: false, error };
+};
+
+const createGmailOAuthClient = (environment = process.env) => {
+  const config = getGmailApiConfig(environment);
   if (!config.configured) return null;
-  return nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 30000,
-    auth: {
-      user: config.user,
-      pass: config.appPassword,
-    },
+  const oauthClient = new google.auth.OAuth2(config.clientId, config.clientSecret);
+  oauthClient.setCredentials({
+    refresh_token: config.refreshToken,
   });
+  return oauthClient;
+};
+
+const createGmailApiClient = (environment = process.env) => {
+  const auth = createGmailOAuthClient(environment);
+  return auth ? google.gmail({ version: 'v1', auth }) : null;
 };
 
 const logEmailTransportStatus = () => {
-  if (getSmtpConfig().configured) {
-    console.log('Admissions email transport: Gmail SMTP configured');
+  const config = getGmailApiConfig();
+  if (config.configured && config.senderValid) {
+    console.log('Admissions email transport: Gmail API OAuth configured');
+  } else if (config.configured) {
+    console.warn(`Admissions email transport: unavailable — ${EMAIL_ERROR_CATEGORIES.SENDER}`);
   } else {
-    console.warn('Admissions email transport: unavailable — missing GMAIL_USER/GMAIL_APP_PASSWORD');
+    console.warn('Admissions email transport: unavailable — missing Gmail API OAuth configuration');
   }
 };
 
@@ -70,25 +112,52 @@ const escapeHtml = (value = '') => String(value)
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#039;');
 
+const sanitizeHeader = (value) => String(value || '').replace(/[\r\n]+/g, ' ').trim();
+const encodeHeader = (value) => `=?UTF-8?B?${Buffer.from(sanitizeHeader(value), 'utf8').toString('base64')}?=`;
+
+const createRawMessage = ({ to, subject, htmlBody, fromAddress }) => {
+  const safeTo = sanitizeHeader(to);
+  const safeFromAddress = sanitizeHeader(fromAddress);
+  if (!safeTo || !safeFromAddress) throw Object.assign(new Error('Invalid email envelope'), { status: 400 });
+  const mimeMessage = [
+    `From: ${encodeHeader(SENDER_NAME)} <${safeFromAddress}>`,
+    `To: ${safeTo}`,
+    `Reply-To: ${REPLY_TO}`,
+    `Subject: ${encodeHeader(subject)}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    Buffer.from(String(htmlBody || ''), 'utf8').toString('base64'),
+  ].join('\r\n');
+  return Buffer.from(mimeMessage, 'utf8').toString('base64url');
+};
+
 async function sendEmail(to, subject, htmlBody) {
-  const config = getSmtpConfig();
+  const config = getGmailApiConfig();
   if (!config.configured) {
     console.error(`Admissions email failed: ${EMAIL_ERROR_CATEGORIES.CONFIGURATION}`);
     return { success: false, error: EMAIL_ERROR_CATEGORIES.CONFIGURATION };
   }
+  if (!config.senderValid) {
+    console.error(`Admissions email failed: ${EMAIL_ERROR_CATEGORIES.SENDER}`);
+    return { success: false, error: EMAIL_ERROR_CATEGORIES.SENDER };
+  }
 
   try {
-    const transport = createSmtpTransport();
-    const result = await transport.sendMail({
-      from: {
-        name: 'Harmony Learning Institute',
-        address: config.user,
+    const gmail = createGmailApiClient();
+    const result = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw: createRawMessage({
+          to,
+          subject,
+          htmlBody,
+          fromAddress: config.user,
+        }),
       },
-      to,
-      subject,
-      html: htmlBody,
-    });
-    return { success: true, messageId: result.messageId };
+    }, { timeout: 30000 });
+    return { success: true, messageId: result.data.id };
   } catch (error) {
     const category = sanitizeEmailError(error);
     console.error(`Admissions email failed: ${category}`);
@@ -97,11 +166,23 @@ async function sendEmail(to, subject, htmlBody) {
 }
 
 async function verifyEmailTransport() {
-  if (!getSmtpConfig().configured) {
+  const config = getGmailApiConfig();
+  if (!config.configured) {
     return { success: false, error: EMAIL_ERROR_CATEGORIES.CONFIGURATION };
   }
+  if (!config.senderValid) {
+    return { success: false, error: EMAIL_ERROR_CATEGORIES.SENDER };
+  }
   try {
-    await createSmtpTransport().verify();
+    const oauthClient = createGmailOAuthClient();
+    const accessTokenResult = await oauthClient.getAccessToken();
+    const accessToken = typeof accessTokenResult === 'string' ? accessTokenResult : accessTokenResult?.token;
+    if (!accessToken) return { success: false, error: EMAIL_ERROR_CATEGORIES.AUTH };
+    const tokenInfo = await oauthClient.getTokenInfo(accessToken);
+    const scopes = [...new Set(tokenInfo.scopes || [])];
+    if (scopes.length !== 1 || scopes[0] !== GMAIL_SEND_SCOPE) {
+      return { success: false, error: EMAIL_ERROR_CATEGORIES.PERMISSION };
+    }
     return { success: true };
   } catch (error) {
     return { success: false, error: sanitizeEmailError(error) };
@@ -156,9 +237,12 @@ const statusEmailContent = (status, reference, parentMessage) => {
     UNDER_REVIEW: ['Harmony Application Update', 'Your application is currently being reviewed by our admissions team.'],
     MORE_INFORMATION_REQUIRED: ['Additional Information Required', 'Harmony requires additional information before the application can proceed.'],
     APPROVED: ['Application Approved — Harmony Learning Institute', `We are pleased to inform you that the application referenced ${safeRef} has been approved.<br><br>The next step is to complete the registration process. Further registration instructions will be provided through the secure Harmony registration process.`],
+    approved: ['Application Approved — Harmony Learning Institute', `We are pleased to inform you that the application referenced ${safeRef} has been approved.<br><br>The next step is to complete the registration process. Further registration instructions will be provided through the secure Harmony registration process.`],
+    waitlisted: ['Harmony Application Waitlist Update', 'The application has been placed on the waiting list. Our admissions team will contact you if placement becomes available.'],
     REGISTRATION_PENDING: ['Harmony Registration Update', 'Your approved application is now awaiting completion of the registration process.'],
     REGISTERED: ['Welcome to Harmony Learning Institute', 'Registration has been completed. Welcome to Harmony Learning Institute.'],
     NOT_ACCEPTED: ['Harmony Application Update', 'Thank you for your interest in Harmony Learning Institute. We are unable to offer placement for this application at this time.'],
+    rejected: ['Harmony Application Update', 'Thank you for your interest in Harmony Learning Institute. We are unable to offer placement for this application at this time.'],
   }[status];
   if (!content) return null;
   return {
@@ -174,10 +258,15 @@ async function sendAdmissionsStatusEmail(enrollment, status, parentMessage) {
 }
 
 module.exports = {
+  GMAIL_SEND_SCOPE,
+  REQUIRED_SENDER_ADDRESS,
   EMAIL_ERROR_CATEGORIES,
-  createSmtpTransport,
-  getSmtpConfig,
+  createGmailApiClient,
+  createGmailOAuthClient,
+  createRawMessage,
+  getGmailApiConfig,
   logEmailTransportStatus,
+  normalizeEmailResult,
   sanitizeEmailError,
   sendEmail,
   sendEnrollmentNotification,

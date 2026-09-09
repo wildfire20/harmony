@@ -5,37 +5,72 @@ const path = require('node:path');
 
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
-const originalUser = process.env.GMAIL_USER;
-const originalPassword = process.env.GMAIL_APP_PASSWORD;
+const gmailEnvironmentKeys = [
+  'GOOGLE_GMAIL_CLIENT_ID',
+  'GOOGLE_GMAIL_CLIENT_SECRET',
+  'GOOGLE_GMAIL_REFRESH_TOKEN',
+  'GMAIL_USER',
+];
+const originalGmailEnvironment = Object.fromEntries(
+  gmailEnvironmentKeys.map((key) => [key, process.env[key]]),
+);
 
-const loadServiceWithTransport = (transport) => {
-  const nodemailerPath = require.resolve('nodemailer');
+const configureGmailEnvironment = () => {
+  process.env.GOOGLE_GMAIL_CLIENT_ID = 'test-client-id';
+  process.env.GOOGLE_GMAIL_CLIENT_SECRET = 'test-client-secret';
+  process.env.GOOGLE_GMAIL_REFRESH_TOKEN = 'test-refresh-token';
+  process.env.GMAIL_USER = 'autom8streamlining@gmail.com';
+};
+
+const loadServiceWithGoogle = ({ send, getAccessToken, getTokenInfo }) => {
+  const googlePath = require.resolve('googleapis');
   const servicePath = require.resolve('../services/gmailService');
-  require(nodemailerPath);
-  require.cache[nodemailerPath].exports = {
-    createTransport: () => transport,
+  require(googlePath);
+  class OAuth2 {
+    setCredentials(credentials) {
+      this.credentials = credentials;
+    }
+    async getAccessToken() {
+      return getAccessToken ? getAccessToken() : { token: 'test-access-token' };
+    }
+    async getTokenInfo(token) {
+      return getTokenInfo
+        ? getTokenInfo(token)
+        : { scopes: ['https://www.googleapis.com/auth/gmail.send'] };
+    }
+  }
+  require.cache[googlePath].exports = {
+    google: {
+      auth: { OAuth2 },
+      gmail: () => ({
+        users: {
+          messages: {
+            send: send || (async () => ({ data: { id: 'gmail-message-id' } })),
+          },
+        },
+      }),
+    },
   };
   delete require.cache[servicePath];
   return require(servicePath);
 };
 
 test.afterEach(() => {
-  if (originalUser === undefined) delete process.env.GMAIL_USER;
-  else process.env.GMAIL_USER = originalUser;
-  if (originalPassword === undefined) delete process.env.GMAIL_APP_PASSWORD;
-  else process.env.GMAIL_APP_PASSWORD = originalPassword;
+  gmailEnvironmentKeys.forEach((key) => {
+    if (originalGmailEnvironment[key] === undefined) delete process.env[key];
+    else process.env[key] = originalGmailEnvironment[key];
+  });
   delete require.cache[require.resolve('../services/gmailService')];
-  delete require.cache[require.resolve('nodemailer')];
+  delete require.cache[require.resolve('googleapis')];
 });
 
-test('application and Admin confirmations use Gmail SMTP without exposing credentials', async () => {
-  process.env.GMAIL_USER = 'sender@example.com';
-  process.env.GMAIL_APP_PASSWORD = 'test app password';
+test('application and Admin confirmations use Gmail API with required sender headers', async () => {
+  configureGmailEnvironment();
   const sent = [];
-  const service = loadServiceWithTransport({
-    sendMail: async (message) => {
-      sent.push(message);
-      return { messageId: `message-${sent.length}` };
+  const service = loadServiceWithGoogle({
+    send: async (request, options) => {
+      sent.push({ request, options });
+      return { data: { id: `message-${sent.length}` } };
     },
   });
   const enrollment = {
@@ -52,21 +87,28 @@ test('application and Admin confirmations use Gmail SMTP without exposing creden
   assert.equal((await service.sendApplicationConfirmation(enrollment)).success, true);
   assert.equal((await service.sendEnrollmentNotification(enrollment)).success, true);
   assert.equal(sent.length, 2);
-  assert.equal(sent[0].to, 'parent@example.com');
-  assert.equal(sent[0].from.address, 'sender@example.com');
-  assert.match(sent[0].subject, /Application Received/);
-  assert.match(sent[1].subject, /HLI-2027-0099/);
-  assert.doesNotMatch(JSON.stringify(sent), /test app password/);
+  assert.equal(sent[0].request.userId, 'me');
+  assert.equal(sent[0].options.timeout, 30000);
+  const firstMessage = Buffer.from(sent[0].request.requestBody.raw, 'base64url').toString('utf8');
+  const secondMessage = Buffer.from(sent[1].request.requestBody.raw, 'base64url').toString('utf8');
+  const encodedSenderName = Buffer.from(
+    'Harmony Learning Institute Admissions — powered by AutoM8',
+    'utf8',
+  ).toString('base64');
+  assert.match(firstMessage, new RegExp(`From: =\\?UTF-8\\?B\\?${encodedSenderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?= <autom8streamlining@gmail\\.com>`));
+  assert.match(firstMessage, /Reply-To: harmonylearninginstitute@gmail\.com/);
+  assert.match(firstMessage, /To: parent@example\.com/);
+  assert.match(secondMessage, /To: harmonylearninginstitute@gmail\.com/);
+  assert.doesNotMatch(JSON.stringify(sent), /test-client-secret|test-refresh-token/);
 });
 
-test('approval email uses SMTP and excludes internal Admin notes', async () => {
-  process.env.GMAIL_USER = 'sender@example.com';
-  process.env.GMAIL_APP_PASSWORD = 'app-password';
-  let sentMessage;
-  const service = loadServiceWithTransport({
-    sendMail: async (message) => {
-      sentMessage = message;
-      return { messageId: 'approval-message' };
+test('approval email uses Gmail API and excludes internal Admin notes', async () => {
+  configureGmailEnvironment();
+  let rawMessage;
+  const service = loadServiceWithGoogle({
+    send: async (request) => {
+      rawMessage = Buffer.from(request.requestBody.raw, 'base64url').toString('utf8');
+      return { data: { id: 'approval-message' } };
     },
   });
   const result = await service.sendAdmissionsStatusEmail({
@@ -76,48 +118,162 @@ test('approval email uses SMTP and excludes internal Admin notes', async () => {
   }, 'APPROVED', 'Parent-safe update');
 
   assert.equal(result.success, true);
-  assert.match(sentMessage.subject, /Application Approved/);
-  assert.match(sentMessage.html, /Parent-safe update/);
-  assert.doesNotMatch(sentMessage.html, /PRIVATE ADMIN NOTE/);
+  const encodedBody = rawMessage.split('\r\n\r\n')[1];
+  const html = Buffer.from(encodedBody, 'base64').toString('utf8');
+  assert.match(html, /Parent-safe update/);
+  assert.doesNotMatch(html, /PRIVATE ADMIN NOTE/);
 });
 
-test('missing configuration and SMTP failures return sanitized categories', async () => {
-  delete process.env.GMAIL_USER;
-  delete process.env.GMAIL_APP_PASSWORD;
-  let service = loadServiceWithTransport({});
+test('missing configuration and Gmail API failures return sanitized categories', async () => {
+  gmailEnvironmentKeys.forEach((key) => delete process.env[key]);
+  let service = loadServiceWithGoogle({});
   assert.deepEqual(
     await service.sendEmail('parent@example.com', 'Subject', '<p>Body</p>'),
     { success: false, error: 'EMAIL_CONFIGURATION_MISSING' },
   );
 
-  process.env.GMAIL_USER = 'sender@example.com';
-  process.env.GMAIL_APP_PASSWORD = 'secret-value';
-  service = loadServiceWithTransport({
-    sendMail: async () => {
-      const error = new Error('Authentication failed using secret-value');
-      error.code = 'EAUTH';
-      error.responseCode = 535;
+  configureGmailEnvironment();
+  service = loadServiceWithGoogle({
+    send: async () => {
+      const error = new Error('Request failed without credential details');
+      error.response = { status: 401, data: { error: { status: 'UNAUTHENTICATED' } } };
       throw error;
     },
   });
   assert.deepEqual(
     await service.sendEmail('parent@example.com', 'Subject', '<p>Body</p>'),
-    { success: false, error: 'SMTP_AUTH_FAILED' },
+    { success: false, error: 'EMAIL_AUTH_FAILED' },
   );
 });
 
-test('verification authenticates without sending an email', async () => {
-  process.env.GMAIL_USER = 'sender@example.com';
-  process.env.GMAIL_APP_PASSWORD = 'app-password';
-  let verified = 0;
+test('verification obtains and validates a scoped OAuth token without sending an email', async () => {
+  configureGmailEnvironment();
+  let tokenRequests = 0;
+  let tokenInfoRequests = 0;
   let sent = 0;
-  const service = loadServiceWithTransport({
-    verify: async () => { verified += 1; },
-    sendMail: async () => { sent += 1; },
+  const service = loadServiceWithGoogle({
+    getAccessToken: async () => {
+      tokenRequests += 1;
+      return { token: 'access-token' };
+    },
+    getTokenInfo: async (token) => {
+      tokenInfoRequests += 1;
+      assert.equal(token, 'access-token');
+      return { scopes: ['https://www.googleapis.com/auth/gmail.send'] };
+    },
+    send: async () => {
+      sent += 1;
+      return { data: { id: 'unexpected' } };
+    },
   });
   assert.deepEqual(await service.verifyEmailTransport(), { success: true });
-  assert.equal(verified, 1);
+  assert.equal(tokenRequests, 1);
+  assert.equal(tokenInfoRequests, 1);
   assert.equal(sent, 0);
+});
+
+test('verification rejects OAuth tokens without the gmail.send scope', async () => {
+  configureGmailEnvironment();
+  const service = loadServiceWithGoogle({
+    getTokenInfo: async () => ({ scopes: ['openid'] }),
+  });
+  assert.deepEqual(
+    await service.verifyEmailTransport(),
+    { success: false, error: 'EMAIL_PERMISSION_DENIED' },
+  );
+});
+
+test('verification rejects over-scoped OAuth tokens and a mismatched sender', async () => {
+  configureGmailEnvironment();
+  let service = loadServiceWithGoogle({
+    getTokenInfo: async () => ({
+      scopes: ['https://www.googleapis.com/auth/gmail.send', 'openid'],
+    }),
+  });
+  assert.deepEqual(
+    await service.verifyEmailTransport(),
+    { success: false, error: 'EMAIL_PERMISSION_DENIED' },
+  );
+
+  process.env.GMAIL_USER = 'different-sender@example.com';
+  service = loadServiceWithGoogle({});
+  assert.deepEqual(
+    await service.verifyEmailTransport(),
+    { success: false, error: 'EMAIL_SENDER_MISMATCH' },
+  );
+  assert.deepEqual(
+    await service.sendEmail('parent@example.com', 'Subject', '<p>Body</p>'),
+    { success: false, error: 'EMAIL_SENDER_MISMATCH' },
+  );
+});
+
+test('all supported and legacy admissions outcomes produce an email template', () => {
+  const service = loadServiceWithGoogle({});
+  for (const status of [
+    'UNDER_REVIEW',
+    'MORE_INFORMATION_REQUIRED',
+    'APPROVED',
+    'approved',
+    'waitlisted',
+    'REGISTRATION_PENDING',
+    'REGISTERED',
+    'NOT_ACCEPTED',
+    'rejected',
+  ]) {
+    assert.ok(service.statusEmailContent(status, 'HLI-2027-0099', 'Update'), status);
+  }
+});
+
+test('raw rejected promise details are never persisted to the admissions email log', async () => {
+  const loggedErrors = [];
+  const enrollment = {
+    id: 20,
+    application_reference: 'HLI-2027-0020',
+    status: 'NEW',
+  };
+  const database = {
+    async query(sql, params) {
+      if (String(sql).includes('INSERT INTO enrollments')) return { rows: [enrollment] };
+      if (String(sql).includes('INSERT INTO admissions_email_log')) {
+        loggedErrors.push(params[4]);
+        return { rows: [] };
+      }
+      throw new Error('Unexpected query');
+    },
+    pool: { connect: async () => { throw new Error('not used'); } },
+  };
+  const emailService = {
+    sendApplicationConfirmation: async () => { throw new Error('private provider response'); },
+    sendEnrollmentNotification: async () => { throw new Error('another private response'); },
+    sendAdmissionsStatusEmail: async () => ({ success: true }),
+    EMAIL_ERROR_CATEGORIES: {
+      UNKNOWN: 'UNKNOWN_EMAIL_FAILURE',
+    },
+    normalizeEmailResult: (result) => result?.success
+      ? result
+      : { success: false, error: 'UNKNOWN_EMAIL_FAILURE' },
+  };
+  const loaded = loadEnrollmentRouterWithMocks({ database, emailService });
+  try {
+    const handler = getFinalRouteHandler(loaded.router, '/', 'post');
+    const response = mockResponse();
+    await handler({
+      body: {
+        parentFirstName: 'Parent',
+        parentLastName: 'Example',
+        parentEmail: 'parent@example.com',
+        parentPhone: '0123456789',
+        studentFirstName: 'Learner',
+        studentLastName: 'Example',
+        studentDateOfBirth: '2015-01-01',
+        gradeApplying: 'grade-5',
+      },
+    }, response);
+    assert.equal(response.statusCode, 201);
+    assert.deepEqual(loggedErrors, ['UNKNOWN_EMAIL_FAILURE', 'UNKNOWN_EMAIL_FAILURE']);
+  } finally {
+    loaded.restore();
+  }
 });
 
 const mockResponse = () => ({
@@ -144,7 +300,28 @@ const loadEnrollmentRouterWithMocks = ({ database, emailService }) => {
   const originals = dependencies.map((dependency) => require.cache[dependency].exports);
 
   require.cache[dbPath].exports = database;
-  require.cache[emailPath].exports = emailService;
+  require.cache[emailPath].exports = {
+    EMAIL_ERROR_CATEGORIES: { UNKNOWN: 'UNKNOWN_EMAIL_FAILURE' },
+    normalizeEmailResult: (result) => {
+      if (result?.success) return result;
+      const allowed = new Set([
+        'EMAIL_AUTH_FAILED',
+        'EMAIL_PERMISSION_DENIED',
+        'EMAIL_API_FAILED',
+        'EMAIL_API_TIMEOUT',
+        'EMAIL_RATE_LIMITED',
+        'EMAIL_REJECTED',
+        'EMAIL_SENDER_MISMATCH',
+        'EMAIL_CONFIGURATION_MISSING',
+        'UNKNOWN_EMAIL_FAILURE',
+      ]);
+      return {
+        success: false,
+        error: allowed.has(result?.error) ? result.error : 'UNKNOWN_EMAIL_FAILURE',
+      };
+    },
+    ...emailService,
+  };
   require.cache[authPath].exports = { authenticate: (req, res, next) => next() };
   require.cache[auditPath].exports = {
     logAudit: async () => {},
@@ -273,7 +450,7 @@ test('resend failure is safely logged after the failed transport attempt', async
   const fixture = createResendDatabase();
   const handler = createAdmissionsEmailResendHandler({
     database: fixture.database,
-    sendStatusEmail: async () => ({ success: false, error: 'SMTP_AUTH_FAILED' }),
+    sendStatusEmail: async () => ({ success: false, error: 'EMAIL_AUTH_FAILED' }),
   });
   const response = mockResponse();
   await handler({
@@ -285,10 +462,37 @@ test('resend failure is safely logged after the failed transport attempt', async
   const logInsert = fixture.queries.find(({ sql }) => String(sql).includes('INSERT INTO admissions_email_log'));
   assert.ok(logInsert);
   assert.equal(logInsert.params[2], 'failed');
-  assert.equal(logInsert.params[4], 'SMTP_AUTH_FAILED');
+  assert.equal(logInsert.params[4], 'EMAIL_AUTH_FAILED');
 });
 
-test('application remains persisted when both SMTP deliveries fail', async () => {
+test('a thrown resend transport failure is sanitized, logged, and returned as 502', async () => {
+  const { createAdmissionsEmailResendHandler } = require('../routes/enrollments');
+  const fixture = createResendDatabase();
+  const handler = createAdmissionsEmailResendHandler({
+    database: fixture.database,
+    sendStatusEmail: async () => {
+      throw new Error('private provider response with credential details');
+    },
+  });
+  const response = mockResponse();
+  await handler({
+    user: { role: 'admin' },
+    params: { id: '19' },
+    body: { emailType: 'status_approved' },
+  }, response);
+  assert.equal(response.statusCode, 502);
+  assert.deepEqual(response.body, {
+    message: 'Admissions email could not be delivered',
+    error: 'UNKNOWN_EMAIL_FAILURE',
+  });
+  const logInsert = fixture.queries.find(({ sql }) => String(sql).includes('INSERT INTO admissions_email_log'));
+  assert.ok(logInsert);
+  assert.equal(logInsert.params[2], 'failed');
+  assert.equal(logInsert.params[4], 'UNKNOWN_EMAIL_FAILURE');
+  assert.ok(fixture.queries.some(({ sql }) => String(sql) === 'COMMIT'));
+});
+
+test('application remains persisted when both Gmail API deliveries fail', async () => {
   const events = [];
   const enrollment = {
     id: 19,
@@ -313,13 +517,13 @@ test('application remains persisted when both SMTP deliveries fail', async () =>
   const emailService = {
     sendApplicationConfirmation: async () => {
       events.push('parent-email-attempted');
-      return { success: false, error: 'SMTP_AUTH_FAILED' };
+      return { success: false, error: 'EMAIL_AUTH_FAILED' };
     },
     sendEnrollmentNotification: async () => {
       events.push('admin-email-attempted');
-      return { success: false, error: 'SMTP_AUTH_FAILED' };
+      return { success: false, error: 'EMAIL_AUTH_FAILED' };
     },
-    sendAdmissionsStatusEmail: async () => ({ success: false, error: 'SMTP_AUTH_FAILED' }),
+    sendAdmissionsStatusEmail: async () => ({ success: false, error: 'EMAIL_AUTH_FAILED' }),
   };
   const loaded = loadEnrollmentRouterWithMocks({ database, emailService });
   try {
@@ -348,10 +552,11 @@ test('application remains persisted when both SMTP deliveries fail', async () =>
   }
 });
 
-test('approved status remains committed after SMTP failure and duplicate save does not resend', async () => {
+test('approved status remains committed after Gmail API failure and duplicate save does not resend', async () => {
   const events = [];
   let storedStatus = 'NEW';
   let statusEmailCalls = 0;
+  const attemptedStatuses = [];
   const client = {
     async query(sql, params) {
       const text = String(sql);
@@ -399,10 +604,11 @@ test('approved status remains committed after SMTP failure and duplicate save do
   const emailService = {
     sendApplicationConfirmation: async () => ({ success: true }),
     sendEnrollmentNotification: async () => ({ success: true }),
-    sendAdmissionsStatusEmail: async () => {
+    sendAdmissionsStatusEmail: async (enrollment, status) => {
       statusEmailCalls += 1;
+      attemptedStatuses.push(status);
       events.push('status-email-attempted');
-      return { success: false, error: 'SMTP_AUTH_FAILED' };
+      return { success: false, error: 'EMAIL_AUTH_FAILED' };
     },
   };
   const loaded = loadEnrollmentRouterWithMocks({ database, emailService });
@@ -426,6 +632,13 @@ test('approved status remains committed after SMTP failure and duplicate save do
     assert.equal(response.statusCode, 200);
     assert.equal(response.body.statusChanged, false);
     assert.equal(statusEmailCalls, 1);
+
+    response = mockResponse();
+    await handler({ ...request, body: { ...request.body, status: 'waitlisted' } }, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(storedStatus, 'waitlisted');
+    assert.equal(statusEmailCalls, 2);
+    assert.deepEqual(attemptedStatuses, ['APPROVED', 'waitlisted']);
   } finally {
     loaded.restore();
   }

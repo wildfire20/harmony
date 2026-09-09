@@ -20,6 +20,8 @@ Allowed email types are:
 - `status_registration_pending`
 - `status_registered`
 - `status_not_accepted`
+- `status_waitlisted`
+- `status_rejected`
 
 The endpoint only retries the latest unresolved failed attempt for that application and email type. Status-email retries are allowed only while the application still has the corresponding status. The recipient is always loaded from the application or server configuration; the request cannot provide a recipient.
 
@@ -33,5 +35,5 @@ Responses:
 - `403`: Admin access required.
 - `404`: application not found.
 - `409`: no unresolved failure, status changed, or another retry is active.
-- `502`: SMTP delivery failed; the sanitized category is included.
+- `502`: Gmail API delivery failed; the sanitized category is included.
 - `500`: unexpected server failure.
