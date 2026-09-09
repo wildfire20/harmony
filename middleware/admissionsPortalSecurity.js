@@ -29,8 +29,16 @@ const tokenSafeRequestLogger = (req, res, next) => {
   next();
 };
 
+const securePortalHeaders = (req, res, next) => {
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  res.set('Cache-Control', 'no-store');
+  next();
+};
+
 module.exports = {
   portalReadLimiter,
   portalWriteLimiter,
+  securePortalHeaders,
   tokenSafeRequestLogger,
 };

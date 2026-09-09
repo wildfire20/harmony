@@ -1,0 +1,686 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const http = require('node:http');
+const net = require('node:net');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const express = require('express');
+const { Pool } = require('pg');
+
+const root = path.join(__dirname, '..');
+const migration = fs.readFileSync(
+  path.join(root, 'migrations', 'secure_registration_portal_phase.sql'),
+  'utf8',
+);
+
+const getFreePort = () => new Promise((resolve, reject) => {
+  const server = net.createServer();
+  server.once('error', reject);
+  server.listen(0, '127.0.0.1', () => {
+    const { port } = server.address();
+    server.close(() => resolve(port));
+  });
+});
+
+const requestJson = (server, method, route, body) => new Promise((resolve, reject) => {
+  const payload = body === undefined ? null : JSON.stringify(body);
+  const request = http.request({
+    host: '127.0.0.1',
+    port: server.address().port,
+    path: route,
+    method,
+    headers: payload ? {
+      'content-type': 'application/json',
+      'content-length': Buffer.byteLength(payload),
+    } : {},
+  }, (response) => {
+    let text = '';
+    response.setEncoding('utf8');
+    response.on('data', (chunk) => { text += chunk; });
+    response.on('end', () => {
+      resolve({
+        status: response.statusCode,
+        headers: response.headers,
+        body: text ? JSON.parse(text) : null,
+      });
+    });
+  });
+  request.once('error', reject);
+  if (payload) request.write(payload);
+  request.end();
+});
+
+test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120000 }, async (t) => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'harmony-portal-pg-'));
+  const dataDirectory = path.join(temporaryRoot, 'data');
+  const logFile = path.join(temporaryRoot, 'postgres.log');
+  const port = await getFreePort();
+  let pool;
+  let server;
+
+  try {
+    execFileSync('initdb', [
+      '-D', dataDirectory,
+      '--auth=trust',
+      '--username=postgres',
+      '--no-locale',
+      '--encoding=UTF8',
+    ], { stdio: 'ignore' });
+    execFileSync('pg_ctl', [
+      '-D', dataDirectory,
+      '-l', logFile,
+      '-o', `-F -p ${port} -h 127.0.0.1 -k ${temporaryRoot}`,
+      '-w', 'start',
+    ], { stdio: 'ignore' });
+
+    pool = new Pool({
+      host: '127.0.0.1',
+      port,
+      database: 'postgres',
+      user: 'postgres',
+      ssl: false,
+      max: 20,
+    });
+    const database = {
+      pool,
+      query: (sql, params) => pool.query(sql, params),
+    };
+
+    await pool.query(`
+      CREATE TABLE users (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255),
+        first_name VARCHAR(100),
+        last_name VARCHAR(100),
+        role VARCHAR(20) NOT NULL
+      );
+      CREATE TABLE enrollments (
+        id SERIAL PRIMARY KEY,
+        application_reference VARCHAR(32),
+        parent_first_name VARCHAR(100) NOT NULL,
+        parent_last_name VARCHAR(100) NOT NULL,
+        parent_email VARCHAR(255) NOT NULL,
+        parent_phone VARCHAR(50) NOT NULL,
+        student_first_name VARCHAR(100) NOT NULL,
+        student_last_name VARCHAR(100) NOT NULL,
+        student_date_of_birth DATE NOT NULL,
+        grade_applying VARCHAR(50) NOT NULL,
+        boarding_option BOOLEAN DEFAULT false,
+        previous_school VARCHAR(255),
+        additional_notes TEXT,
+        admin_notes TEXT,
+        status VARCHAR(40) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE enrollment_status_history (
+        id BIGSERIAL PRIMARY KEY,
+        enrollment_id INTEGER NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
+        previous_status VARCHAR(40),
+        new_status VARCHAR(40) NOT NULL,
+        changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        parent_message TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE registration_records (
+        id BIGSERIAL PRIMARY KEY,
+        enrollment_id INTEGER NOT NULL UNIQUE REFERENCES enrollments(id) ON DELETE CASCADE,
+        form_status VARCHAR(20) NOT NULL DEFAULT 'NOT_STARTED'
+          CHECK (form_status IN ('NOT_STARTED', 'IN_PROGRESS', 'SUBMITTED', 'CORRECTIONS_REQUESTED')),
+        residential_address JSONB NOT NULL DEFAULT '{}'::jsonb,
+        postal_address JSONB NOT NULL DEFAULT '{}'::jsonb,
+        emergency_contact JSONB NOT NULL DEFAULT '{}'::jsonb,
+        service_selections JSONB NOT NULL DEFAULT '{}'::jsonb,
+        confirmed_at TIMESTAMP,
+        started_at TIMESTAMP,
+        submitted_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE admissions_portal_tokens (
+        id BIGSERIAL PRIMARY KEY,
+        enrollment_id INTEGER NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
+        purpose VARCHAR(32) NOT NULL
+          CHECK (purpose IN ('UPDATE_APPLICATION', 'COMPLETE_REGISTRATION')),
+        token_hash CHAR(64) NOT NULL UNIQUE,
+        issued_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP NOT NULL,
+        revoked_at TIMESTAMP,
+        replaced_by_token_id BIGINT REFERENCES admissions_portal_tokens(id) ON DELETE SET NULL,
+        first_used_at TIMESTAMP,
+        last_used_at TIMESTAMP,
+        use_count INTEGER NOT NULL DEFAULT 0 CHECK (use_count >= 0),
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (expires_at > issued_at)
+      );
+      CREATE INDEX idx_admissions_portal_tokens_enrollment
+        ON admissions_portal_tokens(enrollment_id, purpose, issued_at DESC);
+      CREATE UNIQUE INDEX idx_admissions_portal_tokens_one_active
+        ON admissions_portal_tokens(enrollment_id, purpose)
+        WHERE revoked_at IS NULL;
+      CREATE TABLE registration_checklist_items (
+        id BIGSERIAL PRIMARY KEY,
+        enrollment_id INTEGER NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
+        item_type VARCHAR(40) NOT NULL
+          CHECK (item_type IN (
+            'BIRTH_CERTIFICATE', 'PARENT_GUARDIAN_ID', 'LATEST_SCHOOL_REPORT',
+            'TRANSFER_DOCUMENT', 'REGISTRATION_FORM'
+          )),
+        status VARCHAR(24) NOT NULL DEFAULT 'MISSING'
+          CHECK (status IN ('MISSING', 'RECEIVED', 'BRING_IN_PERSON', 'NOT_APPLICABLE')),
+        requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        requested_at TIMESTAMP,
+        received_at TIMESTAMP,
+        admin_note TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (enrollment_id, item_type)
+      );
+      CREATE INDEX idx_registration_checklist_enrollment
+        ON registration_checklist_items(enrollment_id);
+      CREATE TABLE admissions_portal_documents (
+        id BIGSERIAL PRIMARY KEY,
+        public_id UUID NOT NULL UNIQUE,
+        enrollment_id INTEGER NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
+        checklist_item_id BIGINT REFERENCES registration_checklist_items(id) ON DELETE SET NULL,
+        storage_key VARCHAR(500) NOT NULL UNIQUE,
+        original_filename VARCHAR(255) NOT NULL,
+        content_type VARCHAR(100) NOT NULL,
+        file_size BIGINT NOT NULL CHECK (file_size > 0 AND file_size <= 10485760),
+        review_status VARCHAR(24) NOT NULL DEFAULT 'PENDING'
+          CHECK (review_status IN ('PENDING', 'RECEIVED', 'REJECTED', 'REPLACEMENT_REQUIRED')),
+        reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        reviewed_at TIMESTAMP,
+        uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX idx_admissions_portal_documents_enrollment
+        ON admissions_portal_documents(enrollment_id, uploaded_at DESC);
+      INSERT INTO users (email, first_name, last_name, role) VALUES
+        ('admin@example.test', 'Test', 'Admin', 'admin'),
+        ('learner@example.test', 'Existing', 'Learner', 'student');
+      INSERT INTO enrollments (
+        application_reference, parent_first_name, parent_last_name, parent_email, parent_phone,
+        student_first_name, student_last_name, student_date_of_birth, grade_applying,
+        boarding_option, previous_school, additional_notes, admin_notes, status
+      ) VALUES (
+        'HLI-2027-TEST', 'Parent', 'One', 'parent@example.test', '0712345678',
+        'Child', 'One', '2018-01-02', 'Grade 1', false, 'Previous School',
+        'Existing note', 'Private admin note', 'APPROVED'
+      );
+    `);
+
+    const snapshot = async () => {
+      const enrollments = await pool.query('SELECT * FROM enrollments ORDER BY id');
+      const learners = await pool.query("SELECT * FROM users WHERE role = 'student' ORDER BY id");
+      return JSON.stringify({ enrollments: enrollments.rows, learners: learners.rows });
+    };
+    const before = await snapshot();
+
+    await t.test('migration applies twice without changing enrollment or learner records', async () => {
+      await pool.query(migration);
+      assert.equal(await snapshot(), before);
+      const upgraded = await pool.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'registration_records'
+          AND column_name IN ('requested_application_fields', 'application_update_submitted_at')
+        ORDER BY column_name
+      `);
+      assert.deepEqual(upgraded.rows.map(({ column_name }) => column_name), [
+        'application_update_submitted_at',
+        'requested_application_fields',
+      ]);
+      await pool.query(migration);
+      assert.equal(await snapshot(), before);
+    });
+
+    await t.test('schema has exact critical types, constraints, foreign keys and indexes', async () => {
+      const columns = await pool.query(`
+        SELECT table_name, column_name, data_type, character_maximum_length, is_nullable
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = ANY($1::text[])
+        ORDER BY table_name, ordinal_position
+      `, [[
+        'admissions_portal_tokens',
+        'registration_records',
+        'registration_checklist_items',
+        'admissions_portal_documents',
+      ]]);
+      const findColumn = (table, column) => columns.rows.find(
+        (row) => row.table_name === table && row.column_name === column,
+      );
+      assert.deepEqual(findColumn('admissions_portal_tokens', 'token_hash'), {
+        table_name: 'admissions_portal_tokens',
+        column_name: 'token_hash',
+        data_type: 'character',
+        character_maximum_length: 64,
+        is_nullable: 'NO',
+      });
+      assert.equal(findColumn('registration_records', 'residential_address').data_type, 'jsonb');
+      assert.equal(findColumn('admissions_portal_documents', 'public_id').data_type, 'uuid');
+      const signatures = Object.fromEntries([
+        'admissions_portal_tokens',
+        'registration_records',
+        'registration_checklist_items',
+        'admissions_portal_documents',
+      ].map((table) => [table, columns.rows.filter((row) => row.table_name === table).map((row) => (
+        `${row.column_name}:${row.data_type}${row.character_maximum_length ? `(${row.character_maximum_length})` : ''}:${row.is_nullable}`
+      ))]));
+      assert.deepEqual(signatures, {
+        admissions_portal_tokens: [
+          'id:bigint:NO', 'enrollment_id:integer:NO', 'purpose:character varying(32):NO',
+          'token_hash:character(64):NO', 'issued_by:integer:YES',
+          'issued_at:timestamp without time zone:NO', 'expires_at:timestamp without time zone:NO',
+          'revoked_at:timestamp without time zone:YES', 'replaced_by_token_id:bigint:YES',
+          'first_used_at:timestamp without time zone:YES', 'last_used_at:timestamp without time zone:YES',
+          'use_count:integer:NO', 'created_at:timestamp without time zone:NO',
+        ],
+        registration_records: [
+          'id:bigint:NO', 'enrollment_id:integer:NO', 'form_status:character varying(20):NO',
+          'residential_address:jsonb:NO', 'postal_address:jsonb:NO', 'emergency_contact:jsonb:NO',
+          'service_selections:jsonb:NO', 'confirmed_at:timestamp without time zone:YES',
+          'started_at:timestamp without time zone:YES', 'submitted_at:timestamp without time zone:YES',
+          'created_at:timestamp without time zone:NO', 'updated_at:timestamp without time zone:NO',
+          'requested_application_fields:jsonb:NO',
+          'application_update_submitted_at:timestamp without time zone:YES',
+        ],
+        registration_checklist_items: [
+          'id:bigint:NO', 'enrollment_id:integer:NO', 'item_type:character varying(40):NO',
+          'status:character varying(24):NO', 'requested_by:integer:YES',
+          'requested_at:timestamp without time zone:YES',
+          'received_at:timestamp without time zone:YES', 'admin_note:text:YES',
+          'created_at:timestamp without time zone:NO', 'updated_at:timestamp without time zone:NO',
+          'parent_submission_choice:character varying(20):YES',
+        ],
+        admissions_portal_documents: [
+          'id:bigint:NO', 'public_id:uuid:NO', 'enrollment_id:integer:NO',
+          'checklist_item_id:bigint:YES', 'storage_key:character varying(500):NO',
+          'original_filename:character varying(255):NO', 'content_type:character varying(100):NO',
+          'file_size:bigint:NO', 'review_status:character varying(24):NO',
+          'reviewed_by:integer:YES', 'reviewed_at:timestamp without time zone:YES',
+          'uploaded_at:timestamp without time zone:NO',
+        ],
+      });
+
+      const constraints = await pool.query(`
+        SELECT conrelid::regclass::text AS table_name, contype,
+          pg_get_constraintdef(oid) AS definition
+        FROM pg_constraint
+        WHERE conrelid = ANY($1::regclass[])
+        ORDER BY conrelid::regclass::text, contype, definition
+      `, [[
+        'admissions_portal_tokens',
+        'registration_records',
+        'registration_checklist_items',
+        'admissions_portal_documents',
+      ]]);
+      assert.ok(constraints.rows.some(({ table_name, contype, definition }) => (
+        table_name === 'admissions_portal_tokens'
+        && contype === 'f'
+        && definition.includes('FOREIGN KEY (enrollment_id) REFERENCES enrollments(id)')
+      )));
+      assert.ok(constraints.rows.some(({ table_name, contype, definition }) => (
+        table_name === 'registration_records'
+        && contype === 'u'
+        && definition.includes('UNIQUE (enrollment_id)')
+      )));
+      assert.ok(constraints.rows.some(({ definition }) => definition.includes('CORRECTIONS_REQUESTED')));
+      assert.ok(constraints.rows.some(({ definition }) => definition.includes('parent_submission_choice')));
+      assert.equal(constraints.rows.filter(({ contype }) => contype === 'f').length, 9);
+      assert.equal(constraints.rows.filter(({ contype }) => contype === 'p').length, 4);
+      assert.equal(constraints.rows.filter(({ contype }) => contype === 'u').length, 5);
+      const checks = constraints.rows
+        .filter(({ contype }) => contype === 'c')
+        .map(({ definition }) => definition);
+      assert.equal(checks.length, 9);
+      for (const fragment of [
+        'UPDATE_APPLICATION', 'COMPLETE_REGISTRATION',
+        'expires_at > issued_at', 'use_count >= 0',
+        'NOT_STARTED', 'CORRECTIONS_REQUESTED',
+        'BIRTH_CERTIFICATE', 'REGISTRATION_FORM',
+        'MISSING', 'BRING_IN_PERSON', 'NOT_APPLICABLE',
+        'UPLOAD_LATER',
+        'file_size > 0', 'file_size <= 10485760',
+        'PENDING', 'REPLACEMENT_REQUIRED',
+      ]) assert.ok(checks.some((definition) => definition.includes(fragment)), fragment);
+      const foreignKeys = constraints.rows
+        .filter(({ contype }) => contype === 'f')
+        .map(({ definition }) => definition);
+      for (const fragment of [
+        'FOREIGN KEY (enrollment_id) REFERENCES enrollments(id) ON DELETE CASCADE',
+        'FOREIGN KEY (issued_by) REFERENCES users(id) ON DELETE SET NULL',
+        'FOREIGN KEY (replaced_by_token_id) REFERENCES admissions_portal_tokens(id) ON DELETE SET NULL',
+        'FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE SET NULL',
+        'FOREIGN KEY (checklist_item_id) REFERENCES registration_checklist_items(id) ON DELETE SET NULL',
+        'FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL',
+      ]) assert.ok(foreignKeys.some((definition) => definition.includes(fragment)), fragment);
+
+      const indexes = await pool.query(`
+        SELECT indexname, indexdef
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = ANY($1::text[])
+        ORDER BY indexname
+      `, [[
+        'idx_admissions_portal_tokens_enrollment',
+        'idx_admissions_portal_tokens_one_active',
+        'idx_registration_checklist_enrollment',
+        'idx_admissions_portal_documents_enrollment',
+      ]]);
+      assert.equal(indexes.rows.length, 4);
+      const active = indexes.rows.find(({ indexname }) => indexname === 'idx_admissions_portal_tokens_one_active');
+      assert.match(active.indexdef, /CREATE UNIQUE INDEX/);
+      assert.match(active.indexdef, /\(enrollment_id, purpose\)/);
+      assert.match(active.indexdef, /WHERE \(revoked_at IS NULL\)/);
+      const enrollmentLookup = indexes.rows.find(
+        ({ indexname }) => indexname === 'idx_admissions_portal_tokens_enrollment',
+      );
+      assert.match(enrollmentLookup.indexdef, /\(enrollment_id, purpose, issued_at DESC\)$/);
+      const checklistLookup = indexes.rows.find(
+        ({ indexname }) => indexname === 'idx_registration_checklist_enrollment',
+      );
+      assert.match(checklistLookup.indexdef, /\(enrollment_id\)$/);
+      const documentLookup = indexes.rows.find(
+        ({ indexname }) => indexname === 'idx_admissions_portal_documents_enrollment',
+      );
+      assert.match(documentLookup.indexdef, /\(enrollment_id, uploaded_at DESC\)$/);
+      const allIndexes = await pool.query(`
+        SELECT tablename, COUNT(*)::int AS count
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = ANY($1::text[])
+        GROUP BY tablename
+        ORDER BY tablename
+      `, [[
+        'admissions_portal_tokens',
+        'registration_records',
+        'registration_checklist_items',
+        'admissions_portal_documents',
+      ]]);
+      assert.deepEqual(allIndexes.rows, [
+        { tablename: 'admissions_portal_documents', count: 4 },
+        { tablename: 'admissions_portal_tokens', count: 4 },
+        { tablename: 'registration_checklist_items', count: 3 },
+        { tablename: 'registration_records', count: 2 },
+      ]);
+    });
+
+    const databasePath = require.resolve('../config/database');
+    require.cache[databasePath] = {
+      id: databasePath,
+      filename: databasePath,
+      loaded: true,
+      exports: database,
+    };
+    delete require.cache[require.resolve('../services/admissionsPortalTokenService')];
+    delete require.cache[require.resolve('../middleware/admissionsPortalSchema')];
+    delete require.cache[require.resolve('../routes/admissionsPortal')];
+    const {
+      TOKEN_PURPOSES,
+      issuePortalToken,
+      reissuePortalToken,
+      revokePortalTokens,
+      withValidatedPortalToken,
+    } = require('../services/admissionsPortalTokenService');
+
+    await t.test('concurrent issue and reissue preserve one active token', async () => {
+      await Promise.all(Array.from({ length: 6 }, () => issuePortalToken({
+        enrollmentId: 1,
+        purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION,
+        database,
+      })));
+      await Promise.all(Array.from({ length: 4 }, () => reissuePortalToken({
+        enrollmentId: 1,
+        purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION,
+        database,
+      })));
+      const active = await pool.query(`
+        SELECT COUNT(*)::int AS count FROM admissions_portal_tokens
+        WHERE enrollment_id = 1 AND purpose = 'COMPLETE_REGISTRATION' AND revoked_at IS NULL
+      `);
+      assert.equal(active.rows[0].count, 1);
+    });
+
+    await t.test('concurrent issue and revoke serialize safely', async () => {
+      await Promise.all([
+        issuePortalToken({
+          enrollmentId: 1,
+          purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION,
+          database,
+        }),
+        revokePortalTokens({
+          enrollmentId: 1,
+          purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION,
+          database,
+        }),
+      ]);
+      const active = await pool.query(`
+        SELECT COUNT(*)::int AS count FROM admissions_portal_tokens
+        WHERE enrollment_id = 1 AND purpose = 'COMPLETE_REGISTRATION' AND revoked_at IS NULL
+      `);
+      assert.ok(active.rows[0].count === 0 || active.rows[0].count === 1);
+    });
+
+    await pool.query("UPDATE enrollments SET status = 'MORE_INFORMATION_REQUIRED' WHERE id = 1");
+    const updateToken = await issuePortalToken({
+      enrollmentId: 1,
+      purpose: TOKEN_PURPOSES.UPDATE_APPLICATION,
+      database,
+    });
+
+    await t.test('concurrent protected writes remain atomic', async () => {
+      await Promise.all(Array.from({ length: 5 }, () => withValidatedPortalToken(updateToken.token, {
+        database,
+        action: async (client, context) => {
+          await client.query(`
+            UPDATE enrollments
+            SET additional_notes = COALESCE(additional_notes, '') || 'x'
+            WHERE id = $1
+          `, [context.enrollment_id]);
+        },
+      })));
+      const result = await pool.query('SELECT additional_notes FROM enrollments WHERE id = 1');
+      assert.equal(result.rows[0].additional_notes, 'Existing notexxxxx');
+    });
+
+    await pool.query(`
+      INSERT INTO registration_records (enrollment_id, requested_application_fields)
+      VALUES (1, '["parentPhone"]'::jsonb)
+      ON CONFLICT (enrollment_id) DO UPDATE
+      SET requested_application_fields = EXCLUDED.requested_application_fields;
+      INSERT INTO registration_checklist_items
+        (enrollment_id, item_type, status, requested_at)
+      VALUES (1, 'BIRTH_CERTIFICATE', 'MISSING', CURRENT_TIMESTAMP)
+      ON CONFLICT (enrollment_id, item_type) DO UPDATE
+      SET requested_at = CURRENT_TIMESTAMP, status = 'MISSING';
+    `);
+
+    const app = express();
+    app.use(express.json({ limit: '2mb' }));
+    app.use('/api/admissions-portal', require('../routes/admissionsPortal'));
+    server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    await t.test('Parent API returns safe session and applies only requested updates', async () => {
+      const session = await requestJson(
+        server,
+        'GET',
+        `/api/admissions-portal/session/${updateToken.token}`,
+      );
+      assert.equal(session.status, 200);
+      assert.equal(session.headers['referrer-policy'], 'no-referrer');
+      assert.equal(session.headers['x-robots-tag'], 'noindex, nofollow, noarchive');
+      assert.deepEqual(Object.keys(session.body).sort(), [
+        'access', 'application', 'checklist', 'expiresAt', 'mode', 'registration', 'requestedFields',
+      ]);
+      assert.equal(JSON.stringify(session.body).includes('Private admin note'), false);
+      assert.equal(JSON.stringify(session.body).includes('"id"'), false);
+      assert.equal(JSON.stringify(session.body).includes('token_hash'), false);
+
+      const rejected = await requestJson(
+        server,
+        'PATCH',
+        `/api/admissions-portal/application/${updateToken.token}`,
+        { fields: { parentEmail: 'not-requested@example.test' } },
+      );
+      assert.equal(rejected.status, 400);
+
+      const saved = await requestJson(
+        server,
+        'PATCH',
+        `/api/admissions-portal/application/${updateToken.token}`,
+        {
+          fields: { parentPhone: '0799999999' },
+          checklistChoices: { BIRTH_CERTIFICATE: 'BRING_IN_PERSON' },
+        },
+      );
+      assert.equal(saved.status, 200);
+      const stored = await pool.query(`
+        SELECT e.parent_phone, e.status, ci.status AS checklist_status
+        FROM enrollments e
+        JOIN registration_checklist_items ci ON ci.enrollment_id = e.id
+        WHERE e.id = 1 AND ci.item_type = 'BIRTH_CERTIFICATE'
+      `);
+      assert.equal(stored.rows[0].parent_phone, '0799999999');
+      assert.equal(stored.rows[0].status, 'MORE_INFORMATION_REQUIRED');
+      assert.equal(stored.rows[0].checklist_status, 'BRING_IN_PERSON');
+
+      const submitted = await requestJson(
+        server,
+        'POST',
+        `/api/admissions-portal/application/${updateToken.token}/submit`,
+        {},
+      );
+      assert.deepEqual(submitted.body, {
+        submitted: true,
+        alreadySubmitted: false,
+        statusChanged: false,
+      });
+      const firstSubmissionState = await pool.query(`
+        SELECT application_update_submitted_at, updated_at
+        FROM registration_records WHERE enrollment_id = 1
+      `);
+      const resubmitted = await requestJson(
+        server,
+        'POST',
+        `/api/admissions-portal/application/${updateToken.token}/submit`,
+        {},
+      );
+      assert.deepEqual(resubmitted.body, {
+        submitted: true,
+        alreadySubmitted: true,
+        statusChanged: false,
+      });
+      const repeatedSubmissionState = await pool.query(`
+        SELECT application_update_submitted_at, updated_at
+        FROM registration_records WHERE enrollment_id = 1
+      `);
+      assert.deepEqual(repeatedSubmissionState.rows[0], firstSubmissionState.rows[0]);
+      const unchanged = await pool.query('SELECT status FROM enrollments WHERE id = 1');
+      assert.equal(unchanged.rows[0].status, 'MORE_INFORMATION_REQUIRED');
+    });
+
+    await pool.query(`
+      UPDATE enrollments SET status = 'approved' WHERE id = 1;
+      UPDATE registration_records SET
+        form_status = 'NOT_STARTED',
+        residential_address = '{}'::jsonb,
+        postal_address = '{}'::jsonb,
+        emergency_contact = '{}'::jsonb,
+        service_selections = '{}'::jsonb,
+        confirmed_at = NULL,
+        submitted_at = NULL
+      WHERE enrollment_id = 1;
+    `);
+    const registrationToken = await issuePortalToken({
+      enrollmentId: 1,
+      purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION,
+      database,
+    });
+
+    await t.test('registration drafts, idempotent submission and read-only state work', async () => {
+      const draft = await requestJson(
+        server,
+        'PATCH',
+        `/api/admissions-portal/registration/${registrationToken.token}`,
+        {
+          residentialAddress: {
+            addressLine1: '2 Skilferdoring Street',
+            city: 'Lephalale',
+            postalCode: '0555',
+          },
+          postalAddress: { sameAsResidential: true },
+          emergencyContact: {
+            fullName: 'Emergency Contact',
+            relationship: 'Aunt',
+            phone: '0788888888',
+          },
+          serviceSelections: { boarding: false, transport: true, aftercare: false },
+          confirmed: true,
+        },
+      );
+      assert.equal(draft.status, 200);
+
+      const firstSubmit = await requestJson(
+        server,
+        'POST',
+        `/api/admissions-portal/registration/${registrationToken.token}/submit`,
+        {},
+      );
+      assert.deepEqual(firstSubmit.body, {
+        submitted: true,
+        alreadySubmitted: false,
+        status: 'REGISTRATION_PENDING',
+      });
+      const secondSubmit = await requestJson(
+        server,
+        'POST',
+        `/api/admissions-portal/registration/${registrationToken.token}/submit`,
+        {},
+      );
+      assert.deepEqual(secondSubmit.body, {
+        submitted: true,
+        alreadySubmitted: true,
+        status: 'REGISTRATION_PENDING',
+      });
+
+      const rejectedEdit = await requestJson(
+        server,
+        'PATCH',
+        `/api/admissions-portal/registration/${registrationToken.token}`,
+        { serviceSelections: { transport: false } },
+      );
+      assert.equal(rejectedEdit.status, 404);
+
+      const readOnly = await requestJson(
+        server,
+        'GET',
+        `/api/admissions-portal/session/${registrationToken.token}`,
+      );
+      assert.equal(readOnly.body.access, 'read_only');
+      assert.equal(readOnly.body.registration.formStatus, 'SUBMITTED');
+
+      const status = await pool.query('SELECT status FROM enrollments WHERE id = 1');
+      assert.equal(status.rows[0].status, 'REGISTRATION_PENDING');
+      const history = await pool.query(`
+        SELECT previous_status, new_status, changed_by
+        FROM enrollment_status_history WHERE enrollment_id = 1
+      `);
+      assert.deepEqual(history.rows, [{
+        previous_status: 'approved',
+        new_status: 'REGISTRATION_PENDING',
+        changed_by: null,
+      }]);
+    });
+  } finally {
+    if (server) await new Promise((resolve) => server.close(resolve));
+    if (pool) await pool.end();
+    try {
+      execFileSync('pg_ctl', ['-D', dataDirectory, '-m', 'immediate', '-w', 'stop'], { stdio: 'ignore' });
+    } catch {}
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});

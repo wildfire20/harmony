@@ -12,12 +12,18 @@ CREATE TABLE IF NOT EXISTS registration_records (
   postal_address JSONB NOT NULL DEFAULT '{}'::jsonb,
   emergency_contact JSONB NOT NULL DEFAULT '{}'::jsonb,
   service_selections JSONB NOT NULL DEFAULT '{}'::jsonb,
+  requested_application_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+  application_update_submitted_at TIMESTAMP,
   confirmed_at TIMESTAMP,
   started_at TIMESTAMP,
   submitted_at TIMESTAMP,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE registration_records
+  ADD COLUMN IF NOT EXISTS requested_application_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS application_update_submitted_at TIMESTAMP;
 
 CREATE TABLE IF NOT EXISTS admissions_portal_tokens (
   id BIGSERIAL PRIMARY KEY,
@@ -57,6 +63,8 @@ CREATE TABLE IF NOT EXISTS registration_checklist_items (
     )),
   status VARCHAR(24) NOT NULL DEFAULT 'MISSING'
     CHECK (status IN ('MISSING', 'RECEIVED', 'BRING_IN_PERSON', 'NOT_APPLICABLE')),
+  parent_submission_choice VARCHAR(20)
+    CHECK (parent_submission_choice IN ('UPLOAD_LATER', 'BRING_IN_PERSON')),
   requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   requested_at TIMESTAMP,
   received_at TIMESTAMP,
@@ -65,6 +73,22 @@ CREATE TABLE IF NOT EXISTS registration_checklist_items (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (enrollment_id, item_type)
 );
+
+ALTER TABLE registration_checklist_items
+  ADD COLUMN IF NOT EXISTS parent_submission_choice VARCHAR(20);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'registration_checklist_items'::regclass
+      AND conname = 'registration_checklist_items_parent_submission_choice_check'
+  ) THEN
+    ALTER TABLE registration_checklist_items
+      ADD CONSTRAINT registration_checklist_items_parent_submission_choice_check
+      CHECK (parent_submission_choice IN ('UPLOAD_LATER', 'BRING_IN_PERSON'));
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_registration_checklist_enrollment
   ON registration_checklist_items(enrollment_id);
@@ -118,8 +142,11 @@ BEGIN
     ('admissions_portal_tokens', 'last_used_at'),
     ('registration_records', 'enrollment_id'),
     ('registration_records', 'form_status'),
+    ('registration_records', 'requested_application_fields'),
+    ('registration_records', 'application_update_submitted_at'),
     ('registration_checklist_items', 'enrollment_id'),
     ('registration_checklist_items', 'item_type'),
+    ('registration_checklist_items', 'parent_submission_choice'),
     ('admissions_portal_documents', 'enrollment_id'),
     ('admissions_portal_documents', 'public_id')
   ) AS required(table_name, column_name)

@@ -21,8 +21,11 @@ async function isAdmissionsPortalSchemaReady(database = db) {
         ('admissions_portal_tokens', 'last_used_at'),
         ('registration_records', 'enrollment_id'),
         ('registration_records', 'form_status'),
+        ('registration_records', 'requested_application_fields'),
+        ('registration_records', 'application_update_submitted_at'),
         ('registration_checklist_items', 'enrollment_id'),
         ('registration_checklist_items', 'item_type'),
+        ('registration_checklist_items', 'parent_submission_choice'),
         ('admissions_portal_documents', 'enrollment_id'),
         ('admissions_portal_documents', 'public_id')
     ),
@@ -46,7 +49,7 @@ async function isAdmissionsPortalSchemaReady(database = db) {
     SELECT tables_present, columns_present, indexes_present FROM readiness
   `, [REQUIRED_PORTAL_TABLES]);
   return Number(result.rows[0]?.tables_present) === REQUIRED_PORTAL_TABLES.length
-    && Number(result.rows[0]?.columns_present) === 12
+    && Number(result.rows[0]?.columns_present) === 15
     && Number(result.rows[0]?.indexes_present) === 4;
 }
 

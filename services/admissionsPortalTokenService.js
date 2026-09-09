@@ -32,8 +32,7 @@ const getPortalAccess = ({ purpose, enrollmentStatus, formStatus }) => {
     return enrollmentStatus === 'MORE_INFORMATION_REQUIRED' ? PORTAL_ACCESS.EDIT : null;
   }
   if (purpose !== TOKEN_PURPOSES.COMPLETE_REGISTRATION) return null;
-  if (enrollmentStatus === 'APPROVED' || enrollmentStatus === 'approved') return PORTAL_ACCESS.EDIT;
-  if (enrollmentStatus !== 'REGISTRATION_PENDING') return null;
+  if (!['APPROVED', 'approved', 'REGISTRATION_PENDING'].includes(enrollmentStatus)) return null;
   return formStatus === 'SUBMITTED' ? PORTAL_ACCESS.READ_ONLY : PORTAL_ACCESS.EDIT;
 };
 

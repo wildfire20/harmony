@@ -19,6 +19,11 @@ const {
   withValidatedPortalToken,
 } = require('../services/admissionsPortalTokenService');
 const { isAdmissionsPortalSchemaReady } = require('../middleware/admissionsPortalSchema');
+const {
+  CANONICAL_PRODUCTION_URL,
+  buildPortalLink,
+  getCanonicalProductionUrl,
+} = require('../services/admissionsPortalLinks');
 
 const createTransactionDatabase = ({ status = 'APPROVED', formStatus = null, priorIds = [] } = {}) => {
   const queries = [];
@@ -73,10 +78,10 @@ test('portal schema has a separate readiness guard and explicit migration comman
 
 test('schema readiness requires every portal table', async () => {
   const ready = await isAdmissionsPortalSchemaReady({
-    async query() { return { rows: [{ tables_present: 4, columns_present: 12, indexes_present: 4 }] }; },
+    async query() { return { rows: [{ tables_present: 4, columns_present: 15, indexes_present: 4 }] }; },
   });
   const notReady = await isAdmissionsPortalSchemaReady({
-    async query() { return { rows: [{ tables_present: 4, columns_present: 11, indexes_present: 4 }] }; },
+    async query() { return { rows: [{ tables_present: 4, columns_present: 14, indexes_present: 4 }] }; },
   });
   assert.equal(ready, true);
   assert.equal(notReady, false);
@@ -105,6 +110,11 @@ test('eligibility preserves legacy approved and submitted registration is read-o
   assert.equal(getPortalAccess({
     purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION,
     enrollmentStatus: 'REGISTRATION_PENDING',
+    formStatus: 'SUBMITTED',
+  }), PORTAL_ACCESS.READ_ONLY);
+  assert.equal(getPortalAccess({
+    purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION,
+    enrollmentStatus: 'approved',
     formStatus: 'SUBMITTED',
   }), PORTAL_ACCESS.READ_ONLY);
   for (const status of ['NEW', 'UNDER_REVIEW', 'REGISTERED', 'NOT_ACCEPTED', 'rejected', 'waitlisted']) {
@@ -230,10 +240,56 @@ test('portal security middleware redacts tokens and applies stricter limits', ()
   assert.match(middleware, /max: 30/);
   assert.match(middleware, /\/api\/admissions-portal\/\[REDACTED\]/);
   assert.doesNotMatch(middleware, /originalUrl|req\.url|req\.params/);
+  assert.match(middleware, /Referrer-Policy/);
+  assert.match(middleware, /X-Robots-Tag/);
+  assert.match(middleware, /Cache-Control/);
   assert.match(route, /portalReadLimiter/);
   assert.match(route, /portalWriteLimiter/);
   assert.match(route, /requireAdmissionsPortalSchema/);
   assert.match(server, /app\.use\('\/api\/admissions-portal', admissionsPortalRoutes\)/);
+});
+
+test('secure links fail closed unless the exact canonical production origin is configured', () => {
+  const validEnvironment = { FRONTEND_URL: 'https://www.harmonylearning.co.za/' };
+  assert.equal(getCanonicalProductionUrl(validEnvironment), CANONICAL_PRODUCTION_URL);
+  assert.equal(
+    buildPortalLink({
+      token: 'a'.repeat(43),
+      purpose: TOKEN_PURPOSES.UPDATE_APPLICATION,
+      environment: validEnvironment,
+    }),
+    `https://www.harmonylearning.co.za/application/update/${'a'.repeat(43)}`,
+  );
+  for (const frontendUrl of [
+    '',
+    'http://www.harmonylearning.co.za',
+    'https://harmonylearning.co.za',
+    'https://www.harmonylearning.co.za.evil.example',
+    'https://www.harmonylearning.co.za/unexpected',
+  ]) {
+    assert.throws(() => getCanonicalProductionUrl({ FRONTEND_URL: frontendUrl }), {
+      code: 'PORTAL_CANONICAL_URL_INVALID',
+    });
+  }
+});
+
+test('Parent API exposes only approved endpoints and allowlisted fields', () => {
+  const route = read('routes/admissionsPortal.js');
+  for (const endpoint of [
+    "router.get('/session/:token'",
+    "router.patch('/application/:token'",
+    "router.post('/application/:token/submit'",
+    "router.patch('/registration/:token'",
+    "router.post('/registration/:token/submit'",
+  ]) assert.ok(route.includes(endpoint));
+  for (const allowed of [
+    'parentEmail', 'parentPhone', 'previousSchool', 'additionalNotes',
+    'residentialAddress', 'postalAddress', 'emergencyContact',
+    'boarding', 'transport', 'aftercare',
+  ]) assert.match(route, new RegExp(allowed));
+  assert.doesNotMatch(route, /medical|accessibility/i);
+  assert.match(route, /withValidatedPortalToken/);
+  assert.doesNotMatch(route, /sendAdmissionsStatusEmail|sendEmail|multer|s3/i);
 });
 
 test('atomic token action locks token and enrollment and enforces edit access', async () => {
