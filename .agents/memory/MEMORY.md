@@ -2,3 +2,4 @@
 - [Arrears-first manual payment](arrears-first-manual.md) — endpoint + UI button for applying payments to oldest unpaid invoice first
 - [Railway npm registry portability](railway-npm-registry.md) — verify client lockfiles contain no Replit-internal registry URLs before Railway deployment.
 - [Role-preserving portal retirement](role-preserving-portal-retirement.md) — disable learner access with a reversible server flag, never by mutating learner records.
+- [Secure-link resend semantics](secure-link-resend.md) — hash-only tokens cannot be recovered; resend explicitly reissues and invalidates the prior link.

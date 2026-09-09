@@ -137,6 +137,67 @@ async function issuePortalToken({
   }
 }
 
+// Transaction-aware variant used when a status or information request must
+// commit atomically with token issuance. The caller owns BEGIN/COMMIT/ROLLBACK.
+async function issuePortalTokenInTransaction({
+  client,
+  enrollmentId,
+  purpose,
+  issuedBy = null,
+  now = new Date(),
+}) {
+  requirePurpose(purpose);
+  if (!client || typeof client.query !== 'function') throw new TypeError('A database transaction client is required');
+  const numericEnrollmentId = Number(enrollmentId);
+  if (!Number.isSafeInteger(numericEnrollmentId) || numericEnrollmentId < 1) {
+    throw new PortalTokenError('INVALID_ENROLLMENT');
+  }
+  const enrollmentResult = await client.query(`
+    SELECT e.status, rr.form_status
+    FROM enrollments e
+    LEFT JOIN registration_records rr ON rr.enrollment_id = e.id
+    WHERE e.id = $1
+    FOR UPDATE OF e
+  `, [numericEnrollmentId]);
+  if (!enrollmentResult.rows.length) throw new PortalTokenError('INVALID_ENROLLMENT');
+  const enrollment = enrollmentResult.rows[0];
+  const access = getPortalAccess({
+    purpose,
+    enrollmentStatus: enrollment.status,
+    formStatus: enrollment.form_status,
+  });
+  if (!access || access === PORTAL_ACCESS.READ_ONLY) throw new PortalTokenError('TOKEN_NOT_ELIGIBLE');
+  const rawToken = generatePortalToken();
+  const issuedAt = new Date(now);
+  const expiresAt = new Date(issuedAt.getTime() + TOKEN_TTL_MS[purpose]);
+  const priorResult = await client.query(`
+    SELECT id FROM admissions_portal_tokens
+    WHERE enrollment_id = $1 AND purpose = $2 AND revoked_at IS NULL
+    FOR UPDATE
+  `, [numericEnrollmentId, purpose]);
+  if (priorResult.rows.length) {
+    await client.query(`
+      UPDATE admissions_portal_tokens SET revoked_at = $1
+      WHERE id = ANY($2::bigint[])
+    `, [issuedAt, priorResult.rows.map(({ id }) => id)]);
+  }
+  const inserted = await client.query(`
+    INSERT INTO admissions_portal_tokens
+      (enrollment_id, purpose, token_hash, issued_by, issued_at, expires_at)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING id, enrollment_id, purpose, issued_at, expires_at
+  `, [numericEnrollmentId, purpose, hashPortalToken(rawToken), issuedBy, issuedAt, expiresAt]);
+  const tokenRecord = inserted.rows[0];
+  if (priorResult.rows.length) {
+    await client.query(`
+      UPDATE admissions_portal_tokens SET replaced_by_token_id = $1
+      WHERE id = ANY($2::bigint[])
+    `, [tokenRecord.id, priorResult.rows.map(({ id }) => id)]);
+  }
+  tokenSafeLog('issued', { enrollmentId: numericEnrollmentId, purpose, outcome: 'success' });
+  return { token: rawToken, ...tokenRecord, access };
+}
+
 async function validatePortalToken(rawToken, { database = db, now = new Date() } = {}) {
   if (typeof rawToken !== 'string' || rawToken.length < 40 || rawToken.length > 128) return null;
   const tokenHash = hashPortalToken(rawToken);
@@ -209,6 +270,27 @@ async function revokePortalTokens({
   }
 }
 
+async function revokePortalTokensInTransaction({ client, enrollmentId, purpose, now = new Date() }) {
+  requirePurpose(purpose);
+  if (!client || typeof client.query !== 'function') throw new TypeError('A database transaction client is required');
+  const enrollment = await client.query(
+    'SELECT id FROM enrollments WHERE id = $1 FOR UPDATE',
+    [enrollmentId],
+  );
+  if (!enrollment.rows.length) throw new PortalTokenError('INVALID_ENROLLMENT');
+  const result = await client.query(`
+    UPDATE admissions_portal_tokens SET revoked_at = $3
+    WHERE enrollment_id = $1 AND purpose = $2 AND revoked_at IS NULL
+    RETURNING id
+  `, [enrollmentId, purpose, now]);
+  tokenSafeLog('revoked', {
+    enrollmentId,
+    purpose,
+    outcome: result.rows.length ? 'success' : 'no_active_token',
+  });
+  return result.rows.length;
+}
+
 const reissuePortalToken = (options) => issuePortalToken(options);
 
 async function withValidatedPortalToken(rawToken, {
@@ -273,9 +355,11 @@ module.exports = {
   getPortalAccess,
   hashPortalToken,
   issuePortalToken,
+  issuePortalTokenInTransaction,
   recordPortalTokenUse,
   reissuePortalToken,
   revokePortalTokens,
+  revokePortalTokensInTransaction,
   tokenSafeLog,
   validatePortalToken,
   withValidatedPortalToken,

@@ -67,7 +67,7 @@ test('status updates are controlled, transactional, audited, and idempotent', ()
   assert.match(route, /statusChanged: false/);
   assert.match(route, /INSERT INTO enrollment_status_history/);
   assert.match(route, /action: 'admissions_status_change'/);
-  assert.match(route, /sendAdmissionsStatusEmail\(enrollment, status/);
+  assert.match(route, /sendAdmissionsStatusEmail\(\s*enrollment,\s*status/);
   assert.doesNotMatch(route, /router\.delete\(/);
 });
 
@@ -113,7 +113,8 @@ test('Admin admissions UI includes reference, search, statuses and no delete act
   assert.match(admin, /ADMISSIONS_STATUSES\.map/);
   assert.match(admin, /Parent-safe message/);
   assert.match(admin, /Status history/);
-  assert.match(admin, /Choose a controlled status for this legacy application/);
+  assert.match(admin, /Use Request more information to send a targeted request/);
+  assert.match(admin, /filter\(\(\{ value \}\) => value !== 'MORE_INFORMATION_REQUIRED'\)/);
   assert.match(admin, /!nextStatus/);
   assert.doesNotMatch(admin, /handleDelete|title="Delete"/);
 });

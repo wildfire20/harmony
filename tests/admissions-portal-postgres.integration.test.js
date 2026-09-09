@@ -89,6 +89,7 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
     };
 
     await pool.query(`
+      CREATE SEQUENCE enrollment_application_reference_seq;
       CREATE TABLE users (
         id SERIAL PRIMARY KEY,
         email VARCHAR(255),
@@ -111,6 +112,9 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
         previous_school VARCHAR(255),
         additional_notes TEXT,
         admin_notes TEXT,
+        parent_status_message TEXT,
+        reviewed_by INTEGER REFERENCES users(id),
+        reviewed_at TIMESTAMP,
         status VARCHAR(40) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -122,6 +126,15 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
         new_status VARCHAR(40) NOT NULL,
         changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
         parent_message TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE admissions_email_log (
+        id BIGSERIAL PRIMARY KEY,
+        enrollment_id INTEGER NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
+        email_type VARCHAR(80) NOT NULL,
+        delivery_status VARCHAR(20) NOT NULL,
+        message_id VARCHAR(255),
+        error_message VARCHAR(80),
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE TABLE registration_records (
@@ -421,8 +434,11 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
     const {
       TOKEN_PURPOSES,
       issuePortalToken,
+      issuePortalTokenInTransaction,
       reissuePortalToken,
       revokePortalTokens,
+      validatePortalToken,
+      revokePortalTokensInTransaction,
       withValidatedPortalToken,
     } = require('../services/admissionsPortalTokenService');
 
@@ -501,6 +517,27 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
     const app = express();
     app.use(express.json({ limit: '2mb' }));
     app.use('/api/admissions-portal', require('../routes/admissionsPortal'));
+    const authPath = require.resolve('../middleware/auth');
+    const gmailPath = require.resolve('../services/gmailService');
+    const auditPath = require.resolve('../utils/auditLogger');
+    const routePath = require.resolve('../routes/enrollments');
+    [authPath, gmailPath, auditPath].forEach((modulePath) => require(modulePath));
+    const savedModules = [authPath, gmailPath, auditPath].map((p) => require.cache[p]?.exports);
+    require.cache[authPath].exports = {
+      authenticate: (req, res, next) => {
+        req.user = { id: 1, role: 'admin', email: 'test-admin@example.test' };
+        next();
+      },
+    };
+    require.cache[gmailPath].exports = {
+      ...savedModules[1],
+      sendAdmissionsStatusEmail: async () => ({ success: false, error: 'EMAIL_API_FAILED' }),
+      normalizeEmailResult: (result) => result?.success
+        ? result : { success: false, error: result?.error || 'UNKNOWN_EMAIL_FAILURE' },
+    };
+    require.cache[auditPath].exports = { logAudit: async () => {}, getIp: () => '127.0.0.1' };
+    delete require.cache[routePath];
+    app.use('/api/enrollments', require('../routes/enrollments'));
     server = http.createServer(app);
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
@@ -675,6 +712,198 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
         new_status: 'REGISTRATION_PENDING',
         changed_by: null,
       }]);
+    });
+
+    await t.test('Admin HTTP handlers commit secure Phase 5 workflows and return safe payloads', async () => {
+      await pool.query(`
+        INSERT INTO enrollments (
+          application_reference, parent_first_name, parent_last_name, parent_email, parent_phone,
+          student_first_name, student_last_name, student_date_of_birth, grade_applying, status
+        ) VALUES ('HLI-2027-HTTP', 'Http', 'Admin', 'http@example.test', '0722222222',
+          'Http', 'Learner', '2016-01-01', 'Grade 3', 'NEW')
+      `);
+      const row = await pool.query("SELECT id FROM enrollments WHERE application_reference = 'HLI-2027-HTTP'");
+      const id = row.rows[0].id;
+      let response = await requestJson(server, 'PUT', `/api/enrollments/${id}/status`, { status: 'APPROVED' });
+      assert.equal(response.status, 200, JSON.stringify(response.body));
+      const approved = await pool.query('SELECT status FROM enrollments WHERE id = $1', [id]);
+      const completion = await pool.query(`
+        SELECT token_hash, id FROM admissions_portal_tokens
+        WHERE enrollment_id = $1 AND purpose = 'COMPLETE_REGISTRATION' AND revoked_at IS NULL
+      `, [id]);
+      assert.equal(approved.rows[0].status, 'APPROVED');
+      assert.equal(completion.rows.length, 1);
+      assert.equal(response.body.emailSent, false);
+
+      response = await requestJson(server, 'PUT', `/api/enrollments/${id}/status`, { status: 'APPROVED' });
+      assert.equal(response.status, 200);
+      assert.equal(response.body.statusChanged, false);
+      assert.equal(JSON.stringify(response.body), JSON.stringify(response.body).replace(/registration_token_hash/g, ''));
+
+      response = await requestJson(server, 'POST', `/api/enrollments/${id}/information-request`, {
+        requestedFields: ['parentPhone'],
+        checklistItems: ['LATEST_SCHOOL_REPORT'],
+        parentMessage: 'Please update the report.',
+      });
+      assert.equal(response.status, 200);
+      const requested = await pool.query(`
+        SELECT e.status, rr.requested_application_fields, ci.status AS checklist_status,
+          ci.requested_at, t.purpose, t.revoked_at
+        FROM enrollments e
+        JOIN registration_records rr ON rr.enrollment_id = e.id
+        JOIN registration_checklist_items ci ON ci.enrollment_id = e.id
+        LEFT JOIN admissions_portal_tokens t ON t.enrollment_id = e.id
+          AND t.purpose IN ('UPDATE_APPLICATION', 'COMPLETE_REGISTRATION')
+        WHERE e.id = $1 AND ci.item_type = 'LATEST_SCHOOL_REPORT'
+        ORDER BY t.purpose
+      `, [id]);
+      assert.equal(requested.rows[0].status, 'MORE_INFORMATION_REQUIRED');
+      assert.deepEqual(requested.rows[0].requested_application_fields, ['parentPhone']);
+      assert.equal(requested.rows[0].checklist_status, 'MISSING');
+      assert.ok(requested.rows.some((item) => item.purpose === 'COMPLETE_REGISTRATION' && item.revoked_at));
+      assert.ok(requested.rows.some((item) => item.purpose === 'UPDATE_APPLICATION' && !item.revoked_at));
+
+      response = await requestJson(server, 'POST', `/api/enrollments/${id}/portal-link/reissue`, {
+        purpose: 'UPDATE_APPLICATION',
+      });
+      assert.equal(response.status, 200);
+      assert.equal(response.body.linkReissued, true);
+      assert.equal(JSON.stringify(response.body).includes('token_hash'), false);
+      assert.equal(JSON.stringify(response.body).includes('token'), false);
+      response = await requestJson(server, 'POST', `/api/enrollments/${id}/portal-link/revoke`, {
+        purpose: 'UPDATE_APPLICATION',
+      });
+      assert.equal(response.status, 200);
+      const revoked = await pool.query(`
+        SELECT COUNT(*)::int AS count FROM admissions_portal_tokens
+        WHERE enrollment_id = $1 AND purpose = 'UPDATE_APPLICATION' AND revoked_at IS NULL
+      `, [id]);
+      assert.equal(revoked.rows[0].count, 0);
+
+      response = await requestJson(server, 'PATCH', `/api/enrollments/${id}/checklist/LATEST_SCHOOL_REPORT`, {
+        status: 'RECEIVED',
+      });
+      assert.equal(response.status, 200, JSON.stringify(response.body));
+      response = await requestJson(server, 'PATCH', `/api/enrollments/${id}/checklist/TRANSFER_DOCUMENT`, {
+        status: 'NOT_APPLICABLE',
+      });
+      assert.equal(response.status, 200);
+      const checklist = await pool.query(`
+        SELECT item_type, status, received_at FROM registration_checklist_items
+        WHERE enrollment_id = $1 AND item_type IN ('LATEST_SCHOOL_REPORT', 'TRANSFER_DOCUMENT')
+        ORDER BY item_type
+      `, [id]);
+      assert.deepEqual(checklist.rows.map(({ item_type, status }) => [item_type, status]), [
+        ['LATEST_SCHOOL_REPORT', 'RECEIVED'],
+        ['TRANSFER_DOCUMENT', 'NOT_APPLICABLE'],
+      ]);
+
+      response = await requestJson(server, 'GET', `/api/enrollments/${id}`);
+      assert.equal(response.status, 200);
+      const serialized = JSON.stringify(response.body);
+      for (const secret of ['registration_token_hash', 'registration_token_issued_at', 'registration_token_expires_at', 'token_hash', 'token_id']) {
+        assert.equal(serialized.includes(secret), false, secret);
+      }
+    });
+
+    await t.test('Phase 5 transactional token lifecycle uses only disposable PostgreSQL state', async () => {
+      const { buildPortalLink } = require('../services/admissionsPortalLinks');
+      await pool.query(`
+        INSERT INTO enrollments (
+          application_reference, parent_first_name, parent_last_name, parent_email, parent_phone,
+          student_first_name, student_last_name, student_date_of_birth, grade_applying, status
+        ) VALUES ('HLI-2027-P5', 'Phase', 'Five', 'phase5@example.test', '0711111111',
+          'Test', 'Learner', '2017-01-01', 'Grade 2', 'MORE_INFORMATION_REQUIRED')
+      `);
+      const enrollment = await pool.query(
+        "SELECT id FROM enrollments WHERE application_reference = 'HLI-2027-P5'",
+      );
+      const id = enrollment.rows[0].id;
+
+      await pool.query(`
+        INSERT INTO registration_records (enrollment_id, requested_application_fields)
+        VALUES ($1, '["parentPhone","previousSchool"]'::jsonb)
+      `, [id]);
+      await pool.query(`
+        INSERT INTO registration_checklist_items
+          (enrollment_id, item_type, status, requested_by, requested_at)
+        VALUES ($1, 'LATEST_SCHOOL_REPORT', 'MISSING', 1, CURRENT_TIMESTAMP)
+      `, [id]);
+      const update = await issuePortalToken({
+        enrollmentId: id, purpose: TOKEN_PURPOSES.UPDATE_APPLICATION, database,
+      });
+      assert.match(buildPortalLink({
+        token: update.token, purpose: TOKEN_PURPOSES.UPDATE_APPLICATION,
+        environment: { FRONTEND_URL: 'https://www.harmonylearning.co.za' },
+      }), /\/application\/update\//);
+      assert.ok(await validatePortalToken(update.token, { database }));
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query("UPDATE enrollments SET status = 'APPROVED' WHERE id = $1", [id]);
+        await revokePortalTokensInTransaction({
+          client, enrollmentId: id, purpose: TOKEN_PURPOSES.UPDATE_APPLICATION,
+        });
+        const complete = await issuePortalTokenInTransaction({
+          client, enrollmentId: id, purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION,
+          issuedBy: 1,
+        });
+        await client.query('COMMIT');
+        let emailAttempted = false;
+        try {
+          emailAttempted = true;
+          throw new Error('simulated Gmail failure');
+        } catch {}
+        assert.equal(emailAttempted, true);
+        const committed = await pool.query(
+          'SELECT status FROM enrollments WHERE id = $1', [id],
+        );
+        assert.equal(committed.rows[0].status, 'APPROVED');
+        assert.equal(await validatePortalToken(update.token, { database }), null);
+        assert.ok(await validatePortalToken(complete.token, { database }));
+
+        const replacement = await reissuePortalToken({
+          enrollmentId: id, purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION, database,
+        });
+        assert.equal(await validatePortalToken(complete.token, { database }), null);
+        assert.ok(await validatePortalToken(replacement.token, { database }));
+        await revokePortalTokens({
+          enrollmentId: id, purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION, database,
+        });
+        assert.equal(await validatePortalToken(replacement.token, { database }), null);
+      } finally {
+        client.release();
+      }
+
+      await pool.query("UPDATE enrollments SET status = 'REGISTRATION_PENDING' WHERE id = $1", [id]);
+      const readOnly = await issuePortalToken({
+        enrollmentId: id, purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION, database,
+      });
+      const readOnlyRecord = await validatePortalToken(readOnly.token, { database });
+      assert.equal(readOnlyRecord.access, 'edit');
+      await pool.query("UPDATE registration_records SET form_status = 'SUBMITTED' WHERE enrollment_id = $1", [id]);
+      const submitted = await validatePortalToken(readOnly.token, { database });
+      assert.equal(submitted.access, 'read_only');
+
+      await pool.query(`
+        UPDATE registration_checklist_items SET status = 'RECEIVED', received_at = CURRENT_TIMESTAMP
+        WHERE enrollment_id = $1 AND item_type = 'LATEST_SCHOOL_REPORT'
+      `, [id]);
+      await pool.query(`
+        INSERT INTO registration_checklist_items (enrollment_id, item_type, status)
+        VALUES ($1, 'TRANSFER_DOCUMENT', 'NOT_APPLICABLE')
+      `, [id]);
+      const state = await pool.query(`
+        SELECT ci.item_type, ci.status, ci.received_at, rr.requested_application_fields
+        FROM registration_checklist_items ci
+        JOIN registration_records rr ON rr.enrollment_id = ci.enrollment_id
+        WHERE ci.enrollment_id = $1 ORDER BY ci.item_type
+      `, [id]);
+      assert.equal(state.rows.find((row) => row.item_type === 'LATEST_SCHOOL_REPORT').status, 'RECEIVED');
+      assert.equal(state.rows.find((row) => row.item_type === 'TRANSFER_DOCUMENT').status, 'NOT_APPLICABLE');
+      assert.deepEqual(state.rows[0].requested_application_fields, ['parentPhone', 'previousSchool']);
+      assert.doesNotMatch(JSON.stringify(state.rows), /token_hash|token_id|rawToken/);
     });
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));

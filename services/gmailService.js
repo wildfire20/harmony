@@ -257,14 +257,17 @@ async function sendEnrollmentNotification(enrollment) {
   );
 }
 
-const statusEmailContent = (status, reference, parentMessage) => {
+const statusEmailContent = (status, reference, parentMessage, secureLink = null) => {
   const safeRef = escapeHtml(reference);
   const safeMessage = parentMessage ? `<p><strong>Message from Admissions:</strong> ${escapeHtml(parentMessage)}</p>` : '';
+  const linkButton = secureLink
+    ? `<p style="text-align:center;margin:28px 0"><a href="${escapeHtml(secureLink)}" style="display:inline-block;background:#b91c1c;color:#fff;padding:14px 24px;border-radius:7px;text-decoration:none;font-weight:bold">${status === 'APPROVED' || status === 'approved' ? 'Complete Registration' : 'Update Application'}</a></p><p><strong>Secure link:</strong><br>${escapeHtml(secureLink)}</p>`
+    : '';
   const content = {
     UNDER_REVIEW: ['Harmony Application Update', 'Your application is currently being reviewed by our admissions team.'],
-    MORE_INFORMATION_REQUIRED: ['Additional Information Required', `Harmony requires additional information before the application can proceed.<br><br>You may provide the requested supporting information online if you are comfortable doing so. If you are not comfortable submitting documents online, you are welcome to bring the required documents to Harmony Learning Institute in person.<br><br><strong>Harmony Learning Institute</strong><br>2 Skilferdoring Street<br>Onverwacht, Lephalale`],
-    APPROVED: ['Application Approved — Harmony Learning Institute', `We are pleased to inform you that the application referenced ${safeRef} has been approved.<br><br>The next step is to complete the registration process. Further registration instructions will be provided through the secure Harmony registration process.`],
-    approved: ['Application Approved — Harmony Learning Institute', `We are pleased to inform you that the application referenced ${safeRef} has been approved.<br><br>The next step is to complete the registration process. Further registration instructions will be provided through the secure Harmony registration process.`],
+    MORE_INFORMATION_REQUIRED: ['Additional Information Required', `Harmony requires additional information before the application can proceed.<br><br>You may provide the requested supporting information online if you are comfortable doing so. If you are not comfortable submitting documents online, you are welcome to bring the required documents to Harmony Learning Institute in person.<br><br><strong>Harmony Learning Institute</strong><br>2 Skilferdoring Street<br>Onverwacht, Lephalale${linkButton}`],
+    APPROVED: ['Application Approved — Harmony Learning Institute', `We are pleased to inform you that the application referenced ${safeRef} has been approved.<br><br>The next step is to complete the registration process. Further registration instructions will be provided through the secure Harmony registration process.${linkButton}`],
+    approved: ['Application Approved — Harmony Learning Institute', `We are pleased to inform you that the application referenced ${safeRef} has been approved.<br><br>The next step is to complete the registration process. Further registration instructions will be provided through the secure Harmony registration process.${linkButton}`],
     waitlisted: ['Harmony Application Waitlist Update', 'The application has been placed on the waiting list. Our admissions team will contact you if placement becomes available.'],
     REGISTRATION_PENDING: ['Harmony Registration Update', 'Your approved application is now awaiting completion of the registration process.'],
     REGISTERED: ['Welcome to Harmony Learning Institute', 'Registration has been completed. Welcome to Harmony Learning Institute.'],
@@ -278,8 +281,8 @@ const statusEmailContent = (status, reference, parentMessage) => {
   };
 };
 
-async function sendAdmissionsStatusEmail(enrollment, status, parentMessage) {
-  const content = statusEmailContent(status, enrollment.application_reference, parentMessage);
+async function sendAdmissionsStatusEmail(enrollment, status, parentMessage, secureLink = null) {
+  const content = statusEmailContent(status, enrollment.application_reference, parentMessage, secureLink);
   if (!content) return { success: true, skipped: true };
   return sendEmail(enrollment.parent_email, content.subject, content.html);
 }

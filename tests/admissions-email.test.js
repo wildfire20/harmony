@@ -478,7 +478,7 @@ test('resend handler uses stored recipients and atomically prevents concurrent d
   assert.equal(duplicateSendCount, 0);
 });
 
-test('resend failure is safely logged after the failed transport attempt', async () => {
+test('secure status resend directs Admin to portal reissue', async () => {
   const { createAdmissionsEmailResendHandler } = require('../routes/enrollments');
   const fixture = createResendDatabase();
   const handler = createAdmissionsEmailResendHandler({
@@ -491,14 +491,12 @@ test('resend failure is safely logged after the failed transport attempt', async
     params: { id: '19' },
     body: { emailType: 'status_approved' },
   }, response);
-  assert.equal(response.statusCode, 502);
-  const logInsert = fixture.queries.find(({ sql }) => String(sql).includes('INSERT INTO admissions_email_log'));
-  assert.ok(logInsert);
-  assert.equal(logInsert.params[2], 'failed');
-  assert.equal(logInsert.params[4], 'EMAIL_AUTH_FAILED');
+  assert.equal(response.statusCode, 409);
+  assert.match(response.body.message, /portal-link reissue/i);
+  assert.equal(fixture.queries.length, 0);
 });
 
-test('a thrown resend transport failure is sanitized, logged, and returned as 502', async () => {
+test('secure status resend never invokes the transport directly', async () => {
   const { createAdmissionsEmailResendHandler } = require('../routes/enrollments');
   const fixture = createResendDatabase();
   const handler = createAdmissionsEmailResendHandler({
@@ -513,16 +511,9 @@ test('a thrown resend transport failure is sanitized, logged, and returned as 50
     params: { id: '19' },
     body: { emailType: 'status_approved' },
   }, response);
-  assert.equal(response.statusCode, 502);
-  assert.deepEqual(response.body, {
-    message: 'Admissions email could not be delivered',
-    error: 'UNKNOWN_EMAIL_FAILURE',
-  });
-  const logInsert = fixture.queries.find(({ sql }) => String(sql).includes('INSERT INTO admissions_email_log'));
-  assert.ok(logInsert);
-  assert.equal(logInsert.params[2], 'failed');
-  assert.equal(logInsert.params[4], 'UNKNOWN_EMAIL_FAILURE');
-  assert.ok(fixture.queries.some(({ sql }) => String(sql) === 'COMMIT'));
+  assert.equal(response.statusCode, 409);
+  assert.match(response.body.message, /portal-link reissue/i);
+  assert.equal(fixture.queries.length, 0);
 });
 
 test('application remains persisted when both Gmail API deliveries fail', async () => {
@@ -586,6 +577,8 @@ test('application remains persisted when both Gmail API deliveries fail', async 
 });
 
 test('approved status remains committed after Gmail API failure and duplicate save does not resend', async () => {
+  const previousFrontendUrl = process.env.FRONTEND_URL;
+  process.env.FRONTEND_URL = 'https://www.harmonylearning.co.za';
   const events = [];
   let storedStatus = 'NEW';
   let statusEmailCalls = 0;
@@ -609,6 +602,18 @@ test('approved status remains committed after Gmail API failure and duplicate sa
           parent_email: 'stored-parent@example.com',
         }] };
       }
+      if (text.includes('SELECT id FROM enrollments')) return { rows: [{ id: 19 }] };
+      if (text.includes('SELECT e.status, rr.form_status')) {
+        return { rows: [{ status: storedStatus, form_status: null }] };
+      }
+      if (text.includes('SELECT id FROM admissions_portal_tokens')) return { rows: [] };
+      if (text.includes('INSERT INTO admissions_portal_tokens')) {
+        return { rows: [{
+          id: 1, enrollment_id: 19, purpose: 'COMPLETE_REGISTRATION',
+          issued_at: new Date(), expires_at: new Date(Date.now() + 86400000),
+        }] };
+      }
+      if (text.includes('UPDATE admissions_portal_tokens')) return { rows: [] };
       if (text.includes('UPDATE enrollments')) {
         storedStatus = params[0];
         events.push('status-persisted');
@@ -678,11 +683,13 @@ test('approved status remains committed after Gmail API failure and duplicate sa
       ...request,
       body: { ...request.body, status: 'MORE_INFORMATION_REQUIRED' },
     }, response);
-    assert.equal(response.statusCode, 200);
-    assert.equal(storedStatus, 'MORE_INFORMATION_REQUIRED');
-    assert.equal(statusEmailCalls, 3);
-    assert.deepEqual(attemptedStatuses, ['APPROVED', 'waitlisted', 'MORE_INFORMATION_REQUIRED']);
+    assert.equal(response.statusCode, 400);
+    assert.equal(storedStatus, 'waitlisted');
+    assert.equal(statusEmailCalls, 2);
+    assert.deepEqual(attemptedStatuses, ['APPROVED', 'waitlisted']);
   } finally {
     loaded.restore();
+    if (previousFrontendUrl === undefined) delete process.env.FRONTEND_URL;
+    else process.env.FRONTEND_URL = previousFrontendUrl;
   }
 });

@@ -234,6 +234,12 @@ export const enrollmentsAPI = {
   getAll: (params) => api.get('/enrollments', { params }),
   getOne: (id) => api.get(`/enrollments/${id}`),
   updateStatus: (id, data) => api.put(`/enrollments/${id}/status`, data),
+  requestInformation: (id, data) => api.post(`/enrollments/${id}/information-request`, data),
+  updateChecklistItem: (id, itemType, data) => api.patch(`/enrollments/${id}/checklist/${encodeURIComponent(itemType)}`, data),
+  resendPortalLink: (id, data) => api.post(`/enrollments/${id}/portal-link/resend`, data),
+  reissuePortalLink: (id, data) => api.post(`/enrollments/${id}/portal-link/reissue`, data),
+  revokePortalLink: (id, data) => api.post(`/enrollments/${id}/portal-link/revoke`, data),
+  resendEmail: (id, data) => api.post(`/enrollments/${id}/email/resend`, data),
 };
 
 // Manual Payments API

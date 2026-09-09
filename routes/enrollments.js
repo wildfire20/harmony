@@ -4,6 +4,14 @@ const db = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { logAudit, getIp } = require('../utils/auditLogger');
 const { ADMISSIONS_STATUSES } = require('../utils/admissions');
+const { buildPortalLink } = require('../services/admissionsPortalLinks');
+const {
+  TOKEN_PURPOSES,
+  PortalTokenError,
+  issuePortalTokenInTransaction,
+  getPortalAccess,
+  revokePortalTokensInTransaction,
+} = require('../services/admissionsPortalTokenService');
 const {
   EMAIL_ERROR_CATEGORIES,
   normalizeEmailResult,
@@ -225,7 +233,7 @@ router.get('/', authenticate, async (req, res) => {
       params,
     );
     return res.json({
-      enrollments: result.rows,
+      enrollments: result.rows.map(safeEnrollment),
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     });
   } catch (error) {
@@ -269,11 +277,12 @@ router.get('/:id', authenticate, async (req, res) => {
           SELECT COALESCE(json_agg(json_build_object(
             'email_type', latest.email_type,
             'delivery_status', latest.delivery_status,
+             'error_message', latest.error_message,
             'created_at', latest.created_at
           ) ORDER BY latest.created_at DESC), '[]')
           FROM (
             SELECT DISTINCT ON (email_type)
-              email_type, delivery_status, created_at
+              email_type, delivery_status, error_message, created_at
             FROM admissions_email_log
             WHERE enrollment_id = e.id
             ORDER BY email_type, created_at DESC, id DESC
@@ -285,7 +294,58 @@ router.get('/:id', authenticate, async (req, res) => {
       GROUP BY e.id
     `, [req.params.id]);
     if (!result.rows.length) return res.status(404).json({ message: 'Enrollment not found' });
-    return res.json(result.rows[0]);
+    const enrollment = result.rows[0];
+    delete enrollment.registration_token_hash;
+    delete enrollment.registration_token_issued_at;
+    delete enrollment.registration_token_expires_at;
+    const [recordResult, checklistResult, tokenResult] = await Promise.all([
+      db.query('SELECT form_status, submitted_at, service_selections, requested_application_fields FROM registration_records WHERE enrollment_id = $1', [req.params.id]),
+      db.query(`SELECT item_type, status, requested_at, received_at FROM registration_checklist_items WHERE enrollment_id = $1 ORDER BY item_type`, [req.params.id]),
+      db.query(`SELECT t.purpose, t.issued_at, t.expires_at, t.revoked_at, t.first_used_at, t.last_used_at, t.use_count,
+        rr.form_status FROM admissions_portal_tokens t
+        LEFT JOIN registration_records rr ON rr.enrollment_id = t.enrollment_id
+        WHERE t.enrollment_id = $1 ORDER BY t.issued_at DESC`, [req.params.id]),
+    ]);
+    const record = recordResult.rows[0];
+    enrollment.portalData = {
+      requestedFields: record?.requested_application_fields || [],
+      registration: {
+        formStatus: record?.form_status || 'NOT_STARTED',
+        submittedAt: record?.submitted_at || null,
+        serviceSelections: record?.service_selections || {},
+      },
+      checklist: checklistResult.rows.map((item) => ({
+        itemType: item.item_type,
+        status: item.status,
+        requestedAt: item.requested_at,
+        receivedAt: item.received_at,
+      })),
+      secureLinks: [],
+    };
+    const latestByPurpose = new Map();
+    tokenResult.rows.forEach((token) => { if (!latestByPurpose.has(token.purpose)) latestByPurpose.set(token.purpose, token); });
+    enrollment.portalData.secureLinks = [...latestByPurpose.values()].map((token) => ({
+      purpose: token.purpose,
+      status: token.revoked_at ? 'REVOKED' : (new Date(token.expires_at) <= new Date() ? 'EXPIRED' : (
+        getPortalAccess({ purpose: token.purpose, enrollmentStatus: enrollment.status, formStatus: token.form_status }) === 'read_only'
+          ? 'SUBMITTED_READ_ONLY' : (getPortalAccess({ purpose: token.purpose, enrollmentStatus: enrollment.status, formStatus: token.form_status }) ? 'ACTIVE' : 'REVOKED')
+      )),
+      issuedAt: token.issued_at,
+      expiresAt: token.expires_at,
+      lastUsedAt: token.last_used_at,
+      useCount: token.use_count,
+    }));
+    delete enrollment.registration;
+    delete enrollment.checklist;
+    delete enrollment.portalLinks;
+    enrollment.email_delivery = (enrollment.email_delivery || []).map((entry) => ({
+      ...entry,
+      ...(entry.error_message ? {
+        error_message: Object.values(EMAIL_ERROR_CATEGORIES).includes(entry.error_message)
+          ? entry.error_message : EMAIL_ERROR_CATEGORIES.UNKNOWN,
+      } : {}),
+    }));
+    return res.json(enrollment);
   } catch (error) {
     console.error('Error fetching enrollment:', error.message);
     return res.status(500).json({ message: 'Failed to fetch enrollment' });
@@ -297,6 +357,9 @@ router.put('/:id/status', authenticate, async (req, res) => {
   const { status } = req.body;
   const adminNotes = typeof req.body.adminNotes === 'string' ? req.body.adminNotes.trim().slice(0, 4000) : '';
   const parentMessage = typeof req.body.parentMessage === 'string' ? req.body.parentMessage.trim().slice(0, 1000) : '';
+  if (status === 'MORE_INFORMATION_REQUIRED') {
+    return res.status(400).json({ message: 'Use /information-request with requested fields or checklist items.' });
+  }
   if (!ADMISSIONS_STATUSES.includes(status) && !EMAIL_COMPATIBLE_LEGACY_STATUSES.includes(status)) {
     return res.status(400).json({ message: 'Invalid status' });
   }
@@ -312,7 +375,11 @@ router.put('/:id/status', authenticate, async (req, res) => {
     const current = currentResult.rows[0];
     if (current.status === status) {
       await client.query('ROLLBACK');
-      return res.json({ message: 'Application status unchanged', enrollment: current, statusChanged: false });
+      return res.json({
+        message: 'Application status unchanged',
+        enrollment: safeEnrollment(current),
+        statusChanged: false,
+      });
     }
 
     const updatedResult = await client.query(`
@@ -326,6 +393,18 @@ router.put('/:id/status', authenticate, async (req, res) => {
         (enrollment_id, previous_status, new_status, changed_by, parent_message)
       VALUES ($1, $2, $3, $4, $5)
     `, [req.params.id, current.status, status, req.user.id, parentMessage || null]);
+    let portalToken = null;
+    if (status === 'APPROVED' || status === 'approved') {
+      await revokePortalTokensInTransaction({ client, enrollmentId: req.params.id, purpose: TOKEN_PURPOSES.UPDATE_APPLICATION });
+      portalToken = await issuePortalTokenInTransaction({
+        client, enrollmentId: req.params.id, purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION, issuedBy: req.user.id,
+      });
+    } else {
+      await revokePortalTokensInTransaction({ client, enrollmentId: req.params.id, purpose: TOKEN_PURPOSES.UPDATE_APPLICATION });
+      if (status !== 'REGISTRATION_PENDING') {
+        await revokePortalTokensInTransaction({ client, enrollmentId: req.params.id, purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION });
+      }
+    }
     await client.query('COMMIT');
 
     const enrollment = updatedResult.rows[0];
@@ -343,7 +422,12 @@ router.put('/:id/status', authenticate, async (req, res) => {
     let emailResult;
     try {
       emailResult = normalizeEmailResult(
-        await sendAdmissionsStatusEmail(enrollment, status, parentMessage || null),
+        await sendAdmissionsStatusEmail(
+          enrollment,
+          status,
+          parentMessage || null,
+          portalToken ? buildPortalLink({ token: portalToken.token, purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION }) : null,
+        ),
       );
     } catch {
       emailResult = { success: false, error: EMAIL_ERROR_CATEGORIES.UNKNOWN };
@@ -354,7 +438,7 @@ router.put('/:id/status', authenticate, async (req, res) => {
     }
     return res.json({
       message: `Application status changed to ${status}`,
-      enrollment,
+      enrollment: safeEnrollment(enrollment),
       statusChanged: true,
       emailSent: Boolean(emailResult.success && !emailResult.skipped),
     });
@@ -366,6 +450,183 @@ router.put('/:id/status', authenticate, async (req, res) => {
     client.release();
   }
 });
+
+const REQUESTED_FIELDS = new Set(['parentEmail', 'parentPhone', 'previousSchool', 'additionalNotes']);
+const CHECKLIST_REQUEST_ITEMS = new Set(['BIRTH_CERTIFICATE', 'PARENT_GUARDIAN_ID', 'LATEST_SCHOOL_REPORT', 'TRANSFER_DOCUMENT']);
+const CHECKLIST_ITEMS = new Set([...CHECKLIST_REQUEST_ITEMS, 'REGISTRATION_FORM']);
+const portalPurpose = (value) => Object.values(TOKEN_PURPOSES).includes(value) ? value : null;
+const safeTokenMetadata = (token, now = new Date()) => ({
+  purpose: token.purpose,
+  status: token.revoked_at ? 'REVOKED' : (new Date(token.expires_at) <= now ? 'EXPIRED' : 'ACTIVE'),
+  issuedAt: token.issued_at,
+  expiresAt: token.expires_at,
+  lastUsedAt: token.last_used_at || null,
+  useCount: token.use_count || 0,
+});
+const safeEnrollment = (enrollment) => {
+  if (!enrollment) return enrollment;
+  const safe = { ...enrollment };
+  delete safe.registration_token_hash;
+  delete safe.registration_token_issued_at;
+  delete safe.registration_token_expires_at;
+  return safe;
+};
+
+const sendPortalEmail = async ({ enrollment, purpose, token, parentMessage = null }) => {
+  const link = buildPortalLink({ token, purpose });
+  return normalizeEmailResult(await sendAdmissionsStatusEmail(
+    safeEnrollment(enrollment),
+    purpose === TOKEN_PURPOSES.UPDATE_APPLICATION ? 'MORE_INFORMATION_REQUIRED' : 'APPROVED',
+    parentMessage,
+    link,
+  ));
+};
+
+router.post('/:id/information-request', authenticate, async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const requestedFields = Array.isArray(req.body?.requestedFields) ? [...new Set(req.body.requestedFields)] : [];
+  const checklistItems = Array.isArray(req.body?.checklistItems) ? [...new Set(req.body.checklistItems)] : [];
+  const parentMessage = typeof req.body?.parentMessage === 'string' ? req.body.parentMessage.trim() : '';
+  if (requestedFields.some((field) => !REQUESTED_FIELDS.has(field))
+    || checklistItems.some((item) => !CHECKLIST_REQUEST_ITEMS.has(item))
+    || parentMessage.length > 1000
+    || (!requestedFields.length && !checklistItems.length)) {
+    return res.status(400).json({ message: 'Invalid information request' });
+  }
+  let client;
+  try {
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const currentResult = await client.query('SELECT * FROM enrollments WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!currentResult.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ message: 'Enrollment not found' }); }
+    const current = currentResult.rows[0];
+    await client.query(`
+      INSERT INTO registration_records (enrollment_id, requested_application_fields, updated_at)
+      VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP)
+      ON CONFLICT (enrollment_id) DO UPDATE SET requested_application_fields = EXCLUDED.requested_application_fields, updated_at = CURRENT_TIMESTAMP
+    `, [req.params.id, JSON.stringify(requestedFields)]);
+    for (const item of checklistItems) {
+      await client.query(`
+        INSERT INTO registration_checklist_items (enrollment_id, item_type, status, requested_by, requested_at, updated_at)
+        VALUES ($1, $2, 'MISSING', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (enrollment_id, item_type) DO UPDATE SET
+          requested_by = EXCLUDED.requested_by, requested_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+          status = CASE WHEN registration_checklist_items.status = 'RECEIVED' THEN registration_checklist_items.status ELSE 'MISSING' END
+      `, [req.params.id, item, req.user.id]);
+    }
+    await client.query(`
+      UPDATE registration_checklist_items SET requested_at = NULL, requested_by = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE enrollment_id = $1 AND item_type <> ALL($2::text[]) AND status <> 'RECEIVED'
+    `, [req.params.id, checklistItems]);
+    const statusChanged = current.status !== 'MORE_INFORMATION_REQUIRED';
+    const updated = await client.query(`
+      UPDATE enrollments SET status = 'MORE_INFORMATION_REQUIRED', parent_status_message = $1, reviewed_by = $2,
+        reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *
+    `, [parentMessage || null, req.user.id, req.params.id]);
+    if (statusChanged) {
+      await client.query(`INSERT INTO enrollment_status_history (enrollment_id, previous_status, new_status, changed_by, parent_message)
+        VALUES ($1, $2, 'MORE_INFORMATION_REQUIRED', $3, $4)`,
+      [req.params.id, current.status, req.user.id, parentMessage || null]);
+    }
+    await revokePortalTokensInTransaction({
+      client,
+      enrollmentId: req.params.id,
+      purpose: TOKEN_PURPOSES.COMPLETE_REGISTRATION,
+    });
+    const token = await issuePortalTokenInTransaction({
+      client, enrollmentId: req.params.id, purpose: TOKEN_PURPOSES.UPDATE_APPLICATION, issuedBy: req.user.id,
+    });
+    await client.query('COMMIT');
+    await logAudit({ userId: req.user.id, userName: req.user.email, userRole: req.user.role, action: 'information_request', entityType: 'enrollment', entityId: req.params.id, details: { requestedFields, checklistItems }, ipAddress: getIp(req) });
+    let emailResult;
+    try { emailResult = await sendPortalEmail({ enrollment: updated.rows[0], purpose: TOKEN_PURPOSES.UPDATE_APPLICATION, token: token.token, parentMessage }); }
+    catch { emailResult = { success: false, error: EMAIL_ERROR_CATEGORIES.UNKNOWN }; }
+    await logEmailDelivery(req.params.id, 'status_more_information_required', emailResult);
+    return res.json({ message: 'Information request sent', enrollment: safeEnrollment(updated.rows[0]), statusChanged, emailSent: Boolean(emailResult.success && !emailResult.skipped) });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('Information request failed:', error.message);
+    return res.status(500).json({ message: 'Failed to request additional information' });
+  } finally { if (client) client.release(); }
+});
+
+router.patch('/:id/checklist/:itemType', authenticate, async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const itemType = req.params.itemType;
+  const status = req.body?.status;
+  if (!CHECKLIST_ITEMS.has(itemType) && itemType !== 'REGISTRATION_FORM') {
+    return res.status(400).json({ message: 'Invalid checklist item' });
+  }
+  if (!['MISSING', 'RECEIVED', 'NOT_APPLICABLE'].includes(status)) {
+    return res.status(400).json({ message: 'Invalid checklist status' });
+  }
+  let client;
+  try {
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const enrollment = await client.query('SELECT id FROM enrollments WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!enrollment.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ message: 'Enrollment not found' }); }
+    const item = await client.query(`
+      INSERT INTO registration_checklist_items (enrollment_id, item_type, status, requested_by, requested_at, received_at, updated_at)
+      VALUES ($1, $2, $3::text, $4, CASE WHEN $3::text = 'MISSING' THEN CURRENT_TIMESTAMP ELSE NULL END,
+        CASE WHEN $3::text = 'RECEIVED' THEN CURRENT_TIMESTAMP ELSE NULL END, CURRENT_TIMESTAMP)
+      ON CONFLICT (enrollment_id, item_type) DO UPDATE SET status = EXCLUDED.status,
+        received_at = EXCLUDED.received_at,
+        requested_by = CASE WHEN EXCLUDED.status = 'MISSING' THEN EXCLUDED.requested_by ELSE registration_checklist_items.requested_by END,
+        requested_at = CASE WHEN EXCLUDED.status = 'MISSING' THEN COALESCE(registration_checklist_items.requested_at, CURRENT_TIMESTAMP) ELSE registration_checklist_items.requested_at END,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING item_type, status, requested_at, received_at
+    `, [req.params.id, itemType, status, req.user.id]);
+    await client.query('COMMIT');
+    await logAudit({ userId: req.user.id, userName: req.user.email, userRole: req.user.role, action: 'checklist_status_change', entityType: 'enrollment', entityId: req.params.id, details: { itemType, status }, ipAddress: getIp(req) });
+    return res.json({ checklistItem: item.rows[0] });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('Checklist update failed:', error.message);
+    return res.status(500).json({ message: 'Failed to update checklist item' });
+  } finally { if (client) client.release(); }
+});
+
+const createPortalControlHandler = ({ action } = {}) => async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const purpose = portalPurpose(req.body?.purpose);
+  if (!purpose) return res.status(400).json({ message: 'Invalid portal link purpose' });
+  let client;
+  try {
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const enrollmentResult = await client.query('SELECT * FROM enrollments WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!enrollmentResult.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ message: 'Enrollment not found' }); }
+    const enrollment = enrollmentResult.rows[0];
+    if (action === 'revoke') {
+      await revokePortalTokensInTransaction({ client, enrollmentId: req.params.id, purpose });
+      await client.query('COMMIT');
+      await logAudit({ userId: req.user.id, userName: req.user.email, userRole: req.user.role, action: 'portal_link_revoke', entityType: 'enrollment', entityId: req.params.id, details: { purpose }, ipAddress: getIp(req) });
+      return res.json({ purpose, revoked: true });
+    }
+    const token = await issuePortalTokenInTransaction({ client, enrollmentId: req.params.id, purpose, issuedBy: req.user.id });
+    await client.query('COMMIT');
+    let emailResult;
+    try { emailResult = await sendPortalEmail({ enrollment, purpose, token }); }
+    catch { emailResult = { success: false, error: EMAIL_ERROR_CATEGORIES.UNKNOWN }; }
+    await logEmailDelivery(req.params.id, purpose === TOKEN_PURPOSES.UPDATE_APPLICATION ? 'status_more_information_required' : 'status_approved', emailResult);
+    await logAudit({ userId: req.user.id, userName: req.user.email, userRole: req.user.role, action: 'portal_link_reissue', entityType: 'enrollment', entityId: req.params.id, details: { purpose }, ipAddress: getIp(req) });
+    return res.json({ metadata: safeTokenMetadata(token), emailSent: Boolean(emailResult.success && !emailResult.skipped), linkReissued: true });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    if (error instanceof PortalTokenError
+      && ['TOKEN_NOT_ELIGIBLE', 'INVALID_ENROLLMENT'].includes(error.code)) {
+      return res.status(error.code === 'INVALID_ENROLLMENT' ? 404 : 409).json({
+        message: 'This portal link is not eligible for the current application state.',
+      });
+    }
+    return res.status(500).json({ message: 'Failed to update portal link' });
+  } finally { if (client) client.release(); }
+};
+
+router.post('/:id/portal-link/reissue', authenticate, createPortalControlHandler({ action: 'reissue' }));
+router.post('/:id/portal-link/resend', authenticate, createPortalControlHandler({ action: 'resend' }));
+router.post('/:id/portal-link/revoke', authenticate, createPortalControlHandler({ action: 'revoke' }));
 
 const createAdmissionsEmailResendHandler = ({
   database = db,
@@ -393,6 +654,11 @@ const createAdmissionsEmailResendHandler = ({
   });
   const resendDefinition = resendableEmailTypes[emailType];
   if (!resendDefinition) return res.status(400).json({ message: 'Invalid admissions email type' });
+  if (emailType === 'status_more_information_required' || emailType === 'status_approved') {
+    return res.status(409).json({
+      message: 'Secure status emails must use the portal-link reissue or resend endpoint.',
+    });
+  }
 
   let client;
   try {
