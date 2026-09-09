@@ -1,0 +1,200 @@
+The secure admissions portal is working, but I want to improve the document upload workflow, mobile usability, and Admin UI clarity, and also add Admin dashboard notifications.
+
+Do not deploy or run migrations automatically.
+
+1. Replace “Upload later”
+
+Remove the parent-facing Upload later option.
+
+The document choices should instead be:
+
+Upload online
+Bring in person
+
+If the parent does not have the document yet, they can simply use Save progress and return later through the same secure link.
+
+Do not create a separate “upload later” state.
+
+2. Make document choices obvious on mobile
+
+On mobile, the current document-choice controls are not visually obvious enough and can look like sliders/toggles without clear meaning.
+
+Redesign these controls so it is immediately obvious that the parent must choose one option.
+
+Prefer a mobile-friendly segmented-card or radio-card style, for example:
+
+Upload online
+“Upload this document securely now”
+
+Bring in person
+“Bring this document directly to Harmony”
+
+Requirements:
+
+large tap targets
+clear selected/unselected states
+obvious labels
+visible icons if useful
+accessible radio semantics
+no ambiguous slider appearance
+stack vertically on small screens if necessary
+
+The selected option should be very easy to see.
+
+3. Explain Save Progress and Submit Update
+
+The meaning of these buttons must be obvious.
+
+Save Progress
+should clearly communicate:
+
+“Save what you have entered so far. You can return using this secure link and continue later.”
+
+Submit Update
+should clearly communicate:
+
+“Send the completed requested information to Harmony for review.”
+
+Use:
+
+helper text
+info icons/tooltips where appropriate
+mobile tap/click explanations, not hover-only behavior
+
+Do not rely only on hover because mobile users cannot hover.
+
+Make sure the buttons are visually distinct and easy to understand on phones.
+
+4. Implement secure document uploads
+
+When the parent selects Upload online:
+
+Show a file picker immediately.
+Support only approved formats such as PDF, JPG/JPEG and PNG.
+Enforce the existing 10 MB maximum.
+Verify file signatures server-side, not only MIME type.
+Reject executable, HTML, SVG, archive and script files.
+Generate storage names server-side.
+Store files privately using the existing admissions document/storage foundation.
+Never put documents in a public /uploads folder.
+Never expose storage keys to parents.
+
+After upload, show:
+
+Uploaded — awaiting Harmony review
+
+Allow a parent to replace/remove the file before final submission where safe.
+
+Admin document states should clearly distinguish:
+
+Missing
+Uploaded / Pending review
+Bring in person
+Received
+Replacement required
+Not applicable
+
+Bring in person must never automatically become Received.
+Only Admin can confirm that a physical document was actually received.
+
+5. Improve the Admin admissions UI
+
+The current Admin modal is functional but some states such as Missing, Bring in person, and other checklist statuses can be difficult to read, especially on smaller screens.
+
+Improve the UI so Admin can understand everything at a glance.
+
+Requirements:
+
+stronger visual contrast
+clearer status badges
+larger readable labels
+less cramped document cards
+clear distinction between editable and read-only fields
+mobile/tablet responsive behavior
+avoid dark-on-dark or low-contrast controls
+make selected dropdown/status values easy to read
+keep buttons clearly separated
+
+The Admin should immediately understand:
+
+what is missing
+what the parent will upload online
+what the parent will bring in person
+what Harmony has already received
+what needs replacement
+
+If necessary, use clearer cards, icons, status chips, spacing, or section grouping.
+
+6. Admin dashboard notifications
+
+Add Admin/Super Admin notifications for meaningful admissions events.
+
+Notify Admin when:
+
+A new application is submitted
+A parent submits requested information
+A document is uploaded
+A parent selects Bring in person
+Registration is submitted
+A registration needs Admin review
+A replacement document is submitted
+
+Do not notify for every draft save or small field edit.
+
+Notifications should:
+
+appear in the Admin dashboard/navigation with an unread count
+have read/unread state
+include a timestamp
+identify the application reference and learner
+link directly to the relevant application
+be visible only to Admin/Super Admin
+never contain secure tokens, document contents, storage keys, or sensitive information
+
+Add a simple Recent Admissions Activity section to the Admin dashboard.
+
+7. Parent experience
+
+Parents should clearly understand:
+
+Upload online if they are comfortable
+Bring in person if they prefer physical submission
+Save Progress if they do not have everything yet
+They can return later using the same valid secure link
+
+Keep Harmony’s physical address visible.
+
+Preserve the existing Powered by AutoM8 attribution.
+
+8. Preserve existing systems
+
+Do not break:
+
+Gmail API/OAuth emails
+More Information Required flow
+approval/registration links
+registration submission
+secure token lifecycle
+resend/reissue/revoke controls
+Student Portal retirement
+existing learner records
+
+Email or storage failure must never roll back admissions or registration data.
+
+Before implementation
+
+First return:
+
+Revised parent mobile UI design
+Revised Admin UI design
+Upload architecture
+Existing S3/AWS configuration audit
+Database changes required
+Document review workflow
+Admin notification architecture
+New endpoints
+Security controls
+Migration requirements
+Implementation plan
+
+Do not implement yet. I want to review the plan firs
