@@ -1,0 +1,277 @@
+Phase 4 is approved.
+
+Proceed with Phase 5 — Admin Registration Controls + Secure Email-Link Integration.
+
+Do not implement document uploads yet.
+Do not deploy.
+Do not run any migration.
+
+The goal is to connect the existing Admin admissions workflow to the secure parent portal that has already been built.
+
+1. More Information Required workflow
+
+Extend the existing Enrollment/Application details modal.
+
+When Admin selects More Information Required, allow Admin to:
+
+Select which application fields are missing:
+Parent email
+Parent phone
+Previous school
+Additional notes/information
+Select which documents are missing:
+Birth certificate
+Parent/Guardian ID
+Latest school report
+Transfer document
+Add an optional parent-safe message
+Preview the request before sending
+
+Add a clear action:
+
+Send Request Information
+
+The backend must:
+
+Save the requested fields/checklist items.
+Set/retain the enrollment status as MORE_INFORMATION_REQUIRED.
+Issue a secure UPDATE_APPLICATION token.
+Commit all database changes.
+Build the parent link exclusively through buildPortalLink().
+Send the existing More Information Required email after commit.
+
+The email should include a prominent:
+
+Update Application
+
+button linking to:
+
+/application/update/:token
+
+Include the plain-text URL as well.
+
+Preserve the existing wording explaining that documents may be brought to Harmony in person.
+
+2. Approval → Registration workflow
+
+When Admin changes an application to APPROVED or compatible legacy approved:
+
+Issue a COMPLETE_REGISTRATION token in the same transaction as the approval/status operation.
+Commit approval and token issuance first.
+Send the approval email afterward.
+
+The approval email must contain:
+
+Complete Registration
+
+linking securely to:
+
+/registration/:token
+
+Also provide the plain-text link.
+
+Do not create a token for:
+
+NEW
+UNDER_REVIEW
+NOT_ACCEPTED
+rejected
+waitlisted
+REGISTERED
+3. Registration Pending
+
+When the parent submits registration and the application becomes REGISTRATION_PENDING:
+
+Admin should be able to see:
+
+Registration form status
+Submitted date
+Service selections
+Registration checklist
+Whether the secure registration link is:
+Active
+Expired
+Revoked
+Submitted/read-only
+
+If registration is already submitted, do not encourage the parent to continue editing.
+
+4. Admin secure-link controls
+
+Add controlled Admin actions:
+
+Resend Email
+Reissue Secure Link
+Revoke Secure Link
+
+Rules:
+
+Resend Email
+
+Reuse the existing active token.
+Do not silently create another token.
+
+Reissue Secure Link
+
+Explicit Admin action only.
+Revoke the current token.
+Generate a new token.
+Send the appropriate email after commit.
+
+Revoke Secure Link
+
+Revoke access immediately.
+Do not change the admissions status.
+
+Never display:
+
+token hashes
+raw token database values
+internal IDs
+5. Registration checklist
+
+Add a clear Admin panel showing:
+
+Birth certificate
+Parent/Guardian ID
+Latest school report
+Transfer document
+Registration form
+
+Possible document states:
+
+Missing
+Bring in person
+Received
+Not applicable
+
+Remember:
+
+Bring in person is NOT the same as Received.
+
+Only Admin can mark a physical document as Received.
+
+Grade-specific requirements should be respected where already known:
+
+Baby Class–Grade R: Birth certificate, Parent/Guardian ID, Road to Health/Clinic Card where supported by the existing admissions requirements
+Grades 1–7: also latest school progress report and transfer document
+
+Do not invent new requirements if the existing schema does not support them. Report any missing checklist type instead.
+
+6. Email behavior
+
+Preserve the existing Gmail API/OAuth transport exactly.
+
+Preserve:
+
+sender identity
+Harmony Reply-To
+HTML/plain-text MIME
+Powered by AutoM8 link
+delivery logs
+sanitized failure categories
+post-commit sending
+
+Email failure must never roll back:
+
+approval
+status changes
+requested-information configuration
+token issuance
+registration data
+
+Failed delivery should remain visible to Admin and use the existing resend architecture where appropriate.
+
+7. Canonical URL
+
+All secure portal links must use buildPortalLink().
+
+Production canonical origin:
+
+https://www.harmonylearning.co.za
+
+Never build links from:
+
+request headers
+host headers
+arbitrary environment variables
+frontend input
+8. Security
+
+Preserve all Phase 1–4 controls.
+
+Admin endpoints must use existing Admin/Super Admin authentication and role checks.
+
+Token issuance/reissue/revocation must use transactions and existing locking logic.
+
+Never log raw secure links or tokens.
+
+Do not reactivate the Student Portal.
+Do not alter learner records or learner authentication.
+
+9. UI
+
+Keep the current admissions Admin modal but organize the new registration section clearly.
+
+The Admin should be able to understand at a glance:
+
+Admissions status
+Information requested
+Registration progress
+Missing documents
+Secure-link status
+Last relevant email delivery status
+
+Avoid making the modal overcrowded. Use sections/cards/tabs if appropriate.
+
+Verification
+
+Test the full non-production workflow:
+
+MORE_INFORMATION_REQUIRED
+→ secure Update Application link generated
+→ correct email content
+
+APPROVED
+→ registration token generated
+→ Complete Registration email contains correct link
+
+Parent submits registration
+→ REGISTRATION_PENDING
+→ registration becomes read-only
+
+Admin reissue
+→ previous link invalid
+→ new link valid
+
+Admin revoke
+→ link becomes invalid
+
+Email failure
+→ database changes remain committed
+
+Run:
+
+Admin/admissions tests
+Parent portal/API tests
+Token security tests
+Email tests
+Security tests
+Production client build
+Independent review
+
+Return:
+
+Admin UI changes
+New/changed endpoints
+More Information Required workflow
+Approval/registration-link workflow
+Resend/reissue/revoke behavior
+Registration checklist behavior
+Email changes
+Files changed
+Tests passed
+Independent review
+Any remaining blocker before production rollout
+
+Do not deploy and do not run migrations automat
