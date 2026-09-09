@@ -694,7 +694,7 @@ const EnrollmentSection = () => {
               </div>
             </fieldset>
             <label className="flex items-start gap-3 p-4 bg-red-50 rounded-xl cursor-pointer">
-              <input type="checkbox" {...register('boardingOption')} className="mt-0.5 w-5 h-5 accent-red-700" />
+              <input type="checkbox" {...register('boardingOption')} className="boarding-interest-checkbox mt-0.5" />
               <span><span className="block font-extrabold text-blue-950">Interested in boarding?</span><span className="block mt-1 text-sm text-slate-600">Let us know if you would like to explore the boarding option.</span></span>
             </label>
             <div className="grid sm:grid-cols-2 gap-5">

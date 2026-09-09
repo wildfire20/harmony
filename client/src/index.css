@@ -4,161 +4,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Admissions admin readability */
-.admissions-management {
-  color: #1e293b;
-}
-
-.admissions-management h1,
-.admissions-management h2,
-.admissions-management h3 {
-  color: #0f172a;
-}
-
-.admissions-management .admissions-summary button {
-  color: #172554;
-  min-width: 0;
-  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
-}
-
-.admissions-management .admissions-summary button.border-pink-500 {
-  background: #fff1f2;
-  box-shadow: inset 0 0 0 1px #e11d48;
-}
-
-.admissions-management input,
-.admissions-management textarea,
-.admissions-management select {
-  color: #0f172a;
-  background-color: #fff;
-  caret-color: #b91c1c;
-}
-
-.admissions-management input::placeholder,
-.admissions-management textarea::placeholder {
-  color: #64748b;
-  opacity: 1;
-}
-
-.admissions-management input:focus,
-.admissions-management textarea:focus,
-.admissions-management select:focus {
-  outline: 3px solid rgba(30, 64, 175, 0.22);
-  outline-offset: 1px;
-  border-color: #1e40af;
-}
-
-.admissions-management input::selection,
-.admissions-management textarea::selection {
-  color: #fff;
-  background: #1e40af;
-}
-
-.admissions-management input:disabled,
-.admissions-management textarea:disabled,
-.admissions-management select:disabled {
-  color: #475569;
-  background: #e2e8f0;
-  opacity: 0.8;
-  cursor: not-allowed;
-}
-
-.admissions-management fieldset {
-  padding: 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.625rem;
-  background: #f8fafc;
-}
-
-.admissions-management fieldset legend {
-  padding: 0 0.35rem;
-  color: #334155;
-}
-
-.admissions-management fieldset label {
-  min-height: 2rem;
-  line-height: 1.35;
-}
-
-.admissions-management table th {
-  color: #334155;
-  font-weight: 700;
-}
-
-.admissions-management table td {
-  color: #334155;
-}
-
-.dark .admissions-management {
-  color: #e2e8f0;
-}
-
-.dark .admissions-management h1,
-.dark .admissions-management h2,
-.dark .admissions-management h3 {
-  color: #fff;
-}
-
-.dark .admissions-management .admissions-summary button {
-  color: #f8fafc;
-}
-
-.dark .admissions-management .admissions-summary button.border-pink-500 {
-  background: rgba(131, 24, 67, 0.3);
-}
-
-.dark .admissions-management input,
-.dark .admissions-management textarea,
-.dark .admissions-management select {
-  color: #f8fafc;
-  background-color: #0f172a;
-  caret-color: #fb7185;
-}
-
-.dark .admissions-management input::placeholder,
-.dark .admissions-management textarea::placeholder {
-  color: #94a3b8;
-}
-
-.dark .admissions-management input:disabled,
-.dark .admissions-management textarea:disabled,
-.dark .admissions-management select:disabled {
-  color: #cbd5e1;
-  background: #334155;
-}
-
-.dark .admissions-management fieldset {
-  border-color: #475569;
-  background: #0f172a;
-}
-
-.dark .admissions-management fieldset legend,
-.dark .admissions-management table th,
-.dark .admissions-management table td {
-  color: #cbd5e1;
-}
-
-@media (max-width: 640px) {
-  .admissions-management .admissions-summary {
-    gap: 0.5rem;
-  }
-
-  .admissions-management .admissions-summary button {
-    padding: 0.65rem;
-  }
-
-  .admissions-management fieldset label {
-    align-items: flex-start;
-    padding-block: 0.4rem;
-  }
-
-  .admissions-management textarea,
-  .admissions-management select,
-  .admissions-management button {
-    max-width: 100%;
-  }
-}
-
 /* Import mobile-responsive styles */
 @import './mobile-responsive.css';
 @import './components/ui/MobileButtonStyles.css';
@@ -171,14 +16,14 @@
   --harmony-secondary: #1e40af;    /* Blue from logo head and text */
   --harmony-accent: #ffffff;       /* White */
   --harmony-pink: #f87171;         /* Light pink accent */
-  
+
   /* Supporting Colors */
   --harmony-pink-light: #fef2f2;   /* Light pink for subtle backgrounds */
   --harmony-cream: #ffffff;        /* White background */
   --harmony-red-dark: #b91c1c;     /* Darker red for depth */
   --harmony-blue-dark: #1e3a8a;    /* Darker blue for depth */
   --harmony-navy: #1e40af;         /* Navy blue for icons and accents */
-  
+
   /* Neutral Colors */
   --harmony-gray-50: #fafafa;
   --harmony-gray-100: #f5f5f5;
@@ -190,19 +35,19 @@
   --harmony-gray-700: #616161;
   --harmony-gray-800: #424242;
   --harmony-gray-900: #212121;
-  
+
   /* Semantic Colors */
   --harmony-success: #4caf50;
   --harmony-warning: #ffc107;
   --harmony-error: #f44336;
   --harmony-info: #2196f3;
-  
+
   /* Professional Gradients - Matching Logo Colors */
   --harmony-gradient-primary: linear-gradient(135deg, #dc2626 0%, #f87171 100%);
   --harmony-gradient-secondary: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
   --harmony-gradient-hero: linear-gradient(135deg, #dc2626 0%, #f87171 50%, #fecaca 100%);
   --harmony-gradient-accent: linear-gradient(135deg, #1e40af 0%, #60a5fa 100%);
-  
+
   /* Professional Shadows */
   --harmony-shadow-sm: 0 1px 3px 0 rgba(220, 38, 38, 0.1), 0 1px 2px 0 rgba(220, 38, 38, 0.06);
   --harmony-shadow-md: 0 4px 6px -1px rgba(220, 38, 38, 0.1), 0 2px 4px -1px rgba(220, 38, 38, 0.06);
@@ -217,7 +62,7 @@
   --harmony-secondary: #ff4081;
   --harmony-accent: #121826;
   --harmony-gold: #ffd740;
-  
+
   /* Enhanced dark grays with better contrast */
   --harmony-gray-50: #0f1419;    /* Deep dark background */
   --harmony-gray-100: #1a202c;   /* Card backgrounds */
@@ -229,19 +74,187 @@
   --harmony-gray-700: #e2e8f0;   /* High contrast text */
   --harmony-gray-800: #f7fafc;   /* Pure text (rare) */
   --harmony-gray-900: #ffffff;   /* Maximum contrast */
-  
+
   /* Dark theme gradients */
   --harmony-gradient-primary: linear-gradient(135deg, #4c5af7 0%, #6366f1 100%);
   --harmony-gradient-secondary: linear-gradient(135deg, #ff4081 0%, #ff6ec7 100%);
   --harmony-gradient-hero: linear-gradient(135deg, #0f1419 0%, #1a202c 50%, #2d3748 100%);
   --harmony-gradient-accent: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
-  
+
   /* Enhanced dark shadows */
   --harmony-shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
   --harmony-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
   --harmony-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
   --harmony-shadow-brand: 0 10px 25px -3px rgba(76, 90, 247, 0.4);
   --harmony-shadow-pink: 0 10px 25px -3px rgba(255, 64, 129, 0.4);
+}
+
+/* Admissions Admin: final theme-aware contrast overrides */
+.admissions-management {
+  color: #1e293b;
+}
+
+.admissions-management h1,
+.admissions-management h2,
+.admissions-management h3 {
+  color: #0f172a !important;
+}
+
+.admissions-management .admissions-summary button {
+  color: #172554 !important;
+  min-width: 0;
+}
+
+.admissions-management .admissions-summary button.border-pink-500 {
+  background: #fff1f2 !important;
+  box-shadow: inset 0 0 0 1px #e11d48;
+}
+
+.admissions-management input,
+.admissions-management textarea,
+.admissions-management select {
+  color: #0f172a !important;
+  background-color: #fff !important;
+  caret-color: #b91c1c;
+}
+
+.admissions-management input::placeholder,
+.admissions-management textarea::placeholder {
+  color: #64748b !important;
+  opacity: 1;
+}
+
+.admissions-management input:focus,
+.admissions-management textarea:focus,
+.admissions-management select:focus {
+  outline: 3px solid rgba(30, 64, 175, 0.28);
+  outline-offset: 1px;
+  border-color: #1e40af !important;
+}
+
+.admissions-management input::selection,
+.admissions-management textarea::selection {
+  color: #fff;
+  background: #1e40af;
+}
+
+.admissions-management input:disabled,
+.admissions-management textarea:disabled,
+.admissions-management select:disabled {
+  color: #475569 !important;
+  background: #e2e8f0 !important;
+  opacity: 0.85;
+}
+
+.admissions-management fieldset {
+  padding: 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.625rem;
+  background: #f8fafc;
+}
+
+.admissions-management fieldset legend,
+.admissions-management table th {
+  color: #334155 !important;
+  font-weight: 700;
+}
+
+.admissions-management table td {
+  color: #334155 !important;
+}
+
+[data-theme="dark"] .admissions-management {
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .admissions-management h1,
+[data-theme="dark"] .admissions-management h2,
+[data-theme="dark"] .admissions-management h3 {
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] .admissions-management .admissions-summary button {
+  color: #f8fafc !important;
+  background: #1e293b !important;
+  border-color: #475569 !important;
+}
+
+[data-theme="dark"] .admissions-management .admissions-summary button.border-pink-500 {
+  color: #881337 !important;
+  background: #fff1f2 !important;
+  border-color: #ec4899 !important;
+}
+
+[data-theme="dark"] .admissions-management input,
+[data-theme="dark"] .admissions-management textarea,
+[data-theme="dark"] .admissions-management select {
+  color: #f8fafc !important;
+  background-color: #111c30 !important;
+  caret-color: #fb7185;
+}
+
+[data-theme="dark"] .admissions-management input::placeholder,
+[data-theme="dark"] .admissions-management textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .admissions-management fieldset {
+  border-color: #475569;
+  background: #172236 !important;
+}
+
+[data-theme="dark"] .admissions-management fieldset legend,
+[data-theme="dark"] .admissions-management table th {
+  color: #cbd5e1 !important;
+}
+
+[data-theme="dark"] .admissions-management table td {
+  color: #dbe5f1 !important;
+}
+
+[data-theme="dark"] .admissions-management input:disabled,
+[data-theme="dark"] .admissions-management textarea:disabled,
+[data-theme="dark"] .admissions-management select:disabled {
+  color: #cbd5e1 !important;
+  background: #334155 !important;
+}
+
+@media (max-width: 640px) {
+  .admissions-management .admissions-summary {
+    gap: 0.5rem;
+  }
+
+  .admissions-management fieldset label {
+    align-items: flex-start;
+    padding-block: 0.4rem;
+  }
+}
+
+/* Public application: visible mobile boarding selection */
+.boarding-interest-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 0 0 1.5rem;
+  width: 1.5rem !important;
+  height: 1.5rem !important;
+  border: 2px solid #64748b !important;
+  border-radius: 0.3rem;
+  background: #fff !important;
+  cursor: pointer;
+}
+
+.boarding-interest-checkbox:checked {
+  border-color: #b91c1c !important;
+  background-color: #b91c1c !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m4 10 4 4 8-8'/%3E%3C/svg%3E") !important;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 1rem;
+}
+
+.boarding-interest-checkbox:focus-visible {
+  outline: 3px solid rgba(30, 64, 175, 0.35);
+  outline-offset: 3px;
 }
 
 /* Mobile-first responsive design */
@@ -674,4 +687,72 @@ code {
   .fixed-footer-mobile {
     background: var(--harmony-gradient-primary) !important;
   }
+}
+
+/* Keep these page-specific controls after global theme rules. */
+[data-theme="dark"] .admissions-management h1,
+[data-theme="dark"] .admissions-management h2,
+[data-theme="dark"] .admissions-management h3 {
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] .admissions-management .admissions-summary button {
+  color: #f8fafc !important;
+  background: #1e293b !important;
+  border-color: #64748b !important;
+}
+
+[data-theme="dark"] .admissions-management .admissions-summary button.border-pink-500 {
+  color: #881337 !important;
+  background: #fff1f2 !important;
+  border-color: #ec4899 !important;
+}
+
+[data-theme="dark"] .admissions-management fieldset {
+  color: #e2e8f0 !important;
+  background: #172236 !important;
+  border-color: #64748b !important;
+}
+
+[data-theme="dark"] .admissions-management fieldset legend,
+[data-theme="dark"] .admissions-management fieldset label,
+[data-theme="dark"] .admissions-management table th,
+[data-theme="dark"] .admissions-management table td {
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .admissions-management input,
+[data-theme="dark"] .admissions-management textarea,
+[data-theme="dark"] .admissions-management select {
+  color: #f8fafc !important;
+  background: #111c30 !important;
+  border-color: #64748b !important;
+  caret-color: #fb7185;
+}
+
+[data-theme="dark"] .admissions-management input::placeholder,
+[data-theme="dark"] .admissions-management textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+.boarding-interest-checkbox,
+[data-theme="dark"] .boarding-interest-checkbox {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  flex: 0 0 1.5rem;
+  width: 1.5rem !important;
+  height: 1.5rem !important;
+  border: 2px solid #64748b !important;
+  border-radius: 0.3rem;
+  background-color: #fff !important;
+}
+
+.boarding-interest-checkbox:checked,
+[data-theme="dark"] .boarding-interest-checkbox:checked {
+  border-color: #b91c1c !important;
+  background-color: #b91c1c !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m4 10 4 4 8-8'/%3E%3C/svg%3E") !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  background-size: 1rem !important;
 }
