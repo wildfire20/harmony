@@ -21,7 +21,7 @@ import {
   ClipboardCheck
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { enrollmentsAPI } from '../../services/api';
+import { adminAPI, enrollmentsAPI } from '../../services/api';
 import HarmonyLogo from '../common/HarmonyLogo';
 import { ThemeToggle, useTheme, ThemedLayout } from '../common/ThemeProvider';
 import { StatusIndicator, DepartmentBadge } from '../common/BrandingElements';
@@ -45,6 +45,12 @@ const Layout = () => {
     }
   );
   const pendingEnrollments = parseInt(enrollmentStatsData?.data?.pending || 0);
+  const { data: notificationCountData } = useQuery(
+    ['admissions-notification-count'],
+    () => adminAPI.getUnreadNotificationCount(),
+    { enabled: !!isAdmin, refetchInterval: 60 * 1000, refetchOnWindowFocus: true }
+  );
+  const unreadAdmissionsNotifications = Number(notificationCountData?.data?.count || 0);
 
   const handleLogout = async () => {
     await logout();
@@ -66,6 +72,7 @@ const Layout = () => {
     { name: 'Profile', href: '/profile', icon: User, color: 'harmony-secondary' },
     ...(isAdmin ? [
       { name: 'Admin Panel', href: '/admin', icon: Settings, color: 'harmony-navy', badge: pendingEnrollments },
+      { name: 'Admissions Notifications', href: '/enrollments?notifications=1', icon: Bell, color: 'harmony-secondary', badge: unreadAdmissionsNotifications },
       { name: 'Users', href: '/users', icon: Users, color: 'harmony-secondary' },
       { name: 'Analytics', href: '/analytics', icon: BarChart3, color: 'harmony-gold' },
       { name: 'Payments', href: '/payments', icon: CreditCard, color: 'harmony-gold' }

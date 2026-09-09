@@ -6,22 +6,44 @@ const safePayload = (payload = {}) => ({
   documentPublicId: payload.documentPublicId ? String(payload.documentPublicId).slice(0, 80) : null,
   checklistItem: payload.checklistItem ? String(payload.checklistItem).slice(0, 40) : null,
   eventKey: payload.eventKey ? String(payload.eventKey).slice(0, 80) : null,
+  documentCount: payload.documentCount != null && Number.isSafeInteger(Number(payload.documentCount))
+    ? Number(payload.documentCount)
+    : null,
+  checklistItems: Array.isArray(payload.checklistItems)
+    ? payload.checklistItems.map((item) => String(item).slice(0, 40)).slice(0, 10)
+    : [],
 });
-const EVENT_COPY = Object.freeze({
-  DOCUMENT_UPLOADED: ['New document uploaded', 'A parent uploaded an admissions document for review.'],
-  DOCUMENT_REPLACED: ['Document replaced', 'A parent uploaded a replacement admissions document.'],
-  DOCUMENT_REVIEWED: ['Document reviewed', 'An admissions document was marked as received.'],
-  DOCUMENT_REPLACEMENT_REQUIRED: ['Document replacement required', 'An admissions document requires replacement.'],
-  NEW_APPLICATION: ['New admissions application', 'A new admissions application requires attention.'],
-  INFORMATION_SUBMITTED: ['Information submitted', 'A parent submitted requested admissions information.'],
-  BRING_IN_PERSON_SELECTED: ['In-person document delivery selected', 'A parent will bring a requested document in person.'],
-  REGISTRATION_SUBMITTED: ['Registration submitted', 'A parent submitted registration for review.'],
+const ITEM_LABELS = Object.freeze({
+  BIRTH_CERTIFICATE: 'Birth Certificate',
+  PARENT_GUARDIAN_ID: 'Parent/Guardian ID',
+  LATEST_SCHOOL_REPORT: 'Latest School Report',
+  TRANSFER_DOCUMENT: 'Transfer Document',
+  REGISTRATION_FORM: 'Registration Form',
 });
 
 async function notifyAdmissionsAdmins(payload, executor = db) {
   const safe = safePayload(payload);
   if (!safe.enrollmentId || !safe.event) return;
-  const [title, summary] = EVENT_COPY[safe.event] || ['Admissions activity', 'An admissions application was updated.'];
+  const enrollmentResult = await executor.query(`
+    SELECT student_first_name, student_last_name, application_reference, grade_applying
+    FROM enrollments WHERE id = $1
+  `, [safe.enrollmentId]);
+  const enrollment = enrollmentResult.rows[0] || {};
+  const learner = [enrollment.student_first_name, enrollment.student_last_name].filter(Boolean).join(' ') || 'Applicant';
+  const reference = enrollment.application_reference || 'Admissions application';
+  const item = ITEM_LABELS[safe.checklistItem] || safe.checklistItem || 'document';
+  const copy = {
+    DOCUMENT_UPLOADED: ['Document uploaded', `${learner} uploaded ${item} — ${reference}`],
+    DOCUMENT_REPLACED: ['Replacement document uploaded', `${learner} uploaded a replacement ${item} — ${reference}`],
+    DOCUMENTS_SUBMITTED: ['Requested documents submitted', `${learner} submitted ${safe.documentCount || safe.checklistItems.length} requested documents — ${reference}`],
+    DOCUMENT_REVIEWED: ['Document received', `${item} was marked received for ${learner} — ${reference}`],
+    DOCUMENT_REPLACEMENT_REQUIRED: ['Document replacement required', `${item} requires replacement for ${learner} — ${reference}`],
+    NEW_APPLICATION: ['New application received', `New application received — ${learner} (${reference})${enrollment.grade_applying ? `, ${enrollment.grade_applying}` : ''}`],
+    INFORMATION_SUBMITTED: ['Requested information submitted', `${learner} submitted requested application information — ${reference}`],
+    BRING_IN_PERSON_SELECTED: ['Bring in person', `${learner} will bring ${item} in person — ${reference}`],
+    REGISTRATION_SUBMITTED: ['Registration submitted', `Registration submitted — ${learner} (${reference}) is ready for Admin review`],
+  };
+  const [title, summary] = copy[safe.event] || ['Admissions activity', `${learner}'s admissions application was updated — ${reference}`];
   const dedupeKey = `${safe.event}:${safe.enrollmentId}:${safe.documentPublicId || safe.checklistItem || 'application'}:${safe.eventKey || 'initial'}`.slice(0, 180);
   await executor.query(`
     INSERT INTO admissions_notifications (recipient_id, enrollment_id, event_type, title, summary, dedupe_key, payload)

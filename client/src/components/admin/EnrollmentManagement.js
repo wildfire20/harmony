@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { AlertCircle, Bell, ChevronRight, Clock3, Download, FileCheck2, KeyRound, Mail, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import api, { adminAPI, enrollmentsAPI } from '../../services/api';
@@ -71,6 +72,7 @@ const Section = ({ eyebrow, title, icon: Icon, children, action }) => (
 );
 
 const EnrollmentManagement = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [enrollments, setEnrollments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ total: 0 });
@@ -88,9 +90,12 @@ const EnrollmentManagement = () => {
   const [requestNote, setRequestNote] = useState('');
   const [requestPreview, setRequestPreview] = useState(false);
   const [notifications, setNotifications] = useState([]);
-  const [showNotifications, setShowNotifications] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(searchParams.get('notifications') === '1');
   const [activity, setActivity] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  useEffect(() => {
+    if (searchParams.get('notifications') === '1') setShowNotifications(true);
+  }, [searchParams]);
 
   const fetchEnrollments = useCallback(async () => {
     try {
@@ -112,8 +117,24 @@ const EnrollmentManagement = () => {
       }).catch(() => {});
   }, []);
   const markNotificationRead = async (notification) => {
-    if (notification.readAt || notification.read) return;
-    try { await adminAPI.markNotificationRead(notification.id); setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, read: true, readAt: new Date().toISOString() } : item)); setUnreadCount((count) => Math.max(0, count - 1)); } catch (error) { console.error(error); }
+    try {
+      if (!notification.readAt && !notification.read) {
+        await adminAPI.markNotificationRead(notification.id);
+        setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, read: true, readAt: new Date().toISOString() } : item));
+        setUnreadCount((count) => Math.max(0, count - 1));
+      }
+      if (notification.payload?.enrollmentId) {
+        const response = await enrollmentsAPI.getOne(notification.payload.enrollmentId);
+        setSelectedEnrollment(response.data);
+        setNextStatus(response.data.status || '');
+        setAdminNotes(response.data.admin_notes || '');
+        setParentMessage(response.data.parent_status_message || '');
+        setShowNotifications(false);
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.delete('notifications');
+        setSearchParams(nextParams);
+      }
+    } catch (error) { toast.error('Could not open this admissions notification'); }
   };
   const markAllRead = async () => {
     try { await adminAPI.markAllNotificationsRead(); setNotifications((items) => items.map((item) => ({ ...item, read: true, readAt: new Date().toISOString() }))); setUnreadCount(0); } catch (error) { toast.error('Could not mark notifications read'); }
@@ -218,7 +239,7 @@ const EnrollmentManagement = () => {
 
   return (
     <div className="p-6">
-       <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row"><div><h1 className="mb-2 text-2xl font-bold text-slate-900 dark:text-white">Admissions Applications</h1><p className="text-slate-600 dark:text-slate-400">A focused view of decisions, parent follow-ups and registration readiness.</p></div><div className="relative"><button type="button" onClick={() => setShowNotifications((value) => !value)} className="relative flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:text-white"><Bell size={16} />Inbox{unreadCount > 0 && <span className="absolute -right-2 -top-2 min-w-5 rounded-full bg-pink-500 px-1.5 py-0.5 text-center text-[10px] text-white">{unreadCount}</span>}</button>{showNotifications && <div className="absolute right-0 z-20 mt-2 w-[min(90vw,360px)] rounded-xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-800"><div className="flex items-center justify-between px-3 py-2"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Recent admissions activity</p><button type="button" onClick={markAllRead} className="text-xs font-semibold text-blue-700">Mark all read</button></div>{notifications.length ? notifications.map((item) => <button type="button" key={item.id} onClick={() => markNotificationRead(item)} className={`block w-full rounded-lg px-3 py-2 text-left text-sm ${item.readAt || item.read ? 'text-slate-500' : 'bg-pink-50 font-semibold text-slate-800 dark:bg-pink-900/20 dark:text-white'}`}><span className="block">{item.title || item.message || 'Admissions update'}</span><small className="text-xs text-slate-400">{formatDateTime(item.createdAt || item.created_at)}</small></button>) : <p className="px-3 py-4 text-sm text-slate-500">No new activity.</p>}{activity.length > 0 && <p className="border-t border-slate-100 px-3 pb-1 pt-3 text-xs text-slate-500 dark:border-slate-700">{activity.length} recent admissions events shared with your team.</p>}</div>}</div></div>
+       <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row"><div><h1 className="mb-2 text-2xl font-bold text-slate-900 dark:text-white">Admissions Applications</h1><p className="text-slate-600 dark:text-slate-400">A focused view of decisions, parent follow-ups and registration readiness.</p></div><div className="relative"><button type="button" onClick={() => setShowNotifications((value) => !value)} className="relative flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:text-white"><Bell size={16} />Inbox{unreadCount > 0 && <span className="absolute -right-2 -top-2 min-w-5 rounded-full bg-pink-500 px-1.5 py-0.5 text-center text-[10px] text-white">{unreadCount}</span>}</button>{showNotifications && <div className="absolute right-0 z-20 mt-2 w-[min(90vw,360px)] rounded-xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-800"><div className="flex items-center justify-between px-3 py-2"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Recent admissions activity</p><button type="button" onClick={markAllRead} className="text-xs font-semibold text-blue-700">Mark all read</button></div>{notifications.length ? notifications.map((item) => <button type="button" key={item.id} onClick={() => markNotificationRead(item)} className={`block w-full rounded-lg px-3 py-2 text-left text-sm ${item.readAt || item.read ? 'text-slate-500' : 'bg-pink-50 font-semibold text-slate-800 dark:bg-pink-900/20 dark:text-white'}`}><span className="block">{item.title || item.message || 'Admissions update'}</span>{item.summary && <small className="mt-0.5 block text-xs font-normal text-slate-600 dark:text-slate-300">{item.summary}</small>}{item.payload?.checklistItems?.length > 0 && <small className="mt-1 block text-xs font-normal text-slate-400">{item.payload.checklistItems.map((entry) => CHECKLIST_LABELS[entry] || entry).join(', ')}</small>}<small className="text-xs text-slate-400">{formatDateTime(item.createdAt || item.created_at)}</small></button>) : <p className="px-3 py-4 text-sm text-slate-500">No new activity.</p>}{activity.length > 0 && <p className="border-t border-slate-100 px-3 pb-1 pt-3 text-xs text-slate-500 dark:border-slate-700">{activity.length} recent admissions events shared with your team.</p>}</div>}</div></div>
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
         <button type="button" onClick={() => setFilter('')} className={`rounded-lg border p-3 text-left ${!filter ? 'border-pink-500 bg-pink-50 dark:bg-pink-900/20' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800'}`}><span className="block text-xl font-bold dark:text-white">{stats.total || 0}</span><span className="text-xs text-slate-500">All</span></button>
         {ADMISSIONS_STATUSES.map(({ value, label }) => <button key={value} type="button" onClick={() => setFilter(value)} className={`rounded-lg border p-3 text-left ${filter === value ? 'border-pink-500 bg-pink-50 dark:bg-pink-900/20' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800'}`}><span className="block text-xl font-bold dark:text-white">{stats[value] || 0}</span><span className="text-xs text-slate-500">{label}</span></button>)}

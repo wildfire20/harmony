@@ -435,7 +435,7 @@ router.patch('/:id/documents/:publicId/review', authenticate, async (req, res) =
     const result = await client.query(`
       UPDATE admissions_portal_documents
        SET review_status = $1,
-          rejection_reason = $2, replacement_requested_at = CASE WHEN $1 = 'REPLACEMENT_REQUIRED' THEN CURRENT_TIMESTAMP ELSE replacement_requested_at END,
+           rejection_reason = $2,
           reviewed_by = $3, reviewed_at = CURRENT_TIMESTAMP
        WHERE public_id = $4 AND enrollment_id = $5 AND deleted_at IS NULL
          AND superseded_by_document_id IS NULL
@@ -454,6 +454,18 @@ router.patch('/:id/documents/:publicId/review', authenticate, async (req, res) =
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $2
     `, [reviewStatus, document.checklist_item_id]);
+    await logAudit({
+      userId: req.user.id,
+      userName: req.user.email,
+      userRole: req.user.role,
+      action: reviewStatus === 'RECEIVED' ? 'admissions_document_received' : 'admissions_document_replacement_requested',
+      entityType: 'enrollment',
+      entityId: req.params.id,
+      details: { documentPublicId: document.public_id, reviewStatus },
+      ipAddress: getIp(req),
+      executor: client,
+      required: true,
+    });
     await client.query('COMMIT');
     try {
       await notifyAdmissionsAdmins({
@@ -465,6 +477,11 @@ router.patch('/:id/documents/:publicId/review', authenticate, async (req, res) =
     return res.json({ document });
   } catch (error) {
     if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('Admissions document review failed:', {
+      code: error.code,
+      constraint: error.constraint,
+      message: error.message,
+    });
     return res.status(500).json({ message: 'Failed to review admissions document' });
   } finally { if (client) client.release(); }
 });

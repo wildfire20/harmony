@@ -1,0 +1,197 @@
+The admissions document upload system is now live and uploads are working correctly in production.
+
+I have confirmed that uploaded documents appear in Admin as:
+
+UPLOADED_PENDING_REVIEW
+
+However, there are two things I want fixed/improved now.
+
+Do not redesign the overall Admin UI yet.
+Do not deploy automatically.
+Do not run migrations automatically.
+
+1. Fix “Mark received”
+
+In the Admin admissions application modal, uploaded documents are visible correctly.
+
+However, when Admin clicks:
+
+Mark received
+
+the operation fails and a red error notification appears.
+
+Audit this workflow end-to-end and identify the exact root cause.
+
+Check:
+
+frontend request method and endpoint
+document publicId being sent
+Admin authentication/authorization
+backend review endpoint
+expected review-state value
+checklist state transition
+database constraints
+current production migration/schema compatibility
+transaction/locking logic
+whether UPLOADED_PENDING_REVIEW → RECEIVED is mapped correctly
+
+The intended behavior is:
+
+Uploaded / Pending review
+→ Admin clicks Mark received
+→ document becomes Received
+→ checklist becomes Received
+→ review timestamp/Admin reviewer is recorded
+→ audit event is created
+→ UI updates immediately
+
+The parent/application must not lose any data if the review action fails.
+
+Also verify Request replacement while auditing this route because it uses the same document-review infrastructure.
+
+If the problem requires a database/schema correction, prepare an additive/idempotent fix but do not run it. If it is only a code issue, do not create an unnecessary migration.
+
+2. Make Admin admissions notifications much more visible
+
+We already have notification infrastructure, but I want it exposed clearly in the main Admin sidebar/navigation, not only inside the admissions page.
+
+Add a sidebar item such as:
+
+Admissions Notifications
+
+or a clear Notifications item with a bell icon.
+
+It should display an unread badge, for example:
+
+Notifications 4
+
+Only Admin/Super Admin should see it.
+
+Clicking it should open the existing admissions notification inbox/panel.
+
+3. Notifications must clearly say WHO did WHAT
+
+Notifications need to be useful without Admin having to open every application just to understand what happened.
+
+Examples:
+
+New application
+
+New application received — Twayne Mundirwa (HLI-2027-0023), Grade 5
+
+Document uploaded
+
+Twayne Mundirwa uploaded Birth Certificate — HLI-2027-0023
+
+Multiple documents submitted
+
+Twayne Mundirwa submitted 3 requested documents — HLI-2027-0023
+
+The notification details can then list:
+
+Birth Certificate
+Parent/Guardian ID
+Latest School Report
+
+Bring in person
+
+Twayne Mundirwa will bring Transfer Document in person — HLI-2027-0023
+
+Requested information submitted
+
+Twayne Mundirwa submitted requested application information — HLI-2027-0023
+
+Registration submitted
+
+Registration submitted — Twayne Mundirwa (HLI-2027-0023) is ready for Admin review
+
+These should contain only safe operational information.
+
+Do not include:
+
+secure portal tokens
+storage keys
+signed S3 URLs
+document contents
+parent IDs
+sensitive form contents
+4. Deep-link notifications
+
+When Admin clicks a notification, take them directly to the relevant application/enrollment.
+
+Ideally:
+
+Notification
+→ Admissions Management
+→ automatically open the correct application modal
+
+For a document notification, the relevant document/checklist section should be easy to locate.
+
+Do not expose raw database IDs in public-facing URLs if this can be avoided. Use the existing safe Admin navigation architecture.
+
+5. Notification events
+
+Ensure meaningful Admin notifications exist for:
+
+New application submitted
+Requested information submitted
+Individual document uploaded
+Multiple requested documents submitted
+Bring in Person selected
+Replacement document uploaded
+Registration submitted
+Registration ready for Admin review
+
+Do not create notifications for:
+
+every keystroke
+every draft save
+upload progress percentages
+Admin simply opening an application
+
+Per-Admin read/unread state must remain independent.
+
+6. Preserve everything already working
+
+Do not break:
+
+parent secure links
+document uploads
+private S3 storage
+More Information Required
+approval emails
+registration links
+Gmail API/OAuth
+registration submission
+secure-token lifecycle
+resend/reissue/revoke
+Student Portal retirement
+learner records
+
+Do not perform the larger Admin visual redesign yet.
+
+Run:
+
+document review tests
+admissions notification tests
+Admin authorization tests
+PostgreSQL integration tests
+security tests
+admissions regression tests
+frontend tests
+production build
+
+Return:
+
+Exact root cause of Mark received failure
+Exact fix
+Whether Request Replacement had the same issue
+Sidebar notification implementation
+Notification event/message structure
+Deep-link behavior
+Files changed
+Tests passed
+Whether a migration is required
+Independent review result
+
+Do not deploy automatically.

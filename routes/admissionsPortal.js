@@ -339,6 +339,22 @@ router.post('/application/:token/submit', async (req, res) => {
             eventKey: `token-${tokenContext.token_id}`,
           }, client);
         }
+        const submittedDocuments = await client.query(`
+          SELECT ci.item_type
+          FROM registration_checklist_items ci
+          JOIN admissions_portal_documents d ON d.checklist_item_id = ci.id
+          WHERE ci.enrollment_id = $1 AND ci.requested_at IS NOT NULL
+            AND d.deleted_at IS NULL AND d.superseded_by_document_id IS NULL
+        `, [tokenContext.enrollment_id]);
+        if (submittedDocuments.rows.length > 1) {
+          await notifyAdmissionsAdmins({
+            enrollmentId: tokenContext.enrollment_id,
+            event: 'DOCUMENTS_SUBMITTED',
+            documentCount: submittedDocuments.rows.length,
+            checklistItems: submittedDocuments.rows.map((row) => row.item_type),
+            eventKey: `token-${tokenContext.token_id}`,
+          }, client);
+        }
         return { submitted: true, alreadySubmitted: false, statusChanged: false };
       },
     });

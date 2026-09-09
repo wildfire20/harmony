@@ -41,6 +41,8 @@ test('notification payloads exclude sensitive and free-form fields', () => {
     documentPublicId: 'public-document-id',
     checklistItem: 'BIRTH_CERTIFICATE',
     eventKey: null,
+    documentCount: null,
+    checklistItems: [],
     token: 'secret',
     storageKey: 'private/key',
     email: 'parent@example.test',
@@ -51,6 +53,8 @@ test('notification payloads exclude sensitive and free-form fields', () => {
     documentPublicId: 'public-document-id',
     checklistItem: 'BIRTH_CERTIFICATE',
     eventKey: null,
+    documentCount: null,
+    checklistItems: [],
   });
 });
 

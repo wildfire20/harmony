@@ -16,9 +16,12 @@ const db = require('../config/database');
  * @param {string}  [options.ipAddress] - Remote IP
  */
 async function logAudit(options) {
-  const { userId, userName, userRole, action, entityType, entityId, details, ipAddress } = options;
+  const {
+    userId, userName, userRole, action, entityType, entityId, details, ipAddress,
+    executor = db, required = false,
+  } = options;
   try {
-    await db.query(
+    await executor.query(
       `INSERT INTO audit_logs
          (user_id, user_name, user_role, action, entity_type, entity_id, details, ip_address)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
@@ -34,6 +37,7 @@ async function logAudit(options) {
       ]
     );
   } catch (err) {
+    if (required) throw err;
     // Audit logging must never crash the calling request
     console.error('⚠️  Audit log write failed (non-fatal):', err.message);
   }
