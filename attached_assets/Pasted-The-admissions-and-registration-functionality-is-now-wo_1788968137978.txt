@@ -1,0 +1,137 @@
+The admissions and registration functionality is now working correctly. I want one final UI/readability cleanup only before we close this phase.
+
+Do not change backend logic, database schema, admissions workflows, Gmail, document uploads, notifications, tokens, or status behavior.
+
+Do not deploy automatically. No migration is required.
+
+1. Fix Admissions Applications page contrast
+
+On the main Admin Admissions Applications page, some text is difficult or impossible to read against the light background.
+
+Specifically review:
+
+Admissions Applications page title
+subtitle under the title
+status-summary cards
+card labels and counts
+selected card state
+search section
+table/list headings
+
+The page currently mixes a very light background with text that is also too light.
+
+Fix this so:
+
+page headings are dark and clearly readable on the light background
+subtitles have sufficient contrast
+card counts and labels remain visible
+selected/unselected cards are obviously different
+no white/light text disappears against white/light backgrounds
+
+Preserve Harmony’s existing red/navy branding.
+
+2. Fix parent-safe message textarea
+
+In the Request more information panel, the Admin can type into the optional parent-safe message box, but the typed text is not clearly visible.
+
+Fix the textarea styling so:
+
+typed text has a clearly visible contrasting color
+placeholder text is visually different from entered text
+cursor/caret is visible
+selected text is readable
+focus state is obvious
+disabled/read-only styles remain clearly distinguishable
+
+This field should continue to be the optional message that the parent can see in the email/request.
+
+3. Improve Request Information panel readability
+
+Do a small visual cleanup of the panel containing:
+
+Requested fields
+Documents
+Parent-safe message
+Preview request button
+
+Improve:
+
+spacing
+checkbox alignment
+label size
+section headings
+contrast
+visual grouping
+
+Do not redesign the workflow or change which fields/documents can be selected.
+
+4. Improve Admin modal readability
+
+Review the existing admissions modal for the same contrast problems.
+
+Pay attention to:
+
+Missing
+Uploaded / Pending Review
+Bring in Person
+Received
+Replacement Required
+Not Applicable
+dropdown values
+buttons
+helper text
+
+Make sure every status is readable without changing any status logic.
+
+Avoid:
+
+dark text on dark backgrounds
+very light text on white backgrounds
+disabled controls that look completely invisible
+cramped labels
+5. Responsive behavior
+
+Verify the fixes at:
+
+desktop
+tablet
+mobile
+
+No text should be clipped, hidden or overflow its container.
+
+Request-information controls should stack cleanly on narrow screens.
+
+6. Scope protection
+
+This is a UI/CSS cleanup only.
+
+Do not change:
+
+API endpoints
+database queries
+admissions statuses
+document logic
+notification behavior
+Gmail API
+secure links
+registration logic
+Student Portal retirement
+learner records
+
+Run:
+
+relevant frontend tests
+admissions UI tests
+production React build
+git diff --check
+
+Return:
+
+exact UI issues found
+CSS/components changed
+textarea fix
+page contrast fixes
+responsive/mobile verification
+tests passed
+
+Do not deploy automatically.
