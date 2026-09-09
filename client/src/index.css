@@ -903,3 +903,62 @@ code {
 .admissions-management table tbody td:nth-child(5) .inline-flex {
   color: inherit;
 }
+
+/* Light and dark themes share this dark table surface: never mute its content. */
+.admissions-management table th,
+.admissions-management table td,
+.admissions-management table td * {
+  opacity: 1 !important;
+}
+
+.admissions-management table th {
+  color: #f8fafc !important;
+}
+
+.admissions-management table tbody td:nth-child(4),
+.admissions-management table tbody td:nth-child(6) {
+  color: #ffffff !important;
+}
+
+.admissions-management table tbody td:nth-child(5) .bg-emerald-100 {
+  color: #d1fae5 !important;
+  background: #065f46 !important;
+  border: 1px solid #10b981;
+}
+
+.admissions-management table tbody td:nth-child(5) .bg-violet-100 {
+  color: #ede9fe !important;
+  background: #4c1d95 !important;
+  border: 1px solid #8b5cf6;
+}
+
+.admissions-management table tbody td:nth-child(5) .bg-orange-100,
+.admissions-management table tbody td:nth-child(5) .bg-amber-100 {
+  color: #ffedd5 !important;
+  background: #7c2d12 !important;
+  border: 1px solid #f97316;
+}
+
+.admissions-management table tbody td:nth-child(5) .bg-green-100 {
+  color: #dcfce7 !important;
+  background: #166534 !important;
+  border: 1px solid #22c55e;
+}
+
+.admissions-management table tbody td:nth-child(5) .bg-blue-100 {
+  color: #dbeafe !important;
+  background: #1e40af !important;
+  border: 1px solid #3b82f6;
+}
+
+.admissions-management table tbody td:nth-child(5) .bg-red-100 {
+  color: #fee2e2 !important;
+  background: #991b1b !important;
+  border: 1px solid #ef4444;
+}
+
+.admissions-management table tbody td:nth-child(5) .bg-gray-100 {
+  color: #f1f5f9 !important;
+  background: #334155 !important;
+  border: 1px solid #64748b;
+}
