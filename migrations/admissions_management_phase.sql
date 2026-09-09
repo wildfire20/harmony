@@ -44,6 +44,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_enrollments_application_reference
 
 ALTER TABLE enrollments ALTER COLUMN status DROP DEFAULT;
 ALTER TABLE enrollments DROP CONSTRAINT IF EXISTS enrollments_status_check;
+ALTER TABLE enrollments ALTER COLUMN status TYPE VARCHAR(40);
 ALTER TABLE enrollments ALTER COLUMN status SET DEFAULT 'pending';
 ALTER TABLE enrollments ADD CONSTRAINT enrollments_status_check CHECK (
   status IN (

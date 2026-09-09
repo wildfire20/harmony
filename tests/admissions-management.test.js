@@ -16,6 +16,7 @@ test('admissions migration is additive and preserves legacy statuses', () => {
   assert.match(migration, /SET LOCAL lock_timeout = '5s'/);
   assert.match(migration, /SET LOCAL statement_timeout = '60s'/);
   assert.match(migration, /ALTER TABLE enrollments ALTER COLUMN status SET DEFAULT 'pending'/);
+  assert.match(migration, /ALTER TABLE enrollments ALTER COLUMN status TYPE VARCHAR\(40\)/);
   assert.match(migration, /WHERE application_reference IS NULL/);
   assert.match(migration, /ROW_NUMBER\(\) OVER \(ORDER BY created_at NULLS LAST, id\)/);
   assert.match(migration, /SELECT setval\(/);

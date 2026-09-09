@@ -114,21 +114,47 @@ const escapeHtml = (value = '') => String(value)
 
 const sanitizeHeader = (value) => String(value || '').replace(/[\r\n]+/g, ' ').trim();
 const encodeHeader = (value) => `=?UTF-8?B?${Buffer.from(sanitizeHeader(value), 'utf8').toString('base64')}?=`;
+const htmlToPlainText = (html) => String(html || '')
+  .replace(/<a\b[^>]*href=["']https:\/\/www\.auto-m8\.co\.za\/?["'][^>]*>Powered by AutoM8<\/a>/gi, 'Powered by AutoM8 — https://www.auto-m8.co.za/')
+  .replace(/<br\s*\/?>/gi, '\n')
+  .replace(/<\/(p|div|h1|h2|li)>/gi, '\n')
+  .replace(/<li[^>]*>/gi, '- ')
+  .replace(/<[^>]+>/g, '')
+  .replace(/&nbsp;/gi, ' ')
+  .replace(/&amp;/gi, '&')
+  .replace(/&lt;/gi, '<')
+  .replace(/&gt;/gi, '>')
+  .replace(/&quot;/gi, '"')
+  .replace(/&#039;/gi, "'")
+  .replace(/\n[ \t]+/g, '\n')
+  .replace(/\n{3,}/g, '\n\n')
+  .trim();
 
 const createRawMessage = ({ to, subject, htmlBody, fromAddress }) => {
   const safeTo = sanitizeHeader(to);
   const safeFromAddress = sanitizeHeader(fromAddress);
   if (!safeTo || !safeFromAddress) throw Object.assign(new Error('Invalid email envelope'), { status: 400 });
+  const boundary = 'harmony-admissions-alternative';
+  const textBody = htmlToPlainText(htmlBody);
   const mimeMessage = [
     `From: ${encodeHeader(SENDER_NAME)} <${safeFromAddress}>`,
     `To: ${safeTo}`,
     `Reply-To: ${REPLY_TO}`,
     `Subject: ${encodeHeader(subject)}`,
     'MIME-Version: 1.0',
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    Buffer.from(textBody, 'utf8').toString('base64'),
+    `--${boundary}`,
     'Content-Type: text/html; charset=UTF-8',
     'Content-Transfer-Encoding: base64',
     '',
     Buffer.from(String(htmlBody || ''), 'utf8').toString('base64'),
+    `--${boundary}--`,
   ].join('\r\n');
   return Buffer.from(mimeMessage, 'utf8').toString('base64url');
 };
@@ -194,7 +220,8 @@ const emailShell = (title, content) => `<!doctype html>
 <div style="max-width:620px;margin:0 auto;padding:24px">
 <div style="background:#172554;color:#fff;padding:22px;border-radius:12px 12px 0 0"><h1 style="margin:0;font-size:22px">${escapeHtml(title)}</h1></div>
 <div style="background:#fff;border:1px solid #e2e8f0;padding:24px;line-height:1.65">${content}</div>
-<div style="background:#b91c1c;color:#fff;padding:14px;text-align:center;border-radius:0 0 12px 12px">Harmony Learning Institute</div>
+<div style="background:#b91c1c;color:#fff;padding:14px;text-align:center">Harmony Learning Institute</div>
+<div style="padding:10px;text-align:center;color:#64748b;font-size:11px;border-radius:0 0 12px 12px"><a href="https://www.auto-m8.co.za/" style="color:#64748b;text-decoration:none">Powered by AutoM8</a></div>
 </div></body></html>`;
 
 async function sendApplicationConfirmation(enrollment) {
@@ -235,7 +262,7 @@ const statusEmailContent = (status, reference, parentMessage) => {
   const safeMessage = parentMessage ? `<p><strong>Message from Admissions:</strong> ${escapeHtml(parentMessage)}</p>` : '';
   const content = {
     UNDER_REVIEW: ['Harmony Application Update', 'Your application is currently being reviewed by our admissions team.'],
-    MORE_INFORMATION_REQUIRED: ['Additional Information Required', 'Harmony requires additional information before the application can proceed.'],
+    MORE_INFORMATION_REQUIRED: ['Additional Information Required', `Harmony requires additional information before the application can proceed.<br><br>You may provide the requested supporting information online if you are comfortable doing so. If you are not comfortable submitting documents online, you are welcome to bring the required documents to Harmony Learning Institute in person.<br><br><strong>Harmony Learning Institute</strong><br>2 Skilferdoring Street<br>Onverwacht, Lephalale`],
     APPROVED: ['Application Approved — Harmony Learning Institute', `We are pleased to inform you that the application referenced ${safeRef} has been approved.<br><br>The next step is to complete the registration process. Further registration instructions will be provided through the secure Harmony registration process.`],
     approved: ['Application Approved — Harmony Learning Institute', `We are pleased to inform you that the application referenced ${safeRef} has been approved.<br><br>The next step is to complete the registration process. Further registration instructions will be provided through the secure Harmony registration process.`],
     waitlisted: ['Harmony Application Waitlist Update', 'The application has been placed on the waiting list. Our admissions team will contact you if placement becomes available.'],
@@ -265,6 +292,7 @@ module.exports = {
   createGmailOAuthClient,
   createRawMessage,
   getGmailApiConfig,
+  htmlToPlainText,
   logEmailTransportStatus,
   normalizeEmailResult,
   sanitizeEmailError,

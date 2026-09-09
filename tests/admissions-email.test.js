@@ -55,6 +55,15 @@ const loadServiceWithGoogle = ({ send, getAccessToken, getTokenInfo }) => {
   return require(servicePath);
 };
 
+const decodeMimePart = (rawMessage, contentType) => {
+  const escapedType = contentType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = rawMessage.match(new RegExp(
+    `Content-Type: ${escapedType}; charset=UTF-8\\r\\nContent-Transfer-Encoding: base64\\r\\n\\r\\n([^\\r\\n]+)`,
+  ));
+  assert.ok(match, `Expected ${contentType} MIME part`);
+  return Buffer.from(match[1], 'base64').toString('utf8');
+};
+
 test.afterEach(() => {
   gmailEnvironmentKeys.forEach((key) => {
     if (originalGmailEnvironment[key] === undefined) delete process.env[key];
@@ -99,6 +108,8 @@ test('application and Admin confirmations use Gmail API with required sender hea
   assert.match(firstMessage, /Reply-To: harmonylearninginstitute@gmail\.com/);
   assert.match(firstMessage, /To: parent@example\.com/);
   assert.match(secondMessage, /To: harmonylearninginstitute@gmail\.com/);
+  assert.match(decodeMimePart(firstMessage, 'text/html'), /href="https:\/\/www\.auto-m8\.co\.za\/"/);
+  assert.match(decodeMimePart(firstMessage, 'text/plain'), /Powered by AutoM8 — https:\/\/www\.auto-m8\.co\.za\//);
   assert.doesNotMatch(JSON.stringify(sent), /test-client-secret|test-refresh-token/);
 });
 
@@ -118,10 +129,32 @@ test('approval email uses Gmail API and excludes internal Admin notes', async ()
   }, 'APPROVED', 'Parent-safe update');
 
   assert.equal(result.success, true);
-  const encodedBody = rawMessage.split('\r\n\r\n')[1];
-  const html = Buffer.from(encodedBody, 'base64').toString('utf8');
+  const html = decodeMimePart(rawMessage, 'text/html');
   assert.match(html, /Parent-safe update/);
   assert.doesNotMatch(html, /PRIVATE ADMIN NOTE/);
+});
+
+test('More Information Required offers online or in-person document submission', async () => {
+  configureGmailEnvironment();
+  let rawMessage;
+  const service = loadServiceWithGoogle({
+    send: async (request) => {
+      rawMessage = Buffer.from(request.requestBody.raw, 'base64url').toString('utf8');
+      return { data: { id: 'information-message' } };
+    },
+  });
+  const result = await service.sendAdmissionsStatusEmail({
+    application_reference: 'HLI-2027-0099',
+    parent_email: 'parent@example.com',
+  }, 'MORE_INFORMATION_REQUIRED', 'Please bring the latest report.');
+  assert.equal(result.success, true);
+  const html = decodeMimePart(rawMessage, 'text/html');
+  const text = decodeMimePart(rawMessage, 'text/plain');
+  for (const body of [html, text]) {
+    assert.match(body, /not comfortable submitting documents online/i);
+    assert.match(body, /2 Skilferdoring Street/);
+    assert.match(body, /Onverwacht, Lephalale/);
+  }
 });
 
 test('missing configuration and Gmail API failures return sanitized categories', async () => {
@@ -639,6 +672,16 @@ test('approved status remains committed after Gmail API failure and duplicate sa
     assert.equal(storedStatus, 'waitlisted');
     assert.equal(statusEmailCalls, 2);
     assert.deepEqual(attemptedStatuses, ['APPROVED', 'waitlisted']);
+
+    response = mockResponse();
+    await handler({
+      ...request,
+      body: { ...request.body, status: 'MORE_INFORMATION_REQUIRED' },
+    }, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(storedStatus, 'MORE_INFORMATION_REQUIRED');
+    assert.equal(statusEmailCalls, 3);
+    assert.deepEqual(attemptedStatuses, ['APPROVED', 'waitlisted', 'MORE_INFORMATION_REQUIRED']);
   } finally {
     loaded.restore();
   }

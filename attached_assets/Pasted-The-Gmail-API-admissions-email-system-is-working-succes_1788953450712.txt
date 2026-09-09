@@ -1,0 +1,87 @@
+The Gmail API admissions email system is working successfully in production. Before fixing the remaining MORE_INFORMATION_REQUIRED issue, I want two improvements included.
+
+1. Give parents an in-person document submission option
+
+Some parents/guardians may not feel comfortable sending sensitive learner documents online. Admissions emails that request documents must clearly explain that online submission is optional.
+
+Where documents or additional supporting information are requested, include wording along these lines:
+
+“If you are not comfortable submitting documents online, you are welcome to bring the required documents to Harmony Learning Institute in person.”
+
+School address:
+
+Harmony Learning Institute
+2 Skilferdoring Street
+Onverwacht, Lephalale
+
+Make this especially clear in the More Information Required email.
+
+Do not imply that parents are forced to upload identity documents, birth certificates or other sensitive documents electronically.
+
+2. Add professional AutoM8 attribution to admissions emails
+
+Add a small, professional footer to all automated admissions emails:
+
+Powered by AutoM8
+
+Powered by AutoM8 should be a clickable link to:
+
+https://www.auto-m8.co.za/
+
+Keep this subtle and professional. It must not overpower Harmony Learning Institute's branding.
+
+In HTML emails, make “Powered by AutoM8” a clickable link.
+
+In plain-text email versions, include:
+
+Powered by AutoM8 — https://www.auto-m8.co.za/
+
+This attribution is only branding/service-provider attribution. Do not send applicant information to AutoM8 and do not CC AutoM8 on admissions emails.
+
+Remaining bug to fix
+
+When Admin selects More Information Required and clicks Save status update, production currently displays:
+
+Failed to update enrollment status
+
+Audit this specific status end-to-end and identify the exact cause.
+
+Check:
+
+frontend status value sent to the API
+backend status allowlist/mapping
+legacy/new status compatibility
+whether the parent-safe message is required server-side even though the UI currently says optional
+email template mapping for MORE_INFORMATION_REQUIRED
+database constraint compatibility
+
+Fix the flow so that:
+
+MORE_INFORMATION_REQUIRED saves successfully
+status history records it
+the parent receives the correct email
+the email explains both online and in-person document submission options
+email failure can never roll back the saved admissions status
+if a parent-safe message is actually required, the UI clearly tells Admin rather than showing a generic failure
+
+Do not modify working admissions statuses.
+
+Do not modify the Gmail API/OAuth transport.
+
+Do not change the database schema unless absolutely necessary.
+
+Do not run migrations.
+
+Preserve Application Received, Under Review, Approved, Registration Pending, Registered, Not Accepted, legacy waitlisted and legacy rejected email behavior.
+
+Run the admissions, email and security tests plus the production build.
+
+Report:
+
+Exact cause of the MORE_INFORMATION_REQUIRED failure
+Files changed
+How the in-person document option was implemented
+How the AutoM8 footer/link was implemented
+Tests passed
+
+Do not deploy automatically.
