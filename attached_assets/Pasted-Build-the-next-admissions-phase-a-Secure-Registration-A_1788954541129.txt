@@ -1,0 +1,82 @@
+Build the next admissions phase: a Secure Registration & Application Completion Portal for Harmony Learning Institute.
+
+The existing admissions system, Gmail API email transport, status emails, audit logs, resend endpoint, and current database records are working and must not be broken.
+
+The goal is to support two different secure parent links:
+
+1. Update Application
+
+Used when status is MORE_INFORMATION_REQUIRED
+Lets the parent securely provide missing information and/or upload outstanding documents
+Must also offer: “I prefer to bring these documents to the school in person.”
+Show Harmony’s address:
+Harmony Learning Institute
+2 Skilferdoring Street
+Onverwacht, Lephalale
+
+2. Complete Registration
+
+Only available after the application is approved
+The approval email should contain a secure Complete Registration button/link
+Pre-fill information already captured during application so the parent does not re-enter everything
+Allow the parent to complete missing registration details, confirm information, choose relevant services/options, and provide required documents or choose in-person document submission
+
+Use secure random tokens, not predictable IDs in URLs.
+
+Example:
+
+https://www.harmonylearning.co.za/registration/<secure-token>
+
+Tokens must:
+
+be cryptographically secure
+belong to one application only
+expire
+be revocable/reissuable
+never expose application IDs directly
+
+Recommended status behavior:
+
+NEW → no registration link
+UNDER_REVIEW → no registration link
+MORE_INFORMATION_REQUIRED → Update Application link
+APPROVED → Complete Registration link
+REGISTRATION_PENDING → Continue Registration link
+REGISTERED → registration link disabled
+NOT_ACCEPTED, legacy rejected, legacy waitlisted → no registration link
+
+Also improve Admin with a simple Registration Checklist, for example:
+
+Birth certificate: Received / Missing / Bring in person
+Parent/Guardian ID: Received / Missing / Bring in person
+Latest school report: Received / Missing / Not applicable
+Transfer document: Received / Missing / Not applicable
+Registration form: Not started / In progress / Submitted
+
+Admin should be able to choose missing items and send a structured Request Information email instead of manually typing everything every time.
+
+Preserve the existing subtle Powered by AutoM8 footer and Reply-To behavior in all emails.
+
+Important:
+
+Do not delete or alter learner records
+Do not break existing parent/staff/admin functionality
+Do not change the Gmail API transport
+Do not run migrations automatically
+If schema changes are required, design safe, backwards-compatible, idempotent migrations and report them first
+Existing admissions/status flows must continue working
+Email failure must never roll back admissions or registration data
+
+Before coding, first return:
+
+Proposed architecture
+Database changes required
+New routes/pages/endpoints
+Token lifecycle/security design
+Parent registration flow
+Admin workflow
+Email changes
+Risks/edge cases
+Exact implementation plan
+
+Do not implement yet. I want to review the plan first.
