@@ -5,6 +5,7 @@ const REQUIRED_PORTAL_TABLES = Object.freeze([
   'registration_records',
   'registration_checklist_items',
   'admissions_portal_documents',
+  'admissions_notifications',
 ]);
 
 let portalSchemaReady = false;
@@ -27,7 +28,15 @@ async function isAdmissionsPortalSchemaReady(database = db) {
         ('registration_checklist_items', 'item_type'),
         ('registration_checklist_items', 'parent_submission_choice'),
         ('admissions_portal_documents', 'enrollment_id'),
-        ('admissions_portal_documents', 'public_id')
+        ('admissions_portal_documents', 'public_id'),
+        ('admissions_portal_documents', 'sha256'),
+        ('admissions_portal_documents', 'detected_content_type'),
+        ('admissions_portal_documents', 'scan_status'),
+        ('admissions_portal_documents', 'deleted_at'),
+        ('admissions_portal_documents', 'superseded_by_document_id'),
+        ('admissions_notifications', 'recipient_id'),
+        ('admissions_notifications', 'event_type'),
+        ('admissions_notifications', 'read_at')
     ),
     readiness AS (
       SELECT
@@ -42,15 +51,17 @@ async function isAdmissionsPortalSchemaReady(database = db) {
           ('idx_admissions_portal_tokens_enrollment'),
           ('idx_admissions_portal_tokens_one_active'),
           ('idx_registration_checklist_enrollment'),
-          ('idx_admissions_portal_documents_enrollment')
+          ('idx_admissions_portal_documents_enrollment'),
+          ('idx_admissions_documents_active_item'),
+          ('idx_admissions_notifications_recipient')
         ) required(index_name)
         WHERE to_regclass('public.' || required.index_name) IS NOT NULL) AS indexes_present
     )
     SELECT tables_present, columns_present, indexes_present FROM readiness
   `, [REQUIRED_PORTAL_TABLES]);
   return Number(result.rows[0]?.tables_present) === REQUIRED_PORTAL_TABLES.length
-    && Number(result.rows[0]?.columns_present) === 15
-    && Number(result.rows[0]?.indexes_present) === 4;
+    && Number(result.rows[0]?.columns_present) === 23
+    && Number(result.rows[0]?.indexes_present) === 6;
 }
 
 async function requireAdmissionsPortalSchema(req, res, next) {

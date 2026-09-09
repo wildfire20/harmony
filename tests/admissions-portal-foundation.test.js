@@ -78,10 +78,10 @@ test('portal schema has a separate readiness guard and explicit migration comman
 
 test('schema readiness requires every portal table', async () => {
   const ready = await isAdmissionsPortalSchemaReady({
-    async query() { return { rows: [{ tables_present: 4, columns_present: 15, indexes_present: 4 }] }; },
+    async query() { return { rows: [{ tables_present: 5, columns_present: 23, indexes_present: 6 }] }; },
   });
   const notReady = await isAdmissionsPortalSchemaReady({
-    async query() { return { rows: [{ tables_present: 4, columns_present: 14, indexes_present: 4 }] }; },
+    async query() { return { rows: [{ tables_present: 5, columns_present: 22, indexes_present: 6 }] }; },
   });
   assert.equal(ready, true);
   assert.equal(notReady, false);
@@ -278,6 +278,9 @@ test('Parent API exposes only approved endpoints and allowlisted fields', () => 
   for (const endpoint of [
     "router.get('/session/:token'",
     "router.patch('/application/:token'",
+    "router.get('/application/:token/documents'",
+    "router.post('/application/:token/documents'",
+    "router.delete('/application/:token/documents/:publicId'",
     "router.post('/application/:token/submit'",
     "router.patch('/registration/:token'",
     "router.post('/registration/:token/submit'",
@@ -289,7 +292,10 @@ test('Parent API exposes only approved endpoints and allowlisted fields', () => 
   ]) assert.match(route, new RegExp(allowed));
   assert.doesNotMatch(route, /medical|accessibility/i);
   assert.match(route, /withValidatedPortalToken/);
-  assert.doesNotMatch(route, /sendAdmissionsStatusEmail|sendEmail|multer|s3/i);
+  assert.doesNotMatch(route, /sendAdmissionsStatusEmail|sendEmail|PutObjectCommand|GetObjectCommand/i);
+  assert.match(route, /limits: \{ fileSize: MAX_FILE_SIZE, files: 1 \}/);
+  assert.match(route, /validateAdmissionsFile/);
+  assert.match(route, /uploadAdmissionsDocument/);
 });
 
 test('token-bearing React routes send privacy headers before serving HTML', () => {

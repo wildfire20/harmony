@@ -19,6 +19,8 @@ const {
   sendEnrollmentNotification,
   sendAdmissionsStatusEmail,
 } = require('../services/gmailService');
+const { getAdmissionsDocumentStream, deleteAdmissionsDocument } = require('../services/admissionsDocumentService');
+const { notifyAdmissionsAdmins } = require('../services/admissionsNotificationService');
 
 const router = express.Router();
 const LEGACY_STATUSES = ['pending', 'approved', 'rejected', 'waitlisted'];
@@ -154,6 +156,11 @@ router.post('/', enrollmentValidation, async (req, res) => {
     ]);
 
     const enrollment = result.rows[0];
+    try {
+      await notifyAdmissionsAdmins({ enrollmentId: enrollment.id, event: 'NEW_APPLICATION' });
+    } catch (notificationError) {
+      console.error('Admissions notification failed:', notificationError.message);
+    }
     const emailResults = await Promise.allSettled([
       sendApplicationConfirmation(enrollment),
       sendEnrollmentNotification(enrollment),
@@ -298,13 +305,24 @@ router.get('/:id', authenticate, async (req, res) => {
     delete enrollment.registration_token_hash;
     delete enrollment.registration_token_issued_at;
     delete enrollment.registration_token_expires_at;
-    const [recordResult, checklistResult, tokenResult] = await Promise.all([
+    const [recordResult, checklistResult, tokenResult, documentResult] = await Promise.all([
       db.query('SELECT form_status, submitted_at, service_selections, requested_application_fields FROM registration_records WHERE enrollment_id = $1', [req.params.id]),
-      db.query(`SELECT item_type, status, requested_at, received_at FROM registration_checklist_items WHERE enrollment_id = $1 ORDER BY item_type`, [req.params.id]),
+      db.query(`SELECT item_type, status, parent_submission_choice, requested_at, received_at FROM registration_checklist_items WHERE enrollment_id = $1 ORDER BY item_type`, [req.params.id]),
       db.query(`SELECT t.purpose, t.issued_at, t.expires_at, t.revoked_at, t.first_used_at, t.last_used_at, t.use_count,
         rr.form_status FROM admissions_portal_tokens t
         LEFT JOIN registration_records rr ON rr.enrollment_id = t.enrollment_id
         WHERE t.enrollment_id = $1 ORDER BY t.issued_at DESC`, [req.params.id]),
+      db.query(`
+        SELECT DISTINCT ON (ci.item_type)
+          ci.item_type, d.public_id, d.original_filename, d.file_size,
+          d.review_status, d.rejection_reason, d.uploaded_at
+        FROM admissions_portal_documents d
+        JOIN registration_checklist_items ci ON ci.id = d.checklist_item_id
+        WHERE d.enrollment_id = $1
+          AND d.deleted_at IS NULL
+          AND d.superseded_by_document_id IS NULL
+        ORDER BY ci.item_type, d.uploaded_at DESC
+      `, [req.params.id]),
     ]);
     const record = recordResult.rows[0];
     enrollment.portalData = {
@@ -314,12 +332,27 @@ router.get('/:id', authenticate, async (req, res) => {
         submittedAt: record?.submitted_at || null,
         serviceSelections: record?.service_selections || {},
       },
-      checklist: checklistResult.rows.map((item) => ({
-        itemType: item.item_type,
-        status: item.status,
-        requestedAt: item.requested_at,
-        receivedAt: item.received_at,
-      })),
+      checklist: checklistResult.rows.map((item) => {
+        const document = documentResult.rows.find((entry) => entry.item_type === item.item_type);
+        return {
+          itemType: item.item_type,
+          status: document?.review_status === 'PENDING'
+            ? 'UPLOADED_PENDING_REVIEW'
+            : document?.review_status || item.status,
+          checklistStatus: item.status,
+          parentChoice: item.parent_submission_choice,
+          requestedAt: item.requested_at,
+          receivedAt: item.received_at,
+          document: document ? {
+            publicId: document.public_id,
+            originalFilename: document.original_filename,
+            fileSize: Number(document.file_size),
+            reviewStatus: document.review_status,
+            rejectionReason: document.rejection_reason,
+            uploadedAt: document.uploaded_at,
+          } : null,
+        };
+      }),
       secureLinks: [],
     };
     const latestByPurpose = new Map();
@@ -350,6 +383,154 @@ router.get('/:id', authenticate, async (req, res) => {
     console.error('Error fetching enrollment:', error.message);
     return res.status(500).json({ message: 'Failed to fetch enrollment' });
   }
+});
+
+router.get('/:id/documents', authenticate, async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const result = await db.query(`
+      SELECT d.public_id, d.original_filename, d.content_type, d.detected_content_type,
+             d.sha256, d.file_size, d.review_status, d.scan_status, d.rejection_reason,
+             d.deleted_at, d.replaced_at, d.uploaded_at, ci.item_type
+      FROM admissions_portal_documents d
+      LEFT JOIN registration_checklist_items ci ON ci.id = d.checklist_item_id
+      WHERE d.enrollment_id = $1 ORDER BY d.uploaded_at DESC
+    `, [req.params.id]);
+    return res.json({ documents: result.rows.map((row) => ({
+      publicId: row.public_id, originalFilename: row.original_filename, contentType: row.content_type,
+      detectedContentType: row.detected_content_type, sha256: row.sha256,
+      fileSize: Number(row.file_size), reviewStatus: row.review_status, scanStatus: row.scan_status,
+      rejectionReason: row.rejection_reason, deletedAt: row.deleted_at, replacedAt: row.replaced_at,
+      uploadedAt: row.uploaded_at, itemType: row.item_type,
+    })) });
+  } catch (error) {
+    console.error('Admissions document list failed:', error.message);
+    return res.status(500).json({ message: 'Failed to fetch admissions documents' });
+  }
+});
+
+router.patch('/:id/documents/:publicId/review', authenticate, async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const reviewStatus = req.body?.reviewStatus || req.body?.status;
+  if (!['RECEIVED', 'REPLACEMENT_REQUIRED'].includes(reviewStatus)) {
+    return res.status(400).json({ message: 'Invalid document review status' });
+  }
+  const rejectionReason = typeof req.body?.rejectionReason === 'string'
+    ? req.body.rejectionReason.trim().slice(0, 1000) : null;
+  if (reviewStatus === 'REPLACEMENT_REQUIRED' && !rejectionReason) {
+    return res.status(400).json({ message: 'A replacement reason is required' });
+  }
+  let client;
+  try {
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const enrollment = await client.query(
+      'SELECT id FROM enrollments WHERE id = $1 FOR UPDATE',
+      [req.params.id],
+    );
+    if (!enrollment.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Enrollment not found' });
+    }
+    const result = await client.query(`
+      UPDATE admissions_portal_documents
+       SET review_status = $1,
+          rejection_reason = $2, replacement_requested_at = CASE WHEN $1 = 'REPLACEMENT_REQUIRED' THEN CURRENT_TIMESTAMP ELSE replacement_requested_at END,
+          reviewed_by = $3, reviewed_at = CURRENT_TIMESTAMP
+       WHERE public_id = $4 AND enrollment_id = $5 AND deleted_at IS NULL
+         AND superseded_by_document_id IS NULL
+       RETURNING public_id, enrollment_id, checklist_item_id, review_status, rejection_reason, reviewed_at
+    `, [reviewStatus, rejectionReason, req.user.id, req.params.publicId, req.params.id]);
+    if (!result.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Document not found' });
+    }
+    const document = result.rows[0];
+    await client.query(`
+      UPDATE registration_checklist_items
+      SET status = CASE WHEN $1 = 'RECEIVED' THEN 'RECEIVED' ELSE 'MISSING' END,
+          received_at = CASE WHEN $1 = 'RECEIVED' THEN CURRENT_TIMESTAMP ELSE NULL END,
+          parent_submission_choice = 'UPLOAD_ONLINE',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+    `, [reviewStatus, document.checklist_item_id]);
+    await client.query('COMMIT');
+    try {
+      await notifyAdmissionsAdmins({
+        enrollmentId: document.enrollment_id,
+        event: reviewStatus === 'RECEIVED' ? 'DOCUMENT_REVIEWED' : 'DOCUMENT_REPLACEMENT_REQUIRED',
+        documentPublicId: document.public_id,
+      });
+    } catch (error) { console.error('Admissions notification failed:', error.message); }
+    return res.json({ document });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    return res.status(500).json({ message: 'Failed to review admissions document' });
+  } finally { if (client) client.release(); }
+});
+
+router.get('/:id/documents/:publicId/download', authenticate, async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const result = await db.query(`
+       SELECT storage_key, original_filename, content_type
+       FROM admissions_portal_documents
+       WHERE enrollment_id = $1 AND public_id = $2 AND deleted_at IS NULL
+         AND superseded_by_document_id IS NULL
+    `, [req.params.id, req.params.publicId]);
+    if (!result.rows.length) return res.status(404).json({ message: 'Document not found' });
+    const document = result.rows[0];
+    const stream = await getAdmissionsDocumentStream(document.storage_key);
+    res.set({
+      'Content-Type': document.content_type,
+      'Content-Disposition': `attachment; filename="${document.original_filename.replace(/["\\\r\n]/g, '_')}"`,
+      'Cache-Control': 'no-store',
+    });
+    stream.on('error', () => { if (!res.headersSent) res.status(502).json({ message: 'Document download failed' }); });
+    return stream.pipe(res);
+  } catch (error) {
+    console.error('Admissions document download failed:', error.message);
+    return res.status(error.status || 502).json({ message: 'Document download failed' });
+  }
+});
+
+router.delete('/:id/documents/:publicId', authenticate, async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  let client;
+  try {
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const enrollment = await client.query(
+      'SELECT id FROM enrollments WHERE id = $1 FOR UPDATE',
+      [req.params.id],
+    );
+    if (!enrollment.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Enrollment not found' });
+    }
+    const found = await client.query(`
+      SELECT id, storage_key, checklist_item_id FROM admissions_portal_documents
+       WHERE enrollment_id = $1 AND public_id = $2
+         AND deleted_at IS NULL AND superseded_by_document_id IS NULL
+       FOR UPDATE
+    `, [req.params.id, req.params.publicId]);
+    if (!found.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ message: 'Document not found' }); }
+    const document = found.rows[0];
+    await client.query(
+      'UPDATE admissions_portal_documents SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [document.id],
+    );
+    if (document.checklist_item_id) {
+      await client.query(`UPDATE registration_checklist_items SET status = 'MISSING', received_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [document.checklist_item_id]);
+    }
+    await client.query('COMMIT');
+    await deleteAdmissionsDocument(document.storage_key);
+    return res.json({ removed: true });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('Admissions document removal failed:', error.message);
+    return res.status(500).json({ message: 'Failed to remove admissions document' });
+  } finally { if (client) client.release(); }
 });
 
 router.put('/:id/status', authenticate, async (req, res) => {
@@ -503,7 +684,10 @@ router.post('/:id/information-request', authenticate, async (req, res) => {
     await client.query(`
       INSERT INTO registration_records (enrollment_id, requested_application_fields, updated_at)
       VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP)
-      ON CONFLICT (enrollment_id) DO UPDATE SET requested_application_fields = EXCLUDED.requested_application_fields, updated_at = CURRENT_TIMESTAMP
+      ON CONFLICT (enrollment_id) DO UPDATE SET
+        requested_application_fields = EXCLUDED.requested_application_fields,
+        application_update_submitted_at = NULL,
+        updated_at = CURRENT_TIMESTAMP
     `, [req.params.id, JSON.stringify(requestedFields)]);
     for (const item of checklistItems) {
       await client.query(`
@@ -566,6 +750,20 @@ router.patch('/:id/checklist/:itemType', authenticate, async (req, res) => {
     await client.query('BEGIN');
     const enrollment = await client.query('SELECT id FROM enrollments WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!enrollment.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ message: 'Enrollment not found' }); }
+    const activeDocument = await client.query(`
+      SELECT 1
+      FROM admissions_portal_documents d
+      JOIN registration_checklist_items ci ON ci.id = d.checklist_item_id
+      WHERE d.enrollment_id = $1 AND ci.item_type = $2
+        AND d.deleted_at IS NULL AND d.superseded_by_document_id IS NULL
+      LIMIT 1
+    `, [req.params.id, itemType]);
+    if (activeDocument.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        message: 'Review or remove the active uploaded document instead of changing its checklist state.',
+      });
+    }
     const item = await client.query(`
       INSERT INTO registration_checklist_items (enrollment_id, item_type, status, requested_by, requested_at, received_at, updated_at)
       VALUES ($1, $2, $3::text, $4, CASE WHEN $3::text = 'MISSING' THEN CURRENT_TIMESTAMP ELSE NULL END,

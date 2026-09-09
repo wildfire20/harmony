@@ -14,6 +14,10 @@ const migration = fs.readFileSync(
   path.join(root, 'migrations', 'secure_registration_portal_phase.sql'),
   'utf8',
 );
+const uploadMigration = fs.readFileSync(
+  path.join(root, 'migrations', 'admissions_documents_notifications.sql'),
+  'utf8',
+);
 
 const getFreePort = () => new Promise((resolve, reject) => {
   const server = net.createServer();
@@ -95,7 +99,8 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
         email VARCHAR(255),
         first_name VARCHAR(100),
         last_name VARCHAR(100),
-        role VARCHAR(20) NOT NULL
+        role VARCHAR(20) NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT true
       );
       CREATE TABLE enrollments (
         id SERIAL PRIMARY KEY,
@@ -234,6 +239,7 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
 
     await t.test('migration applies twice without changing enrollment or learner records', async () => {
       await pool.query(migration);
+      await pool.query(uploadMigration);
       assert.equal(await snapshot(), before);
       const upgraded = await pool.query(`
         SELECT column_name FROM information_schema.columns
@@ -246,6 +252,7 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
         'requested_application_fields',
       ]);
       await pool.query(migration);
+      await pool.query(uploadMigration);
       assert.equal(await snapshot(), before);
     });
 
@@ -315,6 +322,12 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
           'file_size:bigint:NO', 'review_status:character varying(24):NO',
           'reviewed_by:integer:YES', 'reviewed_at:timestamp without time zone:YES',
           'uploaded_at:timestamp without time zone:NO',
+           'sha256:character(64):YES', 'detected_content_type:character varying(100):YES',
+           'upload_source:character varying(30):NO', 'scan_status:character varying(24):NO',
+           'rejection_reason:character varying(1000):YES',
+           'replacement_requested_at:timestamp without time zone:YES',
+           'deleted_at:timestamp without time zone:YES', 'replaced_at:timestamp without time zone:YES',
+           'superseded_by_document_id:bigint:YES',
         ],
       });
 
@@ -342,20 +355,20 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
       )));
       assert.ok(constraints.rows.some(({ definition }) => definition.includes('CORRECTIONS_REQUESTED')));
       assert.ok(constraints.rows.some(({ definition }) => definition.includes('parent_submission_choice')));
-      assert.equal(constraints.rows.filter(({ contype }) => contype === 'f').length, 9);
+      assert.equal(constraints.rows.filter(({ contype }) => contype === 'f').length, 10);
       assert.equal(constraints.rows.filter(({ contype }) => contype === 'p').length, 4);
       assert.equal(constraints.rows.filter(({ contype }) => contype === 'u').length, 5);
       const checks = constraints.rows
         .filter(({ contype }) => contype === 'c')
         .map(({ definition }) => definition);
-      assert.equal(checks.length, 9);
+      assert.equal(checks.length, 11);
       for (const fragment of [
         'UPDATE_APPLICATION', 'COMPLETE_REGISTRATION',
         'expires_at > issued_at', 'use_count >= 0',
         'NOT_STARTED', 'CORRECTIONS_REQUESTED',
         'BIRTH_CERTIFICATE', 'REGISTRATION_FORM',
         'MISSING', 'BRING_IN_PERSON', 'NOT_APPLICABLE',
-        'UPLOAD_LATER',
+        'UPLOAD_ONLINE',
         'file_size > 0', 'file_size <= 10485760',
         'PENDING', 'REPLACEMENT_REQUIRED',
       ]) assert.ok(checks.some((definition) => definition.includes(fragment)), fragment);
@@ -414,7 +427,7 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
         'admissions_portal_documents',
       ]]);
       assert.deepEqual(allIndexes.rows, [
-        { tablename: 'admissions_portal_documents', count: 4 },
+        { tablename: 'admissions_portal_documents', count: 7 },
         { tablename: 'admissions_portal_tokens', count: 4 },
         { tablename: 'registration_checklist_items', count: 3 },
         { tablename: 'registration_records', count: 2 },

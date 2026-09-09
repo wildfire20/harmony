@@ -15,6 +15,7 @@
     "test:admissions": "node --test tests/admissions-management.test.js tests/enrollment-status-width-fix.test.js tests/admissions-portal-foundation.test.js",
     "test:email": "node --test tests/admissions-email.test.js",
     "test:portal:integration": "node --test tests/admissions-portal-postgres.integration.test.js",
+    "test:admissions-documents": "node --test tests/admissions-documents.test.js",
     "verify:email": "node scripts/verify-email.js",
     "migrate:admissions": "node scripts/run-admissions-migration.js",
     "migrate:registration-portal": "node scripts/run-secure-registration-portal-migration.js",

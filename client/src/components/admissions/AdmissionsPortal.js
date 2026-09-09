@@ -3,6 +3,7 @@ import { useMatch, useParams } from 'react-router-dom';
 import { admissionsPortalApi, portalErrorMessage } from '../../services/admissionsPortalApi';
 import HarmonyLogo from '../common/HarmonyLogo';
 import './AdmissionsPortal.css';
+import './AdmissionsPortalDocuments.css';
 
 const Field = ({ label, value, onChange, type = 'text', required, readOnly, hint, multiline }) => (
   <label className={`portal-field ${readOnly ? 'portal-readonly' : ''}`}>
@@ -29,6 +30,8 @@ export default function AdmissionsPortal() {
   const [submitted, setSubmitted] = useState(false);
   const [fields, setFields] = useState({});
   const [choices, setChoices] = useState({});
+  const [documents, setDocuments] = useState({});
+  const [uploading, setUploading] = useState('');
   const [registration, setRegistration] = useState({ residentialAddress: initialAddress, postalAddress: initialAddress, emergencyContact: initialEmergency, serviceSelections: { boarding: false, transport: false, aftercare: false }, confirmed: false });
 
   useEffect(() => {
@@ -55,9 +58,9 @@ export default function AdmissionsPortal() {
     };
   }, []);
 
-  const load = () => {
+  const load = async () => {
     setLoading(true); setError('');
-    admissionsPortalApi.getSession(token).then(({ data }) => {
+    admissionsPortalApi.getSession(token).then(async ({ data }) => {
       const expectedMode = registrationRoute ? 'COMPLETE_REGISTRATION' : 'UPDATE_APPLICATION';
       if (data.mode !== expectedMode) {
         setSession(null);
@@ -68,6 +71,11 @@ export default function AdmissionsPortal() {
       const app = data.application || {};
       setFields({ parentEmail: app.parent?.email || '', parentPhone: app.parent?.phone || '', previousSchool: app.previousSchool || '', additionalNotes: app.additionalNotes || '' });
       setChoices(Object.fromEntries((data.checklist || []).map((item) => [item.itemType, item.parentChoice || ''])));
+      if (data.mode === 'UPDATE_APPLICATION') {
+        const documentResponse = await admissionsPortalApi.getDocuments(token).catch(() => ({ data: [] }));
+        const documentItems = documentResponse.data.documents || documentResponse.data || [];
+        setDocuments(Object.fromEntries(documentItems.map((item) => [item.itemType, item])));
+      }
       const r = data.registration || {};
       setRegistration((current) => ({ ...current, residentialAddress: { ...initialAddress, ...(r.residentialAddress || {}) }, postalAddress: { ...initialAddress, ...(r.postalAddress || {}) }, emergencyContact: { ...initialEmergency, ...(r.emergencyContact || {}) }, serviceSelections: { ...current.serviceSelections, ...(r.serviceSelections || {}) }, confirmed: Boolean(r.confirmedAt) }));
       setSubmitted(data.access === 'read_only' && (r.formStatus === 'SUBMITTED' || data.mode === 'UPDATE_APPLICATION' && data.application?.status === 'SUBMITTED'));
@@ -107,6 +115,28 @@ export default function AdmissionsPortal() {
         });
     }
   };
+  const uploadDocument = async (itemType, file) => {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { setError('Please choose a file smaller than 10 MB.'); return; }
+    setUploading(itemType); setError('');
+    try {
+      const currentDocument = documents[itemType];
+      const { data } = await admissionsPortalApi.uploadDocument(token, itemType, file, currentDocument?.publicId);
+      setDocuments((current) => ({ ...current, [itemType]: data.document || data }));
+      setChoices((current) => ({ ...current, [itemType]: 'UPLOAD_ONLINE' }));
+      setSaved(`${file.name} uploaded securely.`);
+    } catch (e) { setError(portalErrorMessage(e)); } finally { setUploading(''); }
+  };
+  const removeDocument = async (itemType) => {
+    setUploading(itemType); setError('');
+    try {
+      const publicId = documents[itemType]?.publicId;
+      if (!publicId) return;
+      await admissionsPortalApi.removeDocument(token, publicId);
+      setDocuments((current) => ({ ...current, [itemType]: null }));
+      setChoices((current) => ({ ...current, [itemType]: '' }));
+    } catch (e) { setError(portalErrorMessage(e)); } finally { setUploading(''); }
+  };
   const save = async () => {
     setSaving(true); setError(''); setSaved('');
     try {
@@ -134,7 +164,8 @@ export default function AdmissionsPortal() {
     const missingChoice = (session?.checklist || []).some(
       (item) => !['RECEIVED', 'NOT_APPLICABLE'].includes(item.status) && !choices[item.itemType],
     );
-    return missingField || missingChoice
+    const missingUpload = Object.entries(choices).some(([itemType, choice]) => choice === 'UPLOAD_ONLINE' && !documents[itemType]?.publicId);
+    return missingField || missingChoice || missingUpload
       ? 'Please complete every requested field and choose how you will provide each requested document.'
       : '';
   };
@@ -169,8 +200,8 @@ export default function AdmissionsPortal() {
       {saved && <div className="portal-notice success" role="status"><p>{saved}</p></div>}
       {!readOnly && <div className="portal-progress"><div><span>Progress</span><strong>{Math.min(completed, total)} of {total} sections complete</strong></div><div className="portal-progress-track"><i style={{ width: `${total ? Math.min(100, completed / total * 100) : 0}%` }} /></div></div>}
 
-      {isRegistration ? <RegistrationForm session={session} registration={registration} setRegistration={setRegistration} updateAddress={updateAddress} readOnly={readOnly} /> : <ApplicationForm session={session} fields={fields} setFields={setFields} choices={choices} setChoices={setChoices} readOnly={readOnly} />}
-      {!readOnly && <div className="portal-actions"><button className="portal-button secondary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save progress'}</button><button className="portal-button primary" onClick={submit} disabled={saving}>{isRegistration ? 'Submit registration' : 'Submit update'}</button></div>}
+       {isRegistration ? <RegistrationForm session={session} registration={registration} setRegistration={setRegistration} updateAddress={updateAddress} readOnly={readOnly} /> : <ApplicationForm session={session} fields={fields} setFields={setFields} choices={choices} setChoices={setChoices} documents={documents} uploadDocument={uploadDocument} removeDocument={removeDocument} uploading={uploading} readOnly={readOnly} />}
+       {!readOnly && <div className="portal-actions"><div className="portal-action-help"><strong>Not ready to send?</strong><span>Save your progress and return to this secure link later.</span></div><button className="portal-button secondary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save progress'}</button><div><button className="portal-button primary" onClick={submit} disabled={saving}>{isRegistration ? 'Submit registration' : 'Submit update'}</button><small className="submit-help">You can no longer edit after submitting.</small></div></div>}
     </main>
     <PortalFooter />
   </div>;
@@ -180,13 +211,21 @@ function PortalHeader() { return <header className="portal-header"><HarmonyLogo 
 function ContactLinks() { return <div className="portal-contact-links"><a href="mailto:harmonylearninginstitute@gmail.com">harmonylearninginstitute@gmail.com</a><a href="tel:+27147631358">014 763 1358</a></div>; }
 function PortalFooter() { return <footer className="portal-footer"><div><span>Need help?</span><ContactLinks /></div><a href="https://www.auto-m8.co.za/" target="_blank" rel="noreferrer">Powered by AutoM8</a></footer>; }
 
-function ApplicationForm({ session, fields, setFields, choices, setChoices, readOnly }) {
+function ApplicationForm({ session, fields, setFields, choices, setChoices, documents, uploadDocument, removeDocument, uploading, readOnly }) {
   return <div className="portal-stack">
     <section className="portal-card"><div className="card-heading"><div><p className="portal-eyebrow">Requested information</p><h2>Let’s keep your application moving</h2></div><span className="card-number">01</span></div><p className="card-copy">Only fields specifically requested by Harmony appear here. Information already provided remains unchanged.</p>
       <div className="portal-form-grid">{(session.requestedFields || []).map((key) => <Field key={key} label={{ parentEmail: 'Parent email address', parentPhone: 'Parent phone number', previousSchool: 'Previous school', additionalNotes: 'Additional notes' }[key] || friendlyItem(key)} value={fields[key]} readOnly={readOnly} type={key === 'parentEmail' ? 'email' : key === 'parentPhone' ? 'tel' : 'text'} multiline={key === 'additionalNotes'} onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))} required hint={key === 'additionalNotes' ? 'Please share anything admissions should know.' : null} />)}</div>
     </section>
-    <section className="portal-card"><div className="card-heading"><div><p className="portal-eyebrow">Sensitive documents</p><h2>Choose how you will provide each item</h2></div><span className="card-number">02</span></div><p className="card-copy">You are not required to submit sensitive documents online. Choose “Upload later” or bring them directly to Harmony Learning Institute.</p><address className="portal-address"><strong>Physical submission</strong><span>Harmony Learning Institute</span><span>2 Skilferdoring Street</span><span>Onverwacht, Lephalale</span></address>
-      <div className="checklist">{(session.checklist || []).filter((item) => !['RECEIVED', 'NOT_APPLICABLE'].includes(item.status)).map((item) => <div className="check-item" key={item.itemType}><div><strong>{friendlyItem(item.itemType)}</strong><small>Requested by Harmony admissions</small></div><div className="choice-group">{['UPLOAD_LATER', 'BRING_IN_PERSON'].map((choice) => <button type="button" key={choice} disabled={readOnly} className={choices[item.itemType] === choice ? 'selected' : ''} onClick={() => setChoices((c) => ({ ...c, [item.itemType]: choice }))}>{choice === 'UPLOAD_LATER' ? 'Upload later' : 'Bring in person'}</button>)}</div></div>)}</div>
+     <section className="portal-card"><div className="card-heading"><div><p className="portal-eyebrow">Sensitive documents</p><h2>Choose how you will provide each item</h2></div><span className="card-number">02</span></div><p className="card-copy">Choose Upload online to attach a clear copy now, or Bring in person to share the original with admissions.</p><address className="portal-address"><strong>Physical submission</strong><span>Harmony Learning Institute</span><span>2 Skilferdoring Street</span><span>Onverwacht, Lephalale</span></address>
+       <div className="checklist">{(session.checklist || []).filter((item) => !['RECEIVED', 'NOT_APPLICABLE'].includes(item.status)).map((item) => {
+         const file = documents[item.itemType];
+         const online = choices[item.itemType] === 'UPLOAD_ONLINE';
+         return <div className="check-item" key={item.itemType}><div className="check-copy"><strong>{friendlyItem(item.itemType)}</strong><small>Choose one option. You can change this before submitting.</small></div><div className="choice-stack">
+           <label className={`choice-card ${online ? 'selected' : ''}`}><input type="radio" name={`document-choice-${item.itemType}`} checked={online} disabled={readOnly} onChange={() => setChoices((c) => ({ ...c, [item.itemType]: 'UPLOAD_ONLINE' }))} /><span><strong>Upload online</strong><small>Securely attach a PDF, JPG or PNG</small></span><b aria-hidden="true">{online ? 'Selected' : 'Choose'}</b></label>
+            {online && <div className="upload-reveal">{file?.reviewStatus === 'REPLACEMENT_REQUIRED' && <div className="portal-notice error" role="alert"><p><strong>Replacement required.</strong> {file.rejectionReason || 'Please upload a clearer copy of this document.'}</p></div>}<label className="file-picker"><span>{uploading === item.itemType ? 'Uploading securely…' : file ? 'Replace document' : 'Choose a document'}</span><input type="file" accept=".pdf,.jpg,.jpeg,.png" disabled={readOnly || uploading === item.itemType} onChange={(e) => uploadDocument(item.itemType, e.target.files?.[0])} /></label>{file && <div className="file-status"><span><strong>{file.originalFilename || file.name || 'Uploaded document'}</strong><small>{file.fileSize || file.size ? `${((file.fileSize || file.size) / 1024 / 1024).toFixed(2)} MB` : 'Uploaded securely'} · {file.reviewStatus === 'REPLACEMENT_REQUIRED' ? 'Replacement required' : file.reviewStatus === 'RECEIVED' ? 'Received by Harmony' : 'Awaiting Harmony review'}</small></span><button type="button" onClick={() => removeDocument(item.itemType)} disabled={readOnly || uploading === item.itemType}>Remove</button></div>}</div>}
+            <label className={`choice-card ${choices[item.itemType] === 'BRING_IN_PERSON' ? 'selected' : ''}`}><input type="radio" name={`document-choice-${item.itemType}`} checked={choices[item.itemType] === 'BRING_IN_PERSON'} disabled={readOnly || Boolean(file)} onChange={() => setChoices((c) => ({ ...c, [item.itemType]: 'BRING_IN_PERSON' }))} /><span><strong>Bring in person</strong><small>{file ? 'Remove the uploaded document before changing this choice.' : 'Bring the original to Harmony Learning Institute'}</small></span><b aria-hidden="true">{choices[item.itemType] === 'BRING_IN_PERSON' ? 'Selected' : 'Choose'}</b></label>
+         </div></div>;
+       })}</div>
     </section>
   </div>;
 }

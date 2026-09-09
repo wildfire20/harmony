@@ -68,7 +68,7 @@ test('status updates are controlled, transactional, audited, and idempotent', ()
   assert.match(route, /INSERT INTO enrollment_status_history/);
   assert.match(route, /action: 'admissions_status_change'/);
   assert.match(route, /sendAdmissionsStatusEmail\(\s*enrollment,\s*status/);
-  assert.doesNotMatch(route, /router\.delete\(/);
+  assert.doesNotMatch(route, /router\.delete\('\/:id'/);
 });
 
 test('registration tokens use cryptographic randomness, hashing, and expiry', () => {

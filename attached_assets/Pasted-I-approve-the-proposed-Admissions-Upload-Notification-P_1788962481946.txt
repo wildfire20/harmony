@@ -1,0 +1,51 @@
+I approve the proposed Admissions Upload & Notification Plan with these decisions:
+
+AWS S3 remains the storage provider.
+Use a private admissions-specific storage path/bucket configuration.
+No public bucket access.
+No local/public upload fallback.
+Do not expose direct S3 object URLs.
+Admin downloads must remain authenticated and short-lived.
+Malware scanning is deferred for the first release.
+For now enforce strict PDF/JPEG/PNG allowlisting.
+Verify magic bytes/file signatures server-side.
+Reject MIME/signature mismatches.
+Enforce the 10 MB limit.
+Reject HTML, SVG, executables, scripts, archives and unsupported containers.
+Deliver Admin downloads using safe Content-Disposition: attachment.
+Structure the storage/document service so malware scanning can be added later without redesigning the workflow.
+Admin-requested replacement uses the existing secure link when that token is still active and eligible.
+Do not automatically reissue a secure link just because a document needs replacement.
+If the token is expired/revoked, or Admin explicitly chooses reissue, then generate a new link using the existing secure reissue process.
+Notification read state is per Admin/Super Admin.
+One Admin reading or dismissing a notification must not mark it read for everyone else.
+
+Also preserve the recommended derived document-state model so database/document/checklist states cannot drift unnecessarily.
+
+Proceed with implementation using the proposed Phase A–F sequence.
+
+Important:
+
+Prepare any required additive migration but do not run it.
+Do not deploy.
+Do not modify learner records.
+Do not reactivate Student Portal access.
+Do not alter the working Gmail API/OAuth transport.
+Storage failure must never roll back admissions/registration data.
+Notifications should be generated only for meaningful events, not draft saves.
+
+When finished, return:
+
+AWS/storage configuration required
+Migration changes
+Parent upload workflow
+Admin document review workflow
+Notification system
+Mobile UI changes
+Files changed
+Tests passed
+Storage/security tests
+Independent review
+Exact production rollout steps
+
+Do not run the migration or deploy automatically.

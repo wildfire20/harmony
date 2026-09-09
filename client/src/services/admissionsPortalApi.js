@@ -10,6 +10,15 @@ const portalClient = axios.create({
 export const admissionsPortalApi = {
   getSession: (token) => portalClient.get(`/admissions-portal/session/${encodeURIComponent(token)}`),
   saveApplication: (token, body) => portalClient.patch(`/admissions-portal/application/${encodeURIComponent(token)}`, body),
+  getDocuments: (token) => portalClient.get(`/admissions-portal/application/${encodeURIComponent(token)}/documents`),
+  uploadDocument: (token, itemType, file, replacesPublicId) => {
+    const body = new FormData();
+    body.append('file', file);
+    body.append('itemType', itemType);
+    if (replacesPublicId) body.append('replacesPublicId', replacesPublicId);
+    return portalClient.post(`/admissions-portal/application/${encodeURIComponent(token)}/documents`, body);
+  },
+  removeDocument: (token, publicId) => portalClient.delete(`/admissions-portal/application/${encodeURIComponent(token)}/documents/${encodeURIComponent(publicId)}`),
   submitApplication: (token) => portalClient.post(`/admissions-portal/application/${encodeURIComponent(token)}/submit`, {}),
   saveRegistration: (token, body) => portalClient.patch(`/admissions-portal/registration/${encodeURIComponent(token)}`, body),
   submitRegistration: (token) => portalClient.post(`/admissions-portal/registration/${encodeURIComponent(token)}/submit`, {}),

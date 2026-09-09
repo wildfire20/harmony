@@ -12,7 +12,7 @@ describe('admissions portal API client', () => {
   });
 
   test('encodes the route token and never places it in request bodies', () => {
-    expect(executableSource.match(/encodeURIComponent\(token\)/g)).toHaveLength(5);
+    expect(executableSource.match(/encodeURIComponent\(token\)/g)).toHaveLength(8);
     expect(executableSource).not.toMatch(/\{\s*token\s*[,}]/);
   });
 });

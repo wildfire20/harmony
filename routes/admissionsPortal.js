@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const {
   portalReadLimiter,
   portalWriteLimiter,
@@ -12,8 +13,19 @@ const {
   PortalTokenError,
   withValidatedPortalToken,
 } = require('../services/admissionsPortalTokenService');
+const {
+  MAX_FILE_SIZE,
+  validateAdmissionsFile,
+  uploadAdmissionsDocument,
+  deleteAdmissionsDocument,
+} = require('../services/admissionsDocumentService');
+const { notifyAdmissionsAdmins } = require('../services/admissionsNotificationService');
 
 const router = express.Router();
+const admissionsUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_FILE_SIZE, files: 1 },
+});
 
 const INVALID_LINK_MESSAGE = 'This secure link is invalid or no longer available.';
 const APPLICATION_FIELDS = Object.freeze({
@@ -208,19 +220,29 @@ router.patch('/application/:token', async (req, res) => {
 
         const choices = Object.entries(checklistChoices);
         for (const [itemType, choice] of choices) {
-          if (!CHECKLIST_ITEMS.has(itemType) || !['UPLOAD_LATER', 'BRING_IN_PERSON'].includes(choice)) {
+          if (!CHECKLIST_ITEMS.has(itemType) || !['UPLOAD_ONLINE', 'BRING_IN_PERSON'].includes(choice)) {
             throw Object.assign(new Error('Invalid checklist choice.'), { status: 400 });
           }
           const update = await client.query(`
             UPDATE registration_checklist_items
             SET status = $3, parent_submission_choice = $4, updated_at = CURRENT_TIMESTAMP
             WHERE enrollment_id = $1 AND item_type = $2
-              AND requested_at IS NOT NULL AND status <> 'RECEIVED'
+              AND requested_at IS NOT NULL
+              AND status NOT IN ('RECEIVED', 'NOT_APPLICABLE')
+              AND (
+                $4 <> 'BRING_IN_PERSON'
+                OR NOT EXISTS (
+                  SELECT 1 FROM admissions_portal_documents d
+                  WHERE d.checklist_item_id = registration_checklist_items.id
+                    AND d.deleted_at IS NULL
+                    AND d.superseded_by_document_id IS NULL
+                )
+              )
             RETURNING id
           `, [
             tokenContext.enrollment_id,
             itemType,
-            choice === 'BRING_IN_PERSON' ? 'BRING_IN_PERSON' : 'MISSING',
+             choice === 'BRING_IN_PERSON' ? 'BRING_IN_PERSON' : 'MISSING',
             choice,
           ]);
           if (!update.rows.length) {
@@ -271,7 +293,25 @@ router.post('/application/:token/submit', async (req, res) => {
             AND parent_submission_choice IS NULL
             AND status NOT IN ('RECEIVED', 'NOT_APPLICABLE')
         `, [tokenContext.enrollment_id]);
-        if (missingField || Number(unansweredChecklist.rows[0].count) > 0) {
+        const missingOnlineUpload = await client.query(`
+          SELECT COUNT(*)::int AS count
+          FROM registration_checklist_items ci
+          WHERE ci.enrollment_id = $1
+            AND ci.requested_at IS NOT NULL
+            AND ci.parent_submission_choice = 'UPLOAD_ONLINE'
+            AND ci.status NOT IN ('RECEIVED', 'NOT_APPLICABLE')
+            AND NOT EXISTS (
+              SELECT 1 FROM admissions_portal_documents d
+              WHERE d.checklist_item_id = ci.id
+                AND d.deleted_at IS NULL
+                AND d.superseded_by_document_id IS NULL
+            )
+        `, [tokenContext.enrollment_id]);
+        if (
+          missingField
+          || Number(unansweredChecklist.rows[0].count) > 0
+          || Number(missingOnlineUpload.rows[0].count) > 0
+        ) {
           throw Object.assign(new Error('Requested information is incomplete.'), { status: 400 });
         }
         await client.query(`
@@ -280,6 +320,25 @@ router.post('/application/:token/submit', async (req, res) => {
               updated_at = CURRENT_TIMESTAMP
           WHERE enrollment_id = $1 AND application_update_submitted_at IS NULL
         `, [tokenContext.enrollment_id]);
+        await notifyAdmissionsAdmins({
+          enrollmentId: tokenContext.enrollment_id,
+          event: 'INFORMATION_SUBMITTED',
+          eventKey: `token-${tokenContext.token_id}`,
+        }, client);
+        const inPersonItems = await client.query(`
+          SELECT item_type FROM registration_checklist_items
+          WHERE enrollment_id = $1
+            AND requested_at IS NOT NULL
+            AND parent_submission_choice = 'BRING_IN_PERSON'
+        `, [tokenContext.enrollment_id]);
+        for (const item of inPersonItems.rows) {
+          await notifyAdmissionsAdmins({
+            enrollmentId: tokenContext.enrollment_id,
+            event: 'BRING_IN_PERSON_SELECTED',
+            checklistItem: item.item_type,
+            eventKey: `token-${tokenContext.token_id}`,
+          }, client);
+        }
         return { submitted: true, alreadySubmitted: false, statusChanged: false };
       },
     });
@@ -409,6 +468,11 @@ router.post('/registration/:token/submit', async (req, res) => {
           SET status = 'REGISTRATION_PENDING', updated_at = CURRENT_TIMESTAMP
           WHERE id = $1
         `, [tokenContext.enrollment_id]);
+        await notifyAdmissionsAdmins({
+          enrollmentId: tokenContext.enrollment_id,
+          event: 'REGISTRATION_SUBMITTED',
+          eventKey: `token-${tokenContext.token_id}`,
+        }, client);
         await client.query(`
           INSERT INTO enrollment_status_history
             (enrollment_id, previous_status, new_status, changed_by, parent_message)
@@ -422,6 +486,217 @@ router.post('/registration/:token/submit', async (req, res) => {
     return sendPortalError(res, error);
   }
 });
+
+const documentError = (res, error) => {
+  if (error instanceof PortalTokenError) return sendPortalError(res, error);
+  if (error instanceof multer.MulterError || error.status === 400 || error.status === 409 || error.status === 503) {
+    return res.status(error.status || 400).json({ message: error.message });
+  }
+  console.error('Admissions document request failed');
+  return res.status(500).json({ message: 'The admissions document request could not be completed.' });
+};
+
+const documentListAction = async (client, tokenContext) => {
+  const result = await client.query(`
+    SELECT d.public_id, d.original_filename, d.content_type, d.file_size, d.review_status,
+      d.rejection_reason, d.uploaded_at, ci.item_type, d.scan_status, d.sha256
+    FROM admissions_portal_documents d
+    LEFT JOIN registration_checklist_items ci ON ci.id = d.checklist_item_id
+    WHERE d.enrollment_id = $1
+      AND d.deleted_at IS NULL AND d.superseded_by_document_id IS NULL
+    ORDER BY d.uploaded_at DESC
+  `, [tokenContext.enrollment_id]);
+  const checklist = await client.query(`
+    SELECT item_type, status, requested_at
+    FROM registration_checklist_items
+    WHERE enrollment_id = $1 AND requested_at IS NOT NULL
+    ORDER BY item_type
+  `, [tokenContext.enrollment_id]);
+  return {
+    documents: result.rows.map((row) => ({
+      publicId: row.public_id, originalFilename: row.original_filename, contentType: row.content_type,
+      fileSize: Number(row.file_size), reviewStatus: row.review_status, scanStatus: row.scan_status,
+      rejectionReason: row.rejection_reason, sha256: row.sha256,
+      uploadedAt: row.uploaded_at, itemType: row.item_type,
+    })),
+    checklist: checklist.rows.map((row) => ({
+      itemType: row.item_type,
+      status: row.status,
+      documentState: result.rows.some((doc) => doc.item_type === row.item_type)
+        ? (result.rows.find((doc) => doc.item_type === row.item_type).review_status === 'PENDING'
+          ? 'UPLOADED_PENDING_REVIEW'
+          : result.rows.find((doc) => doc.item_type === row.item_type).review_status)
+        : row.status,
+    })),
+  };
+};
+
+router.get('/application/:token/documents', async (req, res) => {
+  try {
+    return res.json(await withValidatedPortalToken(req.params.token, {
+      requireEdit: false,
+      action: async (client, tokenContext) => {
+        if (tokenContext.purpose !== TOKEN_PURPOSES.UPDATE_APPLICATION) {
+          throw new PortalTokenError('TOKEN_NOT_ELIGIBLE');
+        }
+        return documentListAction(client, tokenContext);
+      },
+    }));
+  } catch (error) { return documentError(res, error); }
+});
+
+router.post('/application/:token/documents', admissionsUpload.single('file'), async (req, res) => {
+  let uploadedKey;
+  try {
+    const detected = validateAdmissionsFile(req.file);
+    const itemType = typeof req.body?.itemType === 'string' ? req.body.itemType : '';
+    if (!CHECKLIST_ITEMS.has(itemType) || itemType === 'REGISTRATION_FORM') {
+      throw Object.assign(new Error('A valid requested checklist item is required.'), { status: 400 });
+    }
+    const result = await withValidatedPortalToken(req.params.token, {
+      action: async (client, tokenContext) => {
+        if (tokenContext.purpose !== TOKEN_PURPOSES.UPDATE_APPLICATION) {
+          throw new PortalTokenError('TOKEN_NOT_ELIGIBLE');
+        }
+        const requested = await client.query(`
+          SELECT id, status, parent_submission_choice FROM registration_checklist_items
+          WHERE enrollment_id = $1 AND item_type = $2 AND requested_at IS NOT NULL
+          FOR UPDATE
+        `, [tokenContext.enrollment_id, itemType]);
+        const checklist = requested.rows[0];
+        if (!checklist || checklist.status === 'RECEIVED' || checklist.status === 'NOT_APPLICABLE') {
+          throw Object.assign(new Error('This checklist item is not eligible for upload.'), { status: 409 });
+        }
+        const replacesPublicId = typeof req.body?.replacesPublicId === 'string'
+          ? req.body.replacesPublicId : null;
+        let replacedDocument = null;
+        if (replacesPublicId) {
+          const replaced = await client.query(`
+            SELECT id, public_id, review_status
+            FROM admissions_portal_documents
+            WHERE public_id = $1 AND enrollment_id = $2 AND checklist_item_id = $3
+              AND deleted_at IS NULL AND superseded_by_document_id IS NULL
+            FOR UPDATE
+          `, [replacesPublicId, tokenContext.enrollment_id, checklist.id]);
+          if (!replaced.rows.length) {
+            throw Object.assign(new Error('The document to replace was not found.'), { status: 404 });
+          }
+          replacedDocument = replaced.rows[0];
+          if (replacedDocument.review_status === 'RECEIVED' || checklist.status === 'RECEIVED') {
+            throw Object.assign(new Error('A received document cannot be replaced.'), { status: 409 });
+          }
+          await client.query(
+            'UPDATE admissions_portal_documents SET replaced_at = CURRENT_TIMESTAMP WHERE id = $1',
+            [replacedDocument.id],
+          );
+        } else {
+          const activeDocument = await client.query(`
+            SELECT id FROM admissions_portal_documents
+            WHERE enrollment_id = $1 AND checklist_item_id = $2
+              AND deleted_at IS NULL AND superseded_by_document_id IS NULL
+            LIMIT 1
+          `, [tokenContext.enrollment_id, checklist.id]);
+          if (activeDocument.rows.length) {
+            throw Object.assign(new Error('Replace the existing document instead of adding another.'), { status: 409 });
+          }
+        }
+        const publicId = require('node:crypto').randomUUID();
+        const stored = await uploadAdmissionsDocument({
+          buffer: req.file.buffer, contentType: detected.mime,
+          publicId, originalFilename: req.file.originalname,
+        });
+        uploadedKey = stored.key;
+        const inserted = await client.query(`
+          INSERT INTO admissions_portal_documents
+            (public_id, enrollment_id, checklist_item_id, storage_key, original_filename, content_type,
+             detected_content_type, sha256, file_size, upload_source, scan_status, review_status)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'PARENT_ONLINE', 'NOT_SCANNED', 'PENDING')
+          RETURNING id, public_id, original_filename, content_type, file_size, review_status, uploaded_at
+        `, [publicId, tokenContext.enrollment_id, checklist.id, stored.key, stored.originalFilename, stored.contentType, stored.detectedContentType, stored.sha256, stored.fileSize]);
+        if (replacedDocument) {
+          await client.query(`
+            UPDATE admissions_portal_documents
+            SET superseded_by_document_id = $1
+            WHERE id = $2
+          `, [inserted.rows[0].id, replacedDocument.id]);
+        }
+        await client.query(`
+          UPDATE registration_checklist_items
+          SET parent_submission_choice = 'UPLOAD_ONLINE',
+              status = 'MISSING',
+              received_at = NULL,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+        `, [checklist.id]);
+        await notifyAdmissionsAdmins({
+          enrollmentId: tokenContext.enrollment_id,
+          event: replacedDocument ? 'DOCUMENT_REPLACED' : 'DOCUMENT_UPLOADED',
+          documentPublicId: publicId,
+          checklistItem: itemType,
+        }, client);
+        const document = inserted.rows[0];
+        return { document: {
+          publicId: document.public_id,
+          originalFilename: document.original_filename,
+          contentType: document.content_type,
+          fileSize: Number(document.file_size),
+          reviewStatus: document.review_status,
+          uploadedAt: document.uploaded_at,
+          itemType,
+          documentState: 'UPLOADED_PENDING_REVIEW',
+        } };
+      },
+    });
+    return res.status(201).json(result);
+  } catch (error) {
+    if (uploadedKey) await deleteAdmissionsDocument(uploadedKey);
+    return documentError(res, error);
+  }
+});
+
+const removeDocument = async (req, res) => {
+  let oldKey;
+  try {
+    const result = await withValidatedPortalToken(req.params.token, {
+      action: async (client, tokenContext) => {
+        if (tokenContext.purpose !== TOKEN_PURPOSES.UPDATE_APPLICATION) {
+          throw new PortalTokenError('TOKEN_NOT_ELIGIBLE');
+        }
+        const existing = await client.query(`
+          SELECT d.*, ci.item_type, ci.id AS checklist_item_id
+          FROM admissions_portal_documents d
+          LEFT JOIN registration_checklist_items ci ON ci.id = d.checklist_item_id
+          WHERE d.public_id = $1 AND d.enrollment_id = $2
+            AND d.deleted_at IS NULL AND d.superseded_by_document_id IS NULL
+          FOR UPDATE OF d
+        `, [req.params.publicId, tokenContext.enrollment_id]);
+        if (!existing.rows.length) throw Object.assign(new Error('Document not found.'), { status: 404 });
+        const doc = existing.rows[0];
+        oldKey = doc.storage_key;
+        if (doc.review_status === 'RECEIVED') {
+          throw Object.assign(new Error('A received document cannot be removed.'), { status: 409 });
+        }
+        await client.query(
+          'UPDATE admissions_portal_documents SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
+          [doc.id],
+        );
+        await client.query(`
+          UPDATE registration_checklist_items
+          SET parent_submission_choice = NULL, status = 'MISSING',
+              received_at = NULL, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1 AND status <> 'RECEIVED'
+        `, [doc.checklist_item_id]);
+        return { removed: true };
+      },
+    });
+    if (oldKey) await deleteAdmissionsDocument(oldKey);
+    return res.json(result);
+  } catch (error) {
+    return documentError(res, error);
+  }
+};
+
+router.delete('/application/:token/documents/:publicId', removeDocument);
 
 router.use((req, res) => res.status(404).json({ message: 'Secure portal endpoint not found.' }));
 

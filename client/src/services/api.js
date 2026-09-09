@@ -144,6 +144,11 @@ export const submissionsAPI = {
 
 // Admin API
 export const adminAPI = {
+  getNotifications: (params) => api.get('/admin/notifications', { params }),
+  getUnreadNotificationCount: () => api.get('/admin/notifications/unread-count'),
+  markNotificationRead: (id) => api.patch(`/admin/notifications/${id}/read`),
+  markAllNotificationsRead: () => api.post('/admin/notifications/read-all'),
+  getAdmissionsActivity: (params) => api.get('/admin/admissions/activity', { params }),
   // Students
   addStudent: (data) => api.post('/admin/students', data),
   bulkAddStudents: (students) => api.post('/admin/students/bulk', { students }),
@@ -240,6 +245,8 @@ export const enrollmentsAPI = {
   reissuePortalLink: (id, data) => api.post(`/enrollments/${id}/portal-link/reissue`, data),
   revokePortalLink: (id, data) => api.post(`/enrollments/${id}/portal-link/revoke`, data),
   resendEmail: (id, data) => api.post(`/enrollments/${id}/email/resend`, data),
+  reviewDocument: (id, publicId, data) => api.patch(`/enrollments/${id}/documents/${encodeURIComponent(publicId)}/review`, data),
+  downloadDocument: (id, publicId) => api.get(`/enrollments/${id}/documents/${encodeURIComponent(publicId)}/download`, { responseType: 'blob' }),
 };
 
 // Manual Payments API
