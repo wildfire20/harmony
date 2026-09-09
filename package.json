@@ -19,6 +19,7 @@
     "verify:email": "node scripts/verify-email.js",
     "migrate:admissions": "node scripts/run-admissions-migration.js",
     "migrate:registration-portal": "node scripts/run-secure-registration-portal-migration.js",
+    "migrate:admissions-documents": "node scripts/run-admissions-documents-migration.js",
     "fix:enrollment-status-width": "node scripts/fix-enrollment-status-width.js",
     "install-client": "cd client && npm install",
     "heroku-postbuild": "npm run build",

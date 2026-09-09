@@ -88,7 +88,9 @@ test('routes keep portal capabilities and admin notification ownership server-si
 
 test('additive migration retires upload later without running automatically', () => {
   const fs = require('node:fs');
+  const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
   const migration = fs.readFileSync('migrations/admissions_documents_notifications.sql', 'utf8');
+  const runner = fs.readFileSync('scripts/run-admissions-documents-migration.js', 'utf8');
   const server = fs.readFileSync('server.js', 'utf8');
   assert.match(migration, /WHERE parent_submission_choice = 'UPLOAD_LATER'/);
   assert.match(migration, /UPLOAD_ONLINE/);
@@ -96,6 +98,13 @@ test('additive migration retires upload later without running automatically', ()
   assert.match(migration, /superseded_by_document_id/);
   assert.match(migration, /DROP INDEX IF EXISTS idx_admissions_documents_sha256_active/);
   assert.match(migration, /replaced_at IS NULL/);
+  assert.equal(
+    packageJson.scripts['migrate:admissions-documents'],
+    'node scripts/run-admissions-documents-migration.js',
+  );
+  assert.match(runner, /admissions_documents_notifications\.sql/);
+  assert.match(runner, /isAdmissionsPortalSchemaReady/);
+  assert.match(runner, /migration applied and verified/);
   assert.match(migration, /admissions_notifications/);
   assert.doesNotMatch(server, /admissions_documents_notifications\.sql/);
 });
