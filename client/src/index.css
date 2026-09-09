@@ -872,3 +872,34 @@ code {
 .admissions-management .modal-content small {
   color: #cbd5e1 !important;
 }
+
+/* Admissions table: explicit cell colors prevent inherited theme conflicts. */
+.admissions-management table tbody td:nth-child(1) {
+  color: #93c5fd !important;
+}
+
+.admissions-management table tbody td:nth-child(2),
+.admissions-management table tbody td:nth-child(3),
+.admissions-management table tbody td:nth-child(4),
+.admissions-management table tbody td:nth-child(6) {
+  color: #f1f5f9 !important;
+}
+
+.admissions-management table tbody td:nth-child(2) *,
+.admissions-management table tbody td:nth-child(3) *,
+.admissions-management table tbody td:nth-child(4) *,
+.admissions-management table tbody td:nth-child(6) * {
+  color: inherit !important;
+}
+
+.admissions-management table tbody td:nth-child(4) .bg-violet-100 {
+  display: inline-flex;
+  color: #5b21b6 !important;
+  background: #ede9fe !important;
+  border: 1px solid #c4b5fd;
+  vertical-align: middle;
+}
+
+.admissions-management table tbody td:nth-child(5) .inline-flex {
+  color: inherit;
+}
