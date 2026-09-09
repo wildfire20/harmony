@@ -82,6 +82,7 @@ const getSafeSession = async (client, tokenContext) => {
       e.application_reference, e.status, e.parent_first_name, e.parent_last_name,
       e.parent_email, e.parent_phone, e.student_first_name, e.student_last_name,
       e.student_date_of_birth, e.grade_applying, e.boarding_option, e.previous_school,
+      e.additional_notes,
       rr.form_status, rr.residential_address, rr.postal_address, rr.emergency_contact,
       rr.service_selections, rr.requested_application_fields, rr.confirmed_at, rr.submitted_at,
       COALESCE(json_agg(json_build_object(
@@ -118,6 +119,7 @@ const getSafeSession = async (client, tokenContext) => {
       },
       boardingOption: row.boarding_option,
       previousSchool: row.previous_school,
+      additionalNotes: row.additional_notes,
     },
     requestedFields: Array.isArray(row.requested_application_fields)
       ? row.requested_application_fields

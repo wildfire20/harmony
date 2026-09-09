@@ -531,6 +531,15 @@ app.get('/api', (req, res) => {
 
 // Serve static files from React app in production
 if (process.env.NODE_ENV === 'production') {
+  app.get(['/application/update/:token', '/registration/:token'], (req, res) => {
+    res.set({
+      'Cache-Control': 'no-store',
+      'X-Robots-Tag': 'noindex, nofollow, noarchive',
+      'Referrer-Policy': 'no-referrer',
+    });
+    res.sendFile(path.join(__dirname, 'client/build/index.html'));
+  });
+
   // Serve static files from the React app
   app.use(express.static(path.join(__dirname, 'client/build')));
   

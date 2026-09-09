@@ -292,6 +292,15 @@ test('Parent API exposes only approved endpoints and allowlisted fields', () => 
   assert.doesNotMatch(route, /sendAdmissionsStatusEmail|sendEmail|multer|s3/i);
 });
 
+test('token-bearing React routes send privacy headers before serving HTML', () => {
+  const server = read('server.js');
+  assert.match(server, /application\/update\/:token/);
+  assert.match(server, /registration\/:token/);
+  assert.match(server, /'Cache-Control': 'no-store'/);
+  assert.match(server, /'X-Robots-Tag': 'noindex, nofollow, noarchive'/);
+  assert.match(server, /'Referrer-Policy': 'no-referrer'/);
+});
+
 test('atomic token action locks token and enrollment and enforces edit access', async () => {
   const queries = [];
   const client = {

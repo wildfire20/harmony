@@ -517,6 +517,7 @@ test('isolated PostgreSQL migration, concurrency and Parent API', { timeout: 120
         'access', 'application', 'checklist', 'expiresAt', 'mode', 'registration', 'requestedFields',
       ]);
       assert.equal(JSON.stringify(session.body).includes('Private admin note'), false);
+      assert.equal(session.body.application.additionalNotes, 'Existing notexxxxx');
       assert.equal(JSON.stringify(session.body).includes('"id"'), false);
       assert.equal(JSON.stringify(session.body).includes('token_hash'), false);
 

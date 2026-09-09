@@ -1,0 +1,135 @@
+Phase 2.5 / Phase 3 is approved and the secure registration portal migration has now been applied successfully in production.
+
+FRONTEND_URL is configured as:
+
+https://www.harmonylearning.co.za
+
+Proceed with Phase 4 — Parent-facing Secure Admissions Portal UI only.
+
+Build the two public React experiences:
+
+1. Update Application
+
+Route:
+
+/application/update/:token
+
+This page is for MORE_INFORMATION_REQUIRED.
+
+It should:
+
+Validate the secure token through the existing session API
+Display Harmony Learning Institute branding
+Display the learner name and application reference
+Show only the information/documents specifically requested by Harmony
+Allow editing only fields permitted by the backend
+Allow each requested document to be marked:
+Upload later
+Bring in person
+Clearly explain that parents are not required to submit sensitive documents online
+Show the physical submission option:
+
+Harmony Learning Institute
+2 Skilferdoring Street
+Onverwacht, Lephalale
+
+Provide Save Progress where supported
+Provide a clear Submit Update action
+Show a professional success state after submission
+
+Do not automatically change the admissions status.
+
+2. Complete Registration
+
+Route:
+
+/registration/:token
+
+This page should:
+
+Pre-fill existing application information
+Avoid asking parents to re-enter information Harmony already has
+Clearly separate information that is read-only from information they need to complete
+Collect:
+residential address
+postal address
+emergency contact
+relevant Harmony services:
+boarding
+transport
+aftercare
+Include confirmation before final submission
+Support Save Progress
+Support final registration submission
+After submission, show a clear confirmation that Harmony will review the registration
+Never imply that the learner is fully registered until Admin marks them REGISTERED
+Submitted registration
+
+If the backend returns read_only:
+
+show the submitted registration
+disable editing
+display:
+“Your registration has been submitted and is currently being reviewed by Harmony Learning Institute.”
+Invalid/expired/revoked links
+
+Do not expose the reason.
+
+Show a generic message such as:
+
+“This secure link is no longer available. Please contact Harmony Learning Institute for assistance.”
+
+Allow the parent to contact Harmony using the existing school email/contact information.
+
+Design
+
+The portal should visually match the redesigned Harmony public website.
+
+Requirements:
+
+clean and professional
+mobile-first
+easy for non-technical parents
+large clear buttons
+accessible labels and validation
+progress indication for registration
+no unnecessary technical terminology
+no Student Portal links
+
+Keep the subtle Powered by AutoM8 attribution with a clickable link to:
+
+https://www.auto-m8.co.za/
+
+Security
+Never expose database IDs
+Never log the token
+Do not put the token into analytics
+Preserve noindex, noarchive, no-referrer, and no-store
+Do not store the secure token in localStorage
+Do not weaken any Phase 1–3 backend validation
+Frontend validation is for usability only; backend remains authoritative
+
+Do not implement document uploads yet.
+
+Where an upload would eventually appear, design the UI cleanly but use the currently supported Upload Later / Bring in Person workflow.
+
+Do not implement Admin UI or email-link generation yet.
+
+Do not run migrations.
+Do not deploy automatically.
+
+Run frontend, admissions, portal API and security tests plus the production build.
+
+Return:
+
+Pages/components created
+Screens and states implemented
+Mobile behavior
+API integration
+Invalid/expired link handling
+Submitted/read-only behavior
+Files changed
+Tests passed
+Production build result
+Independent review
+Any blocker before the Admin/email-link phase

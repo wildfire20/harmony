@@ -42,6 +42,7 @@ import ParentPortal from './components/parent/ParentPortal';
 import ParentForgotPassword from './components/parent/ParentForgotPassword';
 import ParentForceChangePassword from './components/parent/ParentForceChangePassword';
 import StaffScanStation from './components/attendance/StaffScanStation';
+import AdmissionsPortal from './components/admissions/AdmissionsPortal';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -123,6 +124,8 @@ const AppContent = () => {
 
   return (
     <Routes>
+      <Route path="/application/update/:token" element={<AdmissionsPortal />} />
+      <Route path="/registration/:token" element={<AdmissionsPortal />} />
       <Route path="/" element={<LandingRoute />} />
       <Route path="/gallery" element={<GalleryPage />} />
       <Route path="/fees" element={<FeesPage />} />
