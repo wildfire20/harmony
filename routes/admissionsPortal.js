@@ -236,6 +236,7 @@ router.patch('/application/:token', async (req, res) => {
                   WHERE d.checklist_item_id = registration_checklist_items.id
                     AND d.deleted_at IS NULL
                     AND d.superseded_by_document_id IS NULL
+                    AND d.review_status <> 'REPLACEMENT_REQUIRED'
                 )
               )
             RETURNING id

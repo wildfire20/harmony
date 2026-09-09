@@ -1,0 +1,65 @@
+The Request Replacement backend action is now working, but the parent currently has no clear way to know that Harmony requested a new document.
+
+Add a parent replacement-notification workflow.
+
+When Admin clicks Request replacement:
+
+Require or allow a short parent-safe replacement reason.
+Commit the document/checklist state as REPLACEMENT_REQUIRED.
+After commit, automatically send the parent an email through the existing Gmail API transport.
+The email must identify:
+learner name
+application reference
+document that needs replacement
+parent-safe replacement reason
+Add a prominent Replace Document button.
+Reuse the existing active secure Update Application link if it is still valid and eligible.
+Do not automatically reissue a token merely because a replacement was requested.
+If the existing secure link is expired/revoked/unavailable, explicitly issue a new secure link before sending the email.
+Include the plain-text secure URL as well.
+Preserve the existing in-person option where appropriate.
+
+On the parent secure portal:
+
+Clearly highlight the affected document as:
+Replacement required
+Display the parent-safe reason from Harmony.
+Show Upload replacement
+If physical submission is allowed, also show Bring replacement in person
+Do not allow the old rejected document to appear as accepted.
+
+After the parent uploads the replacement:
+
+create a new document version
+preserve the old file in protected review history
+mark the new file UPLOADED_PENDING_REVIEW
+create a new Admin notification such as:
+
+Twayne Mundirwa uploaded a replacement Parent/Guardian ID — HLI-2027-0023
+
+In Admin, show email delivery status for the replacement request so staff can see whether the parent notification was sent successfully.
+
+Email failure must not roll back the replacement-required state.
+
+Preserve:
+
+Gmail API/OAuth transport
+Reply-To
+Powered by AutoM8 footer
+secure token lifecycle
+audit logs
+notification system
+Student Portal retirement
+
+Do not deploy automatically.
+Do not run migrations unless the implementation genuinely requires one.
+
+Return:
+
+replacement email behavior
+secure-link reuse/reissue behavior
+parent portal replacement UI
+Admin notification behavior
+files changed
+tests passed
+whether a migration is required

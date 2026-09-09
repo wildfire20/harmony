@@ -151,8 +151,9 @@ const EnrollmentManagement = () => {
       } else if (action === 'reject') {
         const rejectionReason = window.prompt('Tell the parent what needs to be corrected:');
         if (!rejectionReason?.trim()) return;
-        await enrollmentsAPI.reviewDocument(selectedEnrollment.id, publicId, { reviewStatus: 'REPLACEMENT_REQUIRED', rejectionReason: rejectionReason.trim() });
-        toast.success('Replacement requested');
+        const response = await enrollmentsAPI.reviewDocument(selectedEnrollment.id, publicId, { reviewStatus: 'REPLACEMENT_REQUIRED', rejectionReason: rejectionReason.trim() });
+        if (response.data.emailDelivery?.deliveryStatus === 'sent') toast.success('Replacement requested and parent email sent');
+        else toast.warning('Replacement requested, but the parent email was not sent');
         await refreshDetail();
       } else { const response = await enrollmentsAPI.downloadDocument(selectedEnrollment.id, publicId);
         const contentType = item.document?.contentType || response.data?.type;

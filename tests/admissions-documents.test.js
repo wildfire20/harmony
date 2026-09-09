@@ -63,6 +63,7 @@ test('routes keep portal capabilities and admin notification ownership server-si
   const portalRoutes = fs.readFileSync('routes/admissionsPortal.js', 'utf8');
   const notificationRoutes = fs.readFileSync('routes/admissionsNotifications.js', 'utf8');
   const enrollmentRoutes = fs.readFileSync('routes/enrollments.js', 'utf8');
+  const gmailService = fs.readFileSync('services/gmailService.js', 'utf8');
   const adminUi = fs.readFileSync('client/src/components/admin/EnrollmentManagement.js', 'utf8');
   assert.match(portalRoutes, /application\/:token\/documents/);
   assert.match(portalRoutes, /d\.enrollment_id = \$2/);
@@ -83,6 +84,14 @@ test('routes keep portal capabilities and admin notification ownership server-si
   assert.match(enrollmentRoutes, /attachment;/);
   assert.match(enrollmentRoutes, /Review or remove the active uploaded document/);
   assert.match(enrollmentRoutes, /application_update_submitted_at = NULL/);
+  assert.match(enrollmentRoutes, /document_replacement_request/);
+  assert.match(enrollmentRoutes, /sendDocumentReplacementEmail/);
+  assert.match(enrollmentRoutes, /await client\.query\('COMMIT'\);[\s\S]*sendDocumentReplacementEmail/);
+  assert.match(gmailService, />Replace Document<\/a>/);
+  assert.match(gmailService, /Application Reference:/);
+  assert.match(gmailService, /Reason from Admissions:/);
+  assert.match(portalRoutes, /d\.review_status <> 'REPLACEMENT_REQUIRED'/);
+  assert.match(adminUi, /Replacement requested and parent email sent/);
   assert.match(enrollmentRoutes, /router\.delete\('\/:id\/documents\/:publicId'[\s\S]*SELECT id FROM enrollments WHERE id = \$1 FOR UPDATE[\s\S]*FOR UPDATE/);
   assert.match(adminUi, /item\.document\?\.originalFilename/);
   assert.match(adminUi, /item\.document\?\.contentType \|\| response\.data\?\.type/);

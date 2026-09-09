@@ -287,6 +287,35 @@ async function sendAdmissionsStatusEmail(enrollment, status, parentMessage, secu
   return sendEmail(enrollment.parent_email, content.subject, content.html);
 }
 
+async function sendDocumentReplacementEmail(enrollment, {
+  documentLabel,
+  replacementReason,
+  secureLink,
+}) {
+  const learner = escapeHtml(
+    [enrollment.student_first_name, enrollment.student_last_name].filter(Boolean).join(' '),
+  );
+  const reference = escapeHtml(enrollment.application_reference);
+  const label = escapeHtml(documentLabel);
+  const reason = escapeHtml(replacementReason);
+  const link = escapeHtml(secureLink);
+  return sendEmail(
+    enrollment.parent_email,
+    `Document Replacement Required — ${enrollment.application_reference}`,
+    emailShell('Replacement required', `
+      <p>Dear ${escapeHtml(enrollment.parent_first_name)},</p>
+      <p>Harmony Learning Institute requires a replacement document for this application.</p>
+      <p><strong>Learner:</strong> ${learner}<br>
+      <strong>Application Reference:</strong> ${reference}<br>
+      <strong>Document:</strong> ${label}</p>
+      <p><strong>Reason from Admissions:</strong> ${reason}</p>
+      <p style="text-align:center;margin:28px 0"><a href="${link}" style="display:inline-block;background:#b91c1c;color:#fff;padding:14px 24px;border-radius:7px;text-decoration:none;font-weight:bold">Replace Document</a></p>
+      <p><strong>Secure link:</strong><br>${link}</p>
+      <p>You may upload the replacement securely online. Where the portal offers the option, you may instead choose to bring the replacement to Harmony Learning Institute in person.</p>
+    `),
+  );
+}
+
 module.exports = {
   GMAIL_SEND_SCOPE,
   REQUIRED_SENDER_ADDRESS,
@@ -303,6 +332,7 @@ module.exports = {
   sendEnrollmentNotification,
   sendApplicationConfirmation,
   sendAdmissionsStatusEmail,
+  sendDocumentReplacementEmail,
   statusEmailContent,
   escapeHtml,
   verifyEmailTransport,

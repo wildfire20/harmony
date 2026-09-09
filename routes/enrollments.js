@@ -8,6 +8,7 @@ const { buildPortalLink } = require('../services/admissionsPortalLinks');
 const {
   TOKEN_PURPOSES,
   PortalTokenError,
+  issuePortalToken,
   issuePortalTokenInTransaction,
   getPortalAccess,
   revokePortalTokensInTransaction,
@@ -18,11 +19,19 @@ const {
   sendApplicationConfirmation,
   sendEnrollmentNotification,
   sendAdmissionsStatusEmail,
+  sendDocumentReplacementEmail,
 } = require('../services/gmailService');
 const { getAdmissionsDocumentStream, deleteAdmissionsDocument } = require('../services/admissionsDocumentService');
 const { notifyAdmissionsAdmins } = require('../services/admissionsNotificationService');
 
 const router = express.Router();
+const DOCUMENT_LABELS = Object.freeze({
+  BIRTH_CERTIFICATE: 'Birth Certificate',
+  PARENT_GUARDIAN_ID: 'Parent/Guardian ID',
+  LATEST_SCHOOL_REPORT: 'Latest School Report',
+  TRANSFER_DOCUMENT: 'Transfer Document',
+  REGISTRATION_FORM: 'Registration Form',
+});
 const LEGACY_STATUSES = ['pending', 'approved', 'rejected', 'waitlisted'];
 const EMAIL_COMPATIBLE_LEGACY_STATUSES = ['approved', 'rejected', 'waitlisted'];
 let admissionsSchemaReady = false;
@@ -69,9 +78,11 @@ const logEmailDelivery = async (enrollmentId, emailType, result, executor = db, 
       safeResult.messageId || null,
       safeResult.error || null,
     ]);
+    return { deliveryStatus, error: safeResult.error || null };
   } catch (error) {
     console.error(`Email delivery log failed for enrollment ${enrollmentId}:`, error.message);
     if (required) throw error;
+    return { deliveryStatus, error: safeResult.error || null, logFailed: true };
   }
 };
 
@@ -425,7 +436,7 @@ router.patch('/:id/documents/:publicId/review', authenticate, async (req, res) =
     client = await db.pool.connect();
     await client.query('BEGIN');
     const enrollment = await client.query(
-      'SELECT id FROM enrollments WHERE id = $1 FOR UPDATE',
+      'SELECT * FROM enrollments WHERE id = $1 FOR UPDATE',
       [req.params.id],
     );
     if (!enrollment.rows.length) {
@@ -446,6 +457,10 @@ router.patch('/:id/documents/:publicId/review', authenticate, async (req, res) =
       return res.status(404).json({ message: 'Document not found' });
     }
     const document = result.rows[0];
+    const checklistItem = await client.query(
+      'SELECT item_type FROM registration_checklist_items WHERE id = $1',
+      [document.checklist_item_id],
+    );
     await client.query(`
       UPDATE registration_checklist_items
       SET status = CASE WHEN $1 = 'RECEIVED' THEN 'RECEIVED' ELSE 'MISSING' END,
@@ -467,6 +482,34 @@ router.patch('/:id/documents/:publicId/review', authenticate, async (req, res) =
       required: true,
     });
     await client.query('COMMIT');
+    let emailDelivery = null;
+    if (reviewStatus === 'REPLACEMENT_REQUIRED') {
+      let emailResult;
+      try {
+        // Raw secure tokens are deliberately never stored. A fresh link is issued
+        // because an existing hash-only link cannot be recovered for this email.
+        const token = await issuePortalToken({
+          enrollmentId: document.enrollment_id,
+          purpose: TOKEN_PURPOSES.UPDATE_APPLICATION,
+          issuedBy: req.user.id,
+        });
+        emailResult = await sendDocumentReplacementEmail(enrollment.rows[0], {
+          documentLabel: DOCUMENT_LABELS[checklistItem.rows[0]?.item_type]
+            || checklistItem.rows[0]?.item_type
+            || 'Admissions document',
+          replacementReason: rejectionReason,
+          secureLink: buildPortalLink({ token: token.token, purpose: TOKEN_PURPOSES.UPDATE_APPLICATION }),
+        });
+      } catch (error) {
+        console.error('Document replacement email failed:', error.code || error.message);
+        emailResult = { success: false, error: error.code || EMAIL_ERROR_CATEGORIES.UNKNOWN };
+      }
+      emailDelivery = await logEmailDelivery(
+        req.params.id,
+        'document_replacement_request',
+        emailResult,
+      );
+    }
     try {
       await notifyAdmissionsAdmins({
         enrollmentId: document.enrollment_id,
@@ -474,7 +517,7 @@ router.patch('/:id/documents/:publicId/review', authenticate, async (req, res) =
         documentPublicId: document.public_id,
       });
     } catch (error) { console.error('Admissions notification failed:', error.message); }
-    return res.json({ document });
+    return res.json({ document, emailDelivery });
   } catch (error) {
     if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Admissions document review failed:', {
