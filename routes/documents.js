@@ -496,6 +496,11 @@ router.get('/download/:id', authenticateFlexible, async (req, res) => {
   try {
     const { id } = req.params;
     const user = req.user;
+    // Parent accounts must use the scoped parent portal endpoint, which
+    // requires an explicitly authorized child context.
+    if (user.role === 'parent') {
+      return res.status(403).json({ message: 'Use the parent portal document endpoint' });
+    }
 
     console.log('=== DOWNLOAD DOCUMENT ===');
     console.log('Document ID:', id);
@@ -635,6 +640,11 @@ router.get('/view/:id', authenticateFlexible, async (req, res) => {
   try {
     const { id } = req.params;
     const user = req.user;
+    // Do not allow the legacy unscoped route to become a parent document
+    // access bypass.
+    if (user.role === 'parent') {
+      return res.status(403).json({ message: 'Use the parent portal document endpoint' });
+    }
 
     console.log('=== VIEW DOCUMENT ===');
     console.log('Document ID:', id);

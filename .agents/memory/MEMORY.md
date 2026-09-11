@@ -4,3 +4,4 @@
 - [Role-preserving portal retirement](role-preserving-portal-retirement.md) — disable learner access with a reversible server flag, never by mutating learner records.
 - [Secure-link resend semantics](secure-link-resend.md) — hash-only tokens cannot be recovered; resend explicitly reissues and invalidates the prior link.
 - [Admin theme cascade](admin-theme-cascade.md) — page-specific Admin contrast rules must follow legacy global theme overrides.
+- [Parent learner isolation](parent-learner-isolation.md) — require explicit verified learner IDs; never infer, silently fall back, or relink parent relationships by name.

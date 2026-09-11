@@ -3,13 +3,12 @@ import api from '../../services/api';
 import toast from 'react-hot-toast';
 import {
   UserPlus, Trash2, Edit2, Search, Users, AlertCircle, X,
-  RefreshCw, Phone, Copy, RotateCcw, Plus, Minus, Share2, Link2
+  Phone, Copy, RotateCcw, Plus, Minus, Share2, Link2
 } from 'lucide-react';
 
 const ParentManagement = () => {
   const [parents, setParents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingParent, setEditingParent] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -158,20 +157,6 @@ const ParentManagement = () => {
     }
   };
 
-  const handleSyncEnrollments = async () => {
-    setSyncing(true);
-    try {
-      const res = await api.post('/parent/admin/sync-enrollments');
-      const { created, linked, skipped } = res.data;
-      toast.success(`Sync complete: ${created} new accounts, ${linked} links added, ${skipped} skipped`);
-      loadParents();
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Sync failed');
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text).then(() => toast.success('Copied!'));
   };
@@ -200,15 +185,6 @@ const ParentManagement = () => {
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={handleSyncEnrollments}
-            disabled={syncing}
-            className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition-colors text-sm disabled:opacity-60"
-            title="Auto-create parent accounts from approved enrollment applications"
-          >
-            <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? 'Syncing…' : 'Sync from Enrollments'}
-          </button>
           <button
             onClick={openCreate}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors text-sm"

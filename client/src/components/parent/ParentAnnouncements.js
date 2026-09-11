@@ -13,7 +13,7 @@ const ParentAnnouncements = ({ child }) => {
       .then((d) => setAnnouncements(d.announcements || []))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [child?.id]);
 
   return (
     <div className="space-y-5">

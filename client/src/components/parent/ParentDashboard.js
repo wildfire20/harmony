@@ -28,7 +28,7 @@ const ParentDashboard = ({ child, user }) => {
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [child?.id]);
 
   if (loading) return (
     <div className="flex items-center justify-center py-20">

@@ -3,6 +3,7 @@ import {
   Upload, CheckCircle, Clock, XCircle, AlertCircle,
   ChevronLeft, Receipt, CreditCard, Banknote, Smartphone, Building2
 } from 'lucide-react';
+import { parentApi } from './ParentPortal';
 
 const METHODS = [
   { value: 'eft', label: 'EFT / Bank Transfer', icon: Building2 },
@@ -37,6 +38,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
   const [selectedFees, setSelectedFees] = useState([]);
   const [servicePrices, setServicePrices] = useState([]);
   const [selectedServices, setSelectedServices] = useState([]);
+  const [banking, setBanking] = useState(null);
 
   const fileRef = useRef();
   const [receiptModal, setReceiptModal] = useState(null);
@@ -103,6 +105,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
     authFetch('/api/service-prices')
       .then(d => setServicePrices(d.prices || []))
       .catch(() => {});
+    parentApi('/banking-details').then(d => setBanking(d.banking)).catch(() => {});
   }, [child?.id]);
 
   // Recalculate total from both selected services and one-off fees
@@ -391,8 +394,8 @@ export default function ParentPaymentProof({ child, embedded = false }) {
           <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
             <p className="text-blue-800 font-semibold text-sm mb-2">Banking Details</p>
             <div className="space-y-0.5 text-xs text-blue-700">
-              <p><span className="font-medium">Bank:</span> First National Bank (FNB)</p>
-              <p><span className="font-medium">Account:</span> 63053202265 &bull; Branch: 210755</p>
+               <p><span className="font-medium">Bank:</span> {banking?.bank || 'Loading…'}</p>
+               <p><span className="font-medium">Account:</span> {banking?.accountNumber || 'Loading…'} &bull; Branch: {banking?.branchCode || 'Loading…'}</p>
               <p className="mt-1 text-blue-600 font-semibold">Reference: {child?.student_number || 'your child\'s student number'}</p>
             </div>
           </div>

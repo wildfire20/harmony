@@ -151,7 +151,10 @@ router.get('/for-child', requireParent, async (req, res) => {
       : `SELECT u.* FROM users u JOIN parent_students ps ON ps.student_id=u.id WHERE ps.parent_id=$1 LIMIT 1`;
     const params = childId ? [req.user.id, childId] : [req.user.id];
     const childResult = await db.query(q, params);
-    if (!childResult.rows.length) return res.status(404).json({ message: 'Child not found' });
+    if (!childResult.rows.length) {
+      if (childId) return res.status(403).json({ message: 'That student is not linked to your account' });
+      return res.json({ fees: [], child: null });
+    }
     const child = childResult.rows[0];
 
     const result = await db.query(`

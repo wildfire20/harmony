@@ -1,10 +1,13 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const fs = require('fs');
 const router = express.Router();
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { generateKidFriendlyPassword } = require('../utils/passwordGenerator');
+const BANKING_DETAILS = require('../config/bankingDetails');
+const { logAudit, getIp } = require('../utils/auditLogger');
 
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin  = [authenticate, authorize('admin', 'super_admin')];
@@ -40,7 +43,10 @@ async function getChildren(parentId) {
 
 async function resolveChild(parentId, requestedChildId) {
   const children = await getChildren(parentId);
-  if (children.length === 0) throw { status: 404, message: 'No child linked to this account' };
+  if (children.length === 0) {
+    if (requestedChildId) throw { status: 403, message: 'That student is not linked to your account' };
+    return null;
+  }
   if (requestedChildId) {
     const found = children.find(c => c.id === parseInt(requestedChildId));
     if (!found) throw { status: 403, message: 'That student is not linked to your account' };
@@ -54,13 +60,18 @@ router.get('/me', requireParent, async (req, res) => {
   try {
     const children = await getChildren(req.user.id);
     const childId  = req.query.child_id;
-    const child    = childId ? children.find(c => c.id === parseInt(childId)) || children[0] : children[0];
+    const child    = childId ? children.find(c => c.id === parseInt(childId)) : children[0] || null;
+    if (childId && !child) return res.status(403).json({ message: 'That student is not linked to your account' });
     res.json({ parent: req.user, child, children });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ message: err.message });
     console.error('Parent /me error:', err);
     res.status(500).json({ message: 'Server error' });
   }
+});
+
+router.get('/banking-details', requireParent, (req, res) => {
+  res.json({ banking: BANKING_DETAILS });
 });
 
 // ─── GET /api/parent/dashboard ────────────────────────────────────────────────
@@ -71,8 +82,14 @@ router.get('/dashboard', requireParent, async (req, res) => {
       return res.json({ children: [], child: null, weekAttendance: {}, recentGrades: [], outstandingBalance: 0, recentAnnouncements: [] });
     }
     const child = req.query.child_id
-      ? (children.find(c => c.id === parseInt(req.query.child_id)) || children[0])
+      ? children.find(c => c.id === parseInt(req.query.child_id))
       : children[0];
+    if (req.query.child_id && !child) {
+      return res.status(403).json({ message: 'That student is not linked to your account' });
+    }
+    if (!child) {
+      return res.json({ children, child: null, weekAttendance: {}, recentGrades: [], outstandingBalance: 0, recentAnnouncements: [] });
+    }
 
     const [attendanceRes, gradesRes, invoiceRes, announcementsRes] = await Promise.all([
       db.query(`
@@ -137,6 +154,7 @@ router.get('/dashboard', requireParent, async (req, res) => {
 router.get('/attendance', requireParent, async (req, res) => {
   try {
     const child = await resolveChild(req.user.id, req.query.child_id);
+    if (!child) return res.json({ records: [], summary: {}, child: null, children: [] });
     const { month, year } = req.query;
     let where = 'WHERE student_id = $1';
     const params = [child.id];
@@ -161,6 +179,7 @@ router.get('/grades', requireParent, async (req, res) => {
   try {
     const child = await resolveChild(req.user.id, req.query.child_id);
     const children = await getChildren(req.user.id);
+    if (!child) return res.json({ submissions: [], pendingTasks: [], child: null, children });
 
     const [submissionsRes, childInfoRes] = await Promise.all([
       db.query(`
@@ -198,6 +217,7 @@ router.get('/announcements', requireParent, async (req, res) => {
   try {
     const child = await resolveChild(req.user.id, req.query.child_id);
     const children = await getChildren(req.user.id);
+    if (!child) return res.json({ announcements: [], child: null, children });
     const result = await db.query(`
       SELECT a.id, a.title, a.content, a.created_at,
              u.first_name||' '||u.last_name AS author, g.name AS grade_name
@@ -221,6 +241,7 @@ router.get('/invoices', requireParent, async (req, res) => {
   try {
     const child = await resolveChild(req.user.id, req.query.child_id);
     const children = await getChildren(req.user.id);
+    if (!child) return res.json({ invoices: [], totals: { totalDue: 0, totalPaid: 0, outstanding: 0 }, child: null, children });
     const result = await db.query(`
       SELECT id, amount_due, amount_paid, outstanding_balance, status, due_date,
              COALESCE(description, '') AS description, reference_number
@@ -284,25 +305,91 @@ router.post('/push/unsubscribe', requireParent, async (req, res) => {
 // ─── GET /api/parent/documents ───────────────────────────────────────────────
 router.get('/documents', requireParent, async (req, res) => {
   try {
-    const child = await resolveChild(req.user.id, req.query.child_id);
     const children = await getChildren(req.user.id);
+    if (children.length === 0) {
+      return res.json({ documents: [], child: null, children: [] });
+    }
+    if (!req.query.child_id) {
+      return res.status(400).json({ message: 'child_id is required to access school documents' });
+    }
+    const child = await resolveChild(req.user.id, req.query.child_id);
+    if (!child) return res.json({ documents: [], child: null, children });
     const result = await db.query(`
       SELECT d.id, d.title, d.description, d.document_type,
              d.original_file_name, d.file_size, d.uploaded_at,
-             d.s3_key, d.s3_url, d.target_audience,
+             d.target_audience,
              u.first_name||' '||u.last_name AS uploaded_by
       FROM documents d
       JOIN users u ON d.uploaded_by = u.id
       WHERE d.is_active = true
         AND d.target_audience IN ('everyone', 'parents')
+        AND EXISTS (
+          SELECT 1 FROM parent_students ps
+          JOIN users child_user ON child_user.id = ps.student_id
+          WHERE ps.parent_id = $1
+            AND (d.grade_id IS NULL OR child_user.grade_id = d.grade_id)
+            AND (d.class_id IS NULL OR child_user.class_id = d.class_id)
+            AND child_user.id = $2
+        )
       ORDER BY d.uploaded_at DESC
-    `);
+    `, [req.user.id, child.id]);
     res.json({ documents: result.rows, child, children });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ message: err.message });
     console.error('Parent documents error:', err);
     res.status(500).json({ message: 'Server error' });
   }
+});
+
+// Parent-only file access. Storage locators are never exposed in JSON.
+async function getParentDocument(parentId, documentId, childId) {
+  if (!childId) throw Object.assign(new Error('child_id is required'), { status: 400 });
+  const result = await db.query(`
+    SELECT d.id, d.title, d.original_file_name, d.file_name, d.s3_key, d.file_path
+    FROM documents d
+    WHERE d.id = $1 AND d.is_active = true
+      AND d.target_audience IN ('everyone', 'parents')
+      AND EXISTS (
+        SELECT 1 FROM parent_students ps
+        JOIN users child_user ON child_user.id = ps.student_id
+          WHERE ps.parent_id = $2 AND ps.student_id = $3
+          AND (d.grade_id IS NULL OR child_user.grade_id = d.grade_id)
+          AND (d.class_id IS NULL OR child_user.class_id = d.class_id)
+      )
+  `, [documentId, parentId, childId]);
+  return result.rows[0];
+}
+
+async function serveParentDocument(req, res, inline) {
+  const document = await getParentDocument(req.user.id, req.params.id, req.query.child_id);
+  if (!document) return res.status(404).json({ message: 'Document not found' });
+  const name = String(document.original_file_name || document.file_name || 'document')
+    .replace(/[\r\n"]/g, '_');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  const ext = String(name).toLowerCase().split('.').pop();
+  const contentTypes = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg',
+    jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', txt: 'text/plain' };
+  res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${name}"`);
+  if (document.s3_key) {
+    const s3Service = require('../services/s3Service');
+    return res.send(await s3Service.getFileContent(document.s3_key));
+  }
+  if (document.file_path && fs.existsSync(document.file_path)) {
+    return fs.createReadStream(document.file_path).pipe(res);
+  }
+  return res.status(404).json({ message: 'Document file is not available' });
+}
+
+router.get('/documents/:id/view', requireParent, async (req, res) => {
+  try { return await serveParentDocument(req, res, true); }
+  catch (err) { if (err.status) return res.status(err.status).json({ message: err.message }); console.error('Parent document view error:', err); return res.status(404).json({ message: 'Document file is not available' }); }
+});
+
+router.get('/documents/:id/download', requireParent, async (req, res) => {
+  try { return await serveParentDocument(req, res, false); }
+  catch (err) { if (err.status) return res.status(err.status).json({ message: err.message }); console.error('Parent document download error:', err); return res.status(404).json({ message: 'Document file is not available' }); }
 });
 
 // ─── POST /api/parent/change-password ────────────────────────────────────────
@@ -398,9 +485,23 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
 
   const normalizedPhone = normalizePhone(phone_number);
 
+  let client;
   try {
+    client = await db.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const normalizedStudents = [...new Set(students.map(Number))];
+      if (normalizedStudents.some(id => !Number.isInteger(id) || id <= 0)) {
+        throw Object.assign(new Error('student_ids must contain valid learner IDs'), { status: 400 });
+      }
+      const validStudents = await client.query(
+        `SELECT id, first_name, last_name, student_number FROM users
+         WHERE id = ANY($1::int[]) AND role='student'`, [normalizedStudents]);
+      if (validStudents.rows.length !== normalizedStudents.length) {
+        throw Object.assign(new Error('Every student_id must identify an existing learner'), { status: 400 });
+      }
     // Check if parent with this phone already exists
-    const existing = await db.query(
+    const existing = await client.query(
       `SELECT id FROM users WHERE phone_number=$1 AND role='parent'`, [normalizedPhone]
     );
 
@@ -415,7 +516,7 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
       tempPassword = generateTempPassword();
       const hashed = await bcrypt.hash(tempPassword, 12);
 
-      const userResult = await db.query(`
+      const userResult = await client.query(`
         INSERT INTO users (first_name, last_name, phone_number, email, password, role, is_active, must_change_password)
         VALUES ($1, $2, $3, $4, $5, 'parent', true, true)
         RETURNING id, first_name, last_name, phone_number, role, created_at
@@ -428,21 +529,22 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
     const linked = [];
     const failed = [];
     for (const sid of students) {
-      const studentCheck = await db.query(
-        `SELECT id, first_name, last_name, student_number FROM users WHERE id=$1 AND role='student'`, [sid]
-      );
-      if (studentCheck.rows.length === 0) { failed.push(sid); continue; }
-
       try {
-        await db.query(`
+        await client.query(`
           INSERT INTO parent_students (parent_id, student_id)
           VALUES ($1, $2)
           ON CONFLICT (parent_id, student_id) DO NOTHING
         `, [parentId, sid]);
-        linked.push(studentCheck.rows[0]);
-      } catch { failed.push(sid); }
+        linked.push(validStudents.rows.find(s => s.id === Number(sid)));
+      } catch { throw Object.assign(new Error(`Unable to link student ${sid}`), { status: 400 }); }
     }
 
+    await logAudit({ executor: client, required: true, userId: req.user.id,
+      userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'parent_create_or_link', entityType: 'parent',
+      entityId: parentId, details: { studentIds: students }, ipAddress: getIp(req) });
+    await client.query('COMMIT');
+    client.release();
     res.status(201).json({
       success: true,
       message: existing.rows.length > 0 ? 'Students added to existing parent account' : 'Parent account created',
@@ -452,7 +554,13 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
       failedStudents: failed,
       isExisting: existing.rows.length > 0,
     });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      client.release();
+      throw err;
+    }
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message });
     console.error('Create parent error:', err);
     res.status(500).json({ message: 'Server error' });
   }
@@ -463,7 +571,29 @@ router.put('/admin/:parentId', requireAdmin, async (req, res) => {
   const { parentId } = req.params;
   const { first_name, last_name, phone_number, email, password, is_active, add_student_ids, remove_student_ids } = req.body;
 
+  let client;
   try {
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const parentCheck = await client.query(`SELECT id FROM users WHERE id=$1 AND role='parent' FOR UPDATE`, [parentId]);
+    if (!parentCheck.rows.length) {
+      await client.query('ROLLBACK'); client.release();
+      return res.status(404).json({ message: 'Parent account not found' });
+    }
+    const additions = Array.isArray(add_student_ids) ? [...new Set(add_student_ids.map(Number))] : [];
+    const removals = Array.isArray(remove_student_ids) ? [...new Set(remove_student_ids.map(Number))] : [];
+    const allStudentIds = [...new Set([...additions, ...removals])];
+    if (allStudentIds.some(id => !Number.isInteger(id) || id <= 0)) {
+      await client.query('ROLLBACK'); client.release();
+      return res.status(400).json({ message: 'Student IDs must be valid learner IDs' });
+    }
+    if (allStudentIds.length) {
+      const valid = await client.query(`SELECT id FROM users WHERE id=ANY($1::int[]) AND role='student'`, [allStudentIds]);
+      if (valid.rows.length !== allStudentIds.length) {
+        await client.query('ROLLBACK'); client.release();
+        return res.status(400).json({ message: 'Every linked ID must identify an existing learner' });
+      }
+    }
     const sets = [];
     const params = [];
     if (first_name  !== undefined) { params.push(first_name);                    sets.push(`first_name=$${params.length}`); }
@@ -479,27 +609,36 @@ router.put('/admin/:parentId', requireAdmin, async (req, res) => {
 
     if (sets.length > 0) {
       params.push(parentId);
-      await db.query(
+      await client.query(
         `UPDATE users SET ${sets.join(', ')}, updated_at=NOW() WHERE id=$${params.length} AND role='parent'`, params
       );
     }
 
     if (Array.isArray(add_student_ids)) {
       for (const sid of add_student_ids) {
-        await db.query(
+        await client.query(
           `INSERT INTO parent_students(parent_id,student_id) VALUES($1,$2) ON CONFLICT(parent_id,student_id) DO NOTHING`,
           [parentId, sid]
-        ).catch(() => {});
+        );
       }
     }
     if (Array.isArray(remove_student_ids)) {
       for (const sid of remove_student_ids) {
-        await db.query(`DELETE FROM parent_students WHERE parent_id=$1 AND student_id=$2`, [parentId, sid]);
+        await client.query(`DELETE FROM parent_students WHERE parent_id=$1 AND student_id=$2`, [parentId, sid]);
       }
     }
 
+    await logAudit({ executor: client, required: true, userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'parent_update', entityType: 'parent', entityId: parentId,
+      details: { addedStudentIds: additions, removedStudentIds: removals }, ipAddress: getIp(req) });
+    await client.query('COMMIT');
+    client.release();
     res.json({ success: true, message: 'Parent account updated' });
   } catch (err) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      client.release();
+    }
     console.error('Update parent error:', err);
     res.status(500).json({ message: 'Server error' });
   }
@@ -507,11 +646,24 @@ router.put('/admin/:parentId', requireAdmin, async (req, res) => {
 
 // DELETE /api/parent/admin/:parentId
 router.delete('/admin/:parentId', requireAdmin, async (req, res) => {
+  let client;
   try {
-    await db.query(`DELETE FROM parent_students WHERE parent_id=$1`, [req.params.parentId]);
-    await db.query(`DELETE FROM users WHERE id=$1 AND role='parent'`, [req.params.parentId]);
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const parent = await client.query(`SELECT id FROM users WHERE id=$1 AND role='parent' FOR UPDATE`, [req.params.parentId]);
+    if (!parent.rows.length) {
+      await client.query('ROLLBACK'); client.release();
+      return res.status(404).json({ message: 'Parent account not found' });
+    }
+    await client.query(`DELETE FROM parent_students WHERE parent_id=$1`, [req.params.parentId]);
+    await client.query(`DELETE FROM users WHERE id=$1 AND role='parent'`, [req.params.parentId]);
+    await logAudit({ executor: client, required: true, userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'parent_delete', entityType: 'parent', entityId: req.params.parentId, ipAddress: getIp(req) });
+    await client.query('COMMIT');
+    client.release();
     res.json({ success: true, message: 'Parent account deleted' });
   } catch (err) {
+    if (client) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); }
     console.error('Delete parent error:', err);
     res.status(500).json({ message: 'Server error' });
   }
@@ -536,66 +688,41 @@ router.get('/welcome-password', (req, res) => {
   res.status(404).json({ message: 'Not found' });
 });
 
-// POST /api/parent/admin/sync-enrollments – auto-create parents from enrollment data
-router.post('/admin/sync-enrollments', requireAdmin, async (req, res) => {
+// Direct admin link. The current enrollment schema stores applicant names and
+// contact fields but no durable learner/parent foreign keys, so it cannot prove
+// enrollment provenance. Keep that distinction explicit and never infer a link.
+router.post('/admin/direct-link', requireAdmin, async (req, res) => {
+  const studentId = Number(req.body?.student_id);
+  const parentId = Number(req.body?.parent_id);
+  if (![studentId, parentId].every(Number.isInteger) || studentId <= 0 || parentId <= 0) {
+    return res.status(400).json({ message: 'student_id and parent_id are required learner/account identifiers' });
+  }
+  let client;
   try {
-    // Pull enrollment records that have a parent_phone
-    const enrollments = await db.query(`
-      SELECT DISTINCT e.parent_phone, e.parent_first_name, e.parent_last_name, e.parent_email,
-             u.id AS student_id
-      FROM enrollments e
-      JOIN users u ON (
-        LOWER(u.first_name) = LOWER(e.student_first_name)
-        AND LOWER(u.last_name) = LOWER(e.student_last_name)
-        AND u.role = 'student'
-      )
-      WHERE e.parent_phone IS NOT NULL AND e.parent_phone != ''
-        AND e.status = 'approved'
-    `);
-
-    let created = 0, linked = 0, skipped = 0;
-
-    for (const row of enrollments.rows) {
-      const normalizedPhone = normalizePhone(row.parent_phone);
-      if (!normalizedPhone) { skipped++; continue; }
-
-      // Check existing parent
-      const existing = await db.query(
-        `SELECT id FROM users WHERE phone_number=$1 AND role='parent'`, [normalizedPhone]
-      );
-
-      let parentId;
-      if (existing.rows.length === 0) {
-        const tempPass = generateTempPassword();
-        const hashed   = await bcrypt.hash(tempPass, 12);
-        const pr = await db.query(`
-          INSERT INTO users (first_name, last_name, phone_number, email, password, role, is_active, must_change_password)
-          VALUES ($1, $2, $3, $4, $5, 'parent', true, true)
-          RETURNING id
-        `, [row.parent_first_name||'Parent', row.parent_last_name||'', normalizedPhone, row.parent_email||null, hashed]);
-        parentId = pr.rows[0].id;
-        created++;
-      } else {
-        parentId = existing.rows[0].id;
-      }
-
-      if (row.student_id) {
-        const before = await db.query(
-          `SELECT id FROM parent_students WHERE parent_id=$1 AND student_id=$2`, [parentId, row.student_id]
-        );
-        if (before.rows.length === 0) {
-          await db.query(
-            `INSERT INTO parent_students(parent_id,student_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, [parentId, row.student_id]
-          );
-          linked++;
-        } else { skipped++; }
-      }
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const student = await client.query(`SELECT id FROM users WHERE id=$1 AND role='student' FOR UPDATE`, [studentId]);
+    const parent = await client.query(`SELECT id FROM users WHERE id=$1 AND role='parent' FOR UPDATE`, [parentId]);
+    if (!student.rows.length || !parent.rows.length) {
+      await client.query('ROLLBACK'); client.release();
+      return res.status(400).json({ message: 'Learner and parent identifiers must exist' });
     }
-
-    res.json({ success: true, created, linked, skipped });
+    const link = await client.query(`
+      INSERT INTO parent_students (parent_id, student_id) VALUES ($1, $2)
+      ON CONFLICT (parent_id, student_id) DO NOTHING RETURNING id
+    `, [parentId, studentId]);
+    await logAudit({ executor: client, required: true, userId: req.user.id,
+      userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role, action: 'parent_direct_link',
+      entityType: 'parent_student', entityId: link.rows[0]?.id || null,
+      details: { studentId, parentId, directAdminLink: true, created: link.rows.length > 0 },
+      ipAddress: getIp(req) });
+    await client.query('COMMIT'); client.release();
+    return res.status(201).json({ success: true, created: link.rows.length > 0 });
   } catch (err) {
-    console.error('Sync enrollments error:', err);
-    res.status(500).json({ message: 'Server error: ' + err.message });
+    if (client) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); }
+    console.error('Explicit enrollment link error:', err);
+    return res.status(err.status || 500).json({ message: err.status ? err.message : 'Server error' });
   }
 });
 

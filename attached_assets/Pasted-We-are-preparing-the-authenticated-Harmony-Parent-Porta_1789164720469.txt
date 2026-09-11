@@ -1,0 +1,126 @@
+We are preparing the authenticated Harmony Parent Portal for real parent rollout by Monday.
+
+Phase 1 is Parent Portal Correctness & Security Hardening only.
+
+Do not add new product features yet.
+Do not redesign the UI yet.
+Do not deploy automatically.
+Do not run migrations automatically.
+
+Existing parent accounts and learner links must be preserved.
+
+1. Fix multi-learner isolation everywhere
+
+The Parent Portal currently allows a parent to choose a learner, but several API endpoints still silently use the first linked learner.
+
+Fix every parent-facing endpoint so:
+
+the selected learner ID is explicitly provided
+backend verifies that learner belongs to the authenticated parent
+invalid or unauthorized learner IDs are rejected
+never silently fall back to the first learner when a learner ID was supplied
+zero-child accounts return a safe empty state
+
+Audit:
+
+dashboard
+attendance
+grades
+announcements where learner context matters
+school documents
+invoices
+fees
+payment proof
+enrolled services
+
+Add cross-child isolation tests proving Parent A cannot access another parent's learner and selecting Learner B never returns Learner A's information.
+
+2. Centralize banking details
+
+Audit all Parent Portal payment/fees screens.
+
+Use one authoritative server-side school banking configuration.
+
+Verified Harmony details:
+
+FNB / First National Bank
+Account Holder: Harmony Learning Institute
+Account Number: 63035320265
+Branch Code: 250655
+
+Remove conflicting hard-coded account numbers.
+
+3. Make payment-proof approval safe
+
+Payment approval must:
+
+run in one database transaction
+lock or conditionally update the pending proof
+prevent the same proof being approved twice
+apply payment allocation once
+roll back everything if any step fails
+be idempotent
+
+Test concurrent Admin approval attempts.
+
+4. Harden payment receipt uploads
+
+Bring payment-receipt validation to the same security standard as admissions uploads:
+
+PDF/JPEG/PNG only
+size limits
+magic-byte/signature validation
+reject MIME/signature mismatches
+reject invalid numeric amounts, infinity, excessive decimal precision, oversized notes/references and unsupported payment methods
+5. Secure Parent Portal documents
+
+Parent document APIs must return safe metadata only.
+
+Do not return:
+
+S3 keys
+storage paths
+direct private object URLs
+internal implementation metadata
+
+Use an authenticated secure download/view endpoint and verify parents cannot access staff-only, unpublished, deleted, private admissions or unrelated learner documents.
+
+6. Harden parent/learner management
+
+Preserve existing parent-child links.
+
+Fix create/update/link/unlink operations so they:
+
+verify the parent exists
+verify linked users are valid learner records
+use transactions for parent + learner link changes
+roll back partial failures
+audit changes
+never synchronize learners by first/last name
+
+Use stable learner/enrollment/application identifiers.
+
+Do not automatically relink existing parents during this phase.
+
+Tests
+
+Build comprehensive Parent Portal tests covering:
+
+login
+zero learners
+one learner
+multiple learners
+unauthorized learner access
+attendance isolation
+grades isolation
+invoice/payment isolation
+document isolation
+payment approval concurrency
+parent linking/unlinking
+API response-field safety
+
+Preserve Student Portal retirement and all working admissions functionality.
+
+Return the exact bugs found, fixes made, files changed, tests passed, whether a migration is required, and independent security review findings.
+
+Do not deploy.

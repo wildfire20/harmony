@@ -1,4 +1,5 @@
 const express = require('express');
+const BANKING_DETAILS = require('../config/bankingDetails');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
@@ -1168,22 +1169,22 @@ router.get('/student-payment-history/:studentNumber', [
       worksheet.getCell(`A${bankingRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
       
       worksheet.getCell(`A${bankingRow + 1}`).value = 'Name of Bank:';
-      worksheet.getCell(`B${bankingRow + 1}`).value = 'First National Bank (FNB)';
+      worksheet.getCell(`B${bankingRow + 1}`).value = BANKING_DETAILS.bank;
       worksheet.getCell(`B${bankingRow + 1}`).font = { bold: true };
       
       worksheet.getCell(`A${bankingRow + 2}`).value = 'Account Holder:';
-      worksheet.getCell(`B${bankingRow + 2}`).value = 'HARMONY LEARNING INSTITUTE';
+      worksheet.getCell(`B${bankingRow + 2}`).value = BANKING_DETAILS.accountHolder;
       worksheet.getCell(`B${bankingRow + 2}`).font = { bold: true };
       
       worksheet.getCell(`A${bankingRow + 3}`).value = 'Type of Account:';
-      worksheet.getCell(`B${bankingRow + 3}`).value = 'CHEQUE';
+      worksheet.getCell(`B${bankingRow + 3}`).value = BANKING_DETAILS.accountType;
       
       worksheet.getCell(`A${bankingRow + 4}`).value = 'Account Number:';
-      worksheet.getCell(`B${bankingRow + 4}`).value = '63035320265';
+      worksheet.getCell(`B${bankingRow + 4}`).value = BANKING_DETAILS.accountNumber;
       worksheet.getCell(`B${bankingRow + 4}`).font = { bold: true, size: 12 };
       
       worksheet.getCell(`A${bankingRow + 5}`).value = 'Branch Code:';
-      worksheet.getCell(`B${bankingRow + 5}`).value = '210755';
+      worksheet.getCell(`B${bankingRow + 5}`).value = BANKING_DETAILS.branchCode;
       worksheet.getCell(`B${bankingRow + 5}`).font = { bold: true };
       
       worksheet.getCell(`A${bankingRow + 6}`).value = 'Reference:';

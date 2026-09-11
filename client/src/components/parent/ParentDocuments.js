@@ -46,11 +46,12 @@ const ParentDocuments = ({ child }) => {
   const [filter, setFilter] = useState('all');
 
   useEffect(() => {
-    parentApi('/documents')
+    if (!child?.id) return;
+    parentApi(`/documents?child_id=${encodeURIComponent(child?.id || '')}`)
       .then((d) => setDocuments(d.documents || []))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [child?.id]);
 
   const types = ['all', ...Array.from(new Set(documents.map(d => d.document_type).filter(Boolean)))];
 
@@ -67,7 +68,7 @@ const ParentDocuments = ({ child }) => {
 
   const handleDownload = async (doc) => {
     try {
-      const blob = await fetchDocument(`/api/documents/download/${doc.id}`);
+       const blob = await fetchDocument(`/api/parent/documents/${doc.id}/download?child_id=${encodeURIComponent(child?.id || '')}`);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -88,7 +89,7 @@ const ParentDocuments = ({ child }) => {
     }
     opened.opener = null;
     try {
-      const blob = await fetchDocument(`/api/documents/view/${doc.id}`);
+       const blob = await fetchDocument(`/api/parent/documents/${doc.id}/view?child_id=${encodeURIComponent(child?.id || '')}`);
       const url = URL.createObjectURL(blob);
       opened.location.href = url;
       setTimeout(() => URL.revokeObjectURL(url), 60000);

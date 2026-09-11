@@ -41,7 +41,7 @@ const ParentGrades = ({ child }) => {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [child?.id]);
 
   const graded = submissions.filter((s) => s.score !== null);
   const avgPct = graded.length > 0

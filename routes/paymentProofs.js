@@ -7,24 +7,76 @@ const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const s3Service = require('../services/s3Service');
 const { logAudit, getIp } = require('../utils/auditLogger');
+const { detectType } = require('../services/admissionsDocumentService');
 
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin = [authenticate, authorize('admin', 'super_admin')];
 
 // ─── Multer setup (memory for S3 or durable database storage) ────────────────
 const storage = multer.memoryStorage();
+const MAX_RECEIPT_SIZE = 10 * 1024 * 1024;
+const isAllowedReceiptName = (file) => {
+  const extension = path.extname(file.originalname).toLowerCase();
+  const mimeByExtension = { '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png' };
+  return mimeByExtension[extension] === file.mimetype;
+};
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: MAX_RECEIPT_SIZE },
   fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|gif|pdf|webp/;
-    if (allowed.test(path.extname(file.originalname).toLowerCase()) || allowed.test(file.mimetype)) {
+    if (isAllowedReceiptName(file)) {
       cb(null, true);
     } else {
       cb(new Error('Only images and PDF files are allowed'));
     }
   }
 });
+const validateReceiptFile = (file) => {
+  if (!file || !Buffer.isBuffer(file.buffer) || file.buffer.length < 1 || file.buffer.length > MAX_RECEIPT_SIZE) {
+    return { ok: false, message: 'Receipt must be no larger than 10MB' };
+  }
+  const detected = detectType(file.buffer);
+  if (!detected || detected.mime !== file.mimetype) {
+    return { ok: false, message: 'Receipt must be a valid PDF, JPEG, or PNG matching its MIME type' };
+  }
+  return { ok: true, detected };
+};
+// Multer invokes its callback before the async route handler. Keep upload
+// failures out of the generic Express error path and validate the bytes here
+// as well, before any database or object-storage work begins.
+const uploadReceipt = (req, res, next) => {
+  upload.single('receipt')(req, res, (err) => {
+    if (err) {
+      const isSizeError = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE';
+      const message = isSizeError
+        ? 'Receipt must be no larger than 10MB'
+        : 'Receipt must be a PDF, JPEG, or PNG no larger than 10MB';
+      return res.status(400).json({ message });
+    }
+    if (req.file) {
+      const validation = validateReceiptFile(req.file);
+      if (!validation.ok) {
+        return res.status(400).json({ message: validation.message });
+      }
+    }
+    return next();
+  });
+};
+
+const MAX_AMOUNT = 100000000;
+const PAYMENT_METHODS = new Set(['cash', 'atm', 'eft', 'bank_transfer', 'card', 'debit_order', 'online']);
+const parseAmount = (value) => {
+  const text = String(value ?? '').trim();
+  if (!/^(?:0|[1-9]\d{0,8})(?:\.\d{1,2})?$/.test(text)) throw { status: 400, message: 'Amount must be a finite positive value with at most two decimal places' };
+  const amount = Number(text);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_AMOUNT) throw { status: 400, message: 'Amount must be a finite positive value within the allowed range' };
+  return amount;
+};
+const boundedText = (value, max, name) => {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string' || value.length > max) throw { status: 400, message: `${name} is too long` };
+  return value.trim() || null;
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const resolveChild = async (parentId, childId) => {
@@ -33,20 +85,24 @@ const resolveChild = async (parentId, childId) => {
     : `SELECT u.* FROM users u JOIN parent_students ps ON ps.student_id=u.id WHERE ps.parent_id=$1 LIMIT 1`;
   const params = childId ? [parentId, childId] : [parentId];
   const r = await db.query(q, params);
-  if (!r.rows.length) throw { status: 404, message: 'Child not found' };
+  if (!r.rows.length) {
+    if (!childId) return null;
+    throw { status: 403, message: 'That student is not linked to your account' };
+  }
   return r.rows[0];
 };
 
-const applyPaymentToInvoices = async (studentId, amount, proofId, adminId) => {
+const applyPaymentToInvoices = async (executor, studentId, amount, proofId, adminId) => {
   let remaining = parseFloat(amount);
   const txIds = [];
 
   // Get oldest unpaid/partial invoices first
-  const invoices = await db.query(`
+  const invoices = await executor.query(`
     SELECT id, amount_due, amount_paid, outstanding_balance, reference_number
     FROM invoices
     WHERE student_id = $1 AND status IN ('Unpaid', 'Partial')
     ORDER BY due_date ASC
+    FOR UPDATE
   `, [studentId]);
 
   for (const inv of invoices.rows) {
@@ -58,12 +114,12 @@ const applyPaymentToInvoices = async (studentId, amount, proofId, adminId) => {
       ? (newPaid > parseFloat(inv.amount_due) ? 'Overpaid' : 'Paid')
       : 'Partial';
 
-    await db.query(`
+    await executor.query(`
       UPDATE invoices SET amount_paid = $1, status = $2, updated_at = CURRENT_TIMESTAMP
       WHERE id = $3
     `, [newPaid.toFixed(2), newStatus, inv.id]);
 
-    const tx = await db.query(`
+    const tx = await executor.query(`
       INSERT INTO payment_transactions
         (invoice_id, student_id, amount, payment_date, payment_method, description, status, recorded_by)
       VALUES ($1, $2, $3, CURRENT_DATE, 'proof_of_payment', $4, 'Matched', $5)
@@ -77,7 +133,7 @@ const applyPaymentToInvoices = async (studentId, amount, proofId, adminId) => {
 
   // If there's still remaining amount (paid more than all outstanding), record as unmatched
   if (remaining > 0.009) {
-    const tx = await db.query(`
+    const tx = await executor.query(`
       INSERT INTO payment_transactions
         (student_id, amount, payment_date, payment_method, description, status, recorded_by)
       VALUES ($1, $2, CURRENT_DATE, 'proof_of_payment', $3, 'Unmatched', $4)
@@ -90,23 +146,32 @@ const applyPaymentToInvoices = async (studentId, amount, proofId, adminId) => {
 };
 
 // ─── POST /api/payment-proofs  (parent submits proof) ────────────────────────
-router.post('/', requireParent, upload.single('receipt'), async (req, res) => {
+router.post('/', requireParent, uploadReceipt, async (req, res) => {
   try {
     const { amount, payment_method, reference, notes, child_id } = req.body;
     if (!amount || !payment_method) {
       return res.status(400).json({ message: 'Amount and payment method are required' });
     }
-    if (parseFloat(amount) <= 0) {
-      return res.status(400).json({ message: 'Amount must be greater than zero' });
+    const normalizedAmount = parseAmount(amount);
+    if (typeof payment_method !== 'string' || !PAYMENT_METHODS.has(payment_method.trim().toLowerCase())) {
+      return res.status(400).json({ message: 'Unsupported payment method' });
     }
+    const normalizedMethod = payment_method.trim().toLowerCase();
+    const normalizedReference = boundedText(reference, 255, 'Reference');
+    const normalizedNotes = boundedText(notes, 2000, 'Notes');
 
     const child = await resolveChild(req.user.id, child_id);
+    if (!child) return res.status(404).json({ message: 'No child linked to this account' });
 
     let receiptFileName = null, receiptFilePath = null, receiptS3Key = null, receiptS3Url = null, receiptMime = null, receiptData = null;
 
     if (req.file) {
+      const detected = detectType(req.file.buffer);
+      if (!detected || detected.mime !== req.file.mimetype) {
+        return res.status(400).json({ message: 'Receipt must be a valid PDF, JPEG, or PNG matching its MIME type' });
+      }
       receiptFileName = req.file.originalname;
-      receiptMime = req.file.mimetype;
+      receiptMime = detected.mime;
       // Always store the raw buffer in the database for reliable retrieval across deployments
       receiptData = req.file.buffer;
 
@@ -127,13 +192,22 @@ router.post('/', requireParent, upload.single('receipt'), async (req, res) => {
          receipt_file_name, receipt_file_path, receipt_s3_key, receipt_s3_url, receipt_mime_type, receipt_data)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       RETURNING *
-    `, [req.user.id, child.id, parseFloat(amount).toFixed(2), payment_method,
-        reference || null, notes || null,
+    `, [req.user.id, child.id, normalizedAmount.toFixed(2), normalizedMethod,
+        normalizedReference, normalizedNotes,
         receiptFileName, receiptFilePath, receiptS3Key, receiptS3Url, receiptMime, receiptData]);
 
-    res.status(201).json({ message: 'Proof of payment submitted successfully', submission: result.rows[0] });
+    const submission = result.rows[0];
+    res.status(201).json({
+      message: 'Proof of payment submitted successfully',
+      submission: { id: submission.id, amount: submission.amount, payment_method: submission.payment_method,
+        reference: submission.reference, status: submission.status, submitted_at: submission.submitted_at }
+    });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ message: err.message });
+    if (err instanceof multer.MulterError || err.message?.includes('Only valid') ||
+        err.message?.includes('Only images') || err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: err.message });
+    }
     console.error('Submit proof error:', err);
     res.status(500).json({ message: 'Server error submitting proof of payment' });
   }
@@ -143,8 +217,12 @@ router.post('/', requireParent, upload.single('receipt'), async (req, res) => {
 router.get('/my', requireParent, async (req, res) => {
   try {
     const child = await resolveChild(req.user.id, req.query.child_id);
+    if (!child) return res.json({ submissions: [] });
     const result = await db.query(`
-      SELECT pp.*, u.first_name AS student_first_name, u.last_name AS student_last_name,
+      SELECT pp.id, pp.student_id, pp.amount, pp.payment_method, pp.reference, pp.notes,
+             pp.receipt_file_name, pp.receipt_mime_type, pp.status, pp.submitted_at,
+             pp.reviewed_at, pp.admin_note,
+             u.first_name AS student_first_name, u.last_name AS student_last_name,
              rb.first_name AS reviewed_by_first_name, rb.last_name AS reviewed_by_last_name
       FROM pending_payments pp
       JOIN users u ON u.id = pp.student_id
@@ -217,25 +295,34 @@ router.get('/:id/receipt', authenticate, async (req, res) => {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    const mime = proof.receipt_mime_type || 'application/octet-stream';
+    const mime = proof.receipt_mime_type;
+    if (!['application/pdf', 'image/jpeg', 'image/png'].includes(mime)) {
+      return res.status(404).json({ message: 'Receipt file not found' });
+    }
     const fileName = String(proof.receipt_file_name || 'receipt').replace(/[\r\n"]/g, '_');
+    const sendValidated = (content) => {
+      const detected = detectType(content);
+      if (!detected || detected.mime !== mime) return false;
+      res.setHeader('Content-Type', detected.mime);
+      res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(content);
+      return true;
+    };
 
     // 1. Serve from database (most reliable — survives Railway redeploys)
     if (proof.receipt_data) {
-      res.setHeader('Content-Type', mime);
-      res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
-      res.setHeader('Cache-Control', 'private, max-age=300');
-      return res.send(proof.receipt_data);
+      if (sendValidated(proof.receipt_data)) return;
+      return res.status(404).json({ message: 'Receipt file not found' });
     }
 
     // 2. Proxy S3 content through this authenticated route.
     if (proof.receipt_s3_key && s3Service.isConfigValid) {
       try {
         const fileContent = await s3Service.getFileContent(proof.receipt_s3_key);
-        res.setHeader('Content-Type', mime);
-        res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
-        res.setHeader('Cache-Control', 'private, max-age=300');
-        return res.send(fileContent);
+        if (sendValidated(fileContent)) return;
+        return res.status(404).json({ message: 'Receipt file not found' });
       } catch (e) { console.warn('S3 receipt retrieval failed:', e.message); }
     }
 
@@ -248,9 +335,9 @@ router.get('/:id/receipt', authenticate, async (req, res) => {
         return res.status(404).json({ message: 'Receipt file not found' });
       }
       if (fs.existsSync(localPath)) {
-        res.setHeader('Content-Type', mime);
-        res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
-        return fs.createReadStream(localPath).pipe(res);
+        const content = fs.readFileSync(localPath);
+        if (sendValidated(content)) return;
+        return res.status(404).json({ message: 'Receipt file not found' });
       }
     }
 
@@ -284,18 +371,31 @@ router.delete('/:id', requireAdmin, async (req, res) => {
 
 // ─── POST /api/payment-proofs/:id/approve  (admin approves) ──────────────────
 router.post('/:id/approve', requireAdmin, async (req, res) => {
+  let client;
   try {
-    const proof = (await db.query('SELECT * FROM pending_payments WHERE id=$1', [req.params.id])).rows[0];
-    if (!proof) return res.status(404).json({ message: 'Submission not found' });
-    if (proof.status !== 'pending') return res.status(400).json({ message: `This submission is already ${proof.status}` });
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const proof = (await client.query('SELECT * FROM pending_payments WHERE id=$1 FOR UPDATE', [req.params.id])).rows[0];
+    if (!proof) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Submission not found' });
+    }
+    if (proof.status === 'approved') {
+      await client.query('COMMIT');
+      return res.json({ message: 'Payment proof was already approved', status: 'approved' });
+    }
+    if (proof.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ message: `This submission is already ${proof.status}` });
+    }
 
-    const { admin_note } = req.body;
-    const txIds = await applyPaymentToInvoices(proof.student_id, proof.amount, proof.id, req.user.id);
+    const admin_note = boundedText(req.body?.admin_note, 2000, 'Admin note');
+    const txIds = await applyPaymentToInvoices(client, proof.student_id, proof.amount, proof.id, req.user.id);
 
-    await db.query(`
+    await client.query(`
       UPDATE pending_payments
       SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, admin_note=$2
-      WHERE id=$3
+      WHERE id=$3 AND status='pending'
     `, [req.user.id, admin_note || null, proof.id]);
 
     await logAudit({
@@ -303,12 +403,19 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
       userRole: req.user.role, action: 'payment_proof_approve',
       entityType: 'payment_proof', entityId: proof.id,
       details: { summary: `Approved payment proof of R${proof.amount}`, amount: proof.amount, student_id: proof.student_id, admin_note: admin_note || null },
-      ipAddress: getIp(req)
+      ipAddress: getIp(req), executor: client, required: true
     });
-    res.json({ message: 'Payment approved and applied to student balance', transaction_ids: txIds });
+    await client.query('COMMIT');
+    res.json({ message: 'Payment approved and applied to student balance', status: 'approved', transaction_ids: txIds });
   } catch (err) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (rollbackError) { console.error('Approval rollback failed:', rollbackError.message); }
+    }
     console.error('Approve proof error:', err);
+    if (err.status) return res.status(err.status).json({ message: err.message });
     res.status(500).json({ message: 'Server error approving payment' });
+  } finally {
+    if (client) client.release();
   }
 });
 
@@ -341,3 +448,6 @@ router.post('/:id/reject', requireAdmin, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.validateReceiptFile = validateReceiptFile;
+module.exports.MAX_RECEIPT_SIZE = MAX_RECEIPT_SIZE;
+module.exports.isAllowedReceiptName = isAllowedReceiptName;

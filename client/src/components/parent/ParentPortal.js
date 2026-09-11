@@ -32,7 +32,11 @@ export const useParentAuth = () => {
 // ─── API helper (auto-injects auth + child_id) ────────────────────────────────
 export const parentApi = async (path, opts = {}) => {
   const token = localStorage.getItem('parentToken');
-  const res = await fetch(`/api/parent${path}`, {
+  const selected = JSON.parse(localStorage.getItem('parentChild') || 'null');
+  const requestPath = path.includes('child_id=') || !selected?.id
+    ? path
+    : `${path}${path.includes('?') ? '&' : '?'}child_id=${encodeURIComponent(selected.id)}`;
+  const res = await fetch(`/api/parent${requestPath}`, {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
@@ -211,8 +215,15 @@ const ParentPortal = () => {
         localStorage.setItem('parentChildren', JSON.stringify(freshChildren));
         // Update selectedChild with fresh data that includes up-to-date enrollment flags
         setSelectedChild(prev => {
+          if (freshChildren.length === 0) {
+            localStorage.removeItem('parentChild');
+            return null;
+          }
           const refreshed = freshChildren.find(c => c.id === (prev?.id || freshChildren[0]?.id));
-          const updated = refreshed || prev;
+          // Keep the current learner only when it is still linked. If an
+          // unlink occurred, fall back to the first learner returned by the
+          // server rather than restoring stale local state.
+          const updated = refreshed || freshChildren[0];
           localStorage.setItem('parentChild', JSON.stringify(updated));
           return updated;
         });

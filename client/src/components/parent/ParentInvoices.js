@@ -19,6 +19,7 @@ const ParentInvoices = ({ child }) => {
   const [totals, setTotals] = useState({ totalDue: 0, totalPaid: 0, outstanding: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [banking, setBanking] = useState(null);
 
   useEffect(() => {
     setLoading(true);
@@ -26,6 +27,7 @@ const ParentInvoices = ({ child }) => {
       .then((d) => { setInvoices(d.invoices || []); setTotals(d.totals || {}); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+    parentApi('/banking-details').then(d => setBanking(d.banking)).catch(() => {});
   }, [child?.id]);
 
   return (
@@ -122,11 +124,11 @@ const ParentInvoices = ({ child }) => {
           <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
             <p className="text-blue-800 font-semibold text-sm mb-2">Banking Details</p>
             <div className="space-y-1 text-xs text-blue-700">
-              <p><span className="font-medium">Bank:</span> First National Bank (FNB)</p>
-              <p><span className="font-medium">Account Holder:</span> Harmony Learning Institute</p>
-              <p><span className="font-medium">Account Number:</span> 63035320265</p>
-              <p><span className="font-medium">Branch Code:</span> 210755</p>
-              <p><span className="font-medium">Account Type:</span> Cheque</p>
+               <p><span className="font-medium">Bank:</span> {banking?.bank || 'Loading…'}</p>
+               <p><span className="font-medium">Account Holder:</span> {banking?.accountHolder || 'Loading…'}</p>
+               <p><span className="font-medium">Account Number:</span> {banking?.accountNumber || 'Loading…'}</p>
+               <p><span className="font-medium">Branch Code:</span> {banking?.branchCode || 'Loading…'}</p>
+               <p><span className="font-medium">Account Type:</span> {banking?.accountType || 'Loading…'}</p>
               <p className="mt-2 text-blue-600 font-semibold">
                 Reference: Use your child's student number ({child?.student_number || '—'})
               </p>
