@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 const StatCard = ({ label, value, sub, color, icon: Icon }) => (
-  <div className={`rounded-2xl p-4 flex items-center gap-4 ${color}`}>
+   <div className={`parent-stat rounded-2xl p-4 flex items-center gap-4 ${color}`}>
     <div className="p-2.5 bg-white/20 rounded-xl">
       <Icon className="h-5 w-5 text-white" />
     </div>
@@ -74,7 +74,7 @@ const ParentDashboard = ({ child, user }) => {
             label="Rate"
             value={attendanceRate !== null ? `${attendanceRate}%` : '–'}
             sub={`of ${weekAttendance?.total ?? 0} days`}
-            color="bg-blue-600"
+             color="bg-[#2c7475]"
             icon={CalendarDays}
           />
         </div>
@@ -99,8 +99,8 @@ const ParentDashboard = ({ child, user }) => {
             {recentAnnouncements.map((a) => (
               <div key={a.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
                 <div className="flex items-start gap-3">
-                  <div className="p-2 bg-blue-50 rounded-lg shrink-0 mt-0.5">
-                    <Bell className="h-4 w-4 text-blue-600" />
+                   <div className="p-2 bg-[#e8f1ef] rounded-lg shrink-0 mt-0.5">
+                     <Bell className="h-4 w-4 text-[#176b73]" />
                   </div>
                   <div>
                     <p className="text-gray-800 font-semibold text-sm">{a.title}</p>

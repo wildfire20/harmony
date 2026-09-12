@@ -25,9 +25,14 @@ const NAV = [
 const MOBILE_NAV_PATHS = new Set([
   '/parent/dashboard',
   '/parent/attendance',
+  '/parent/announcements',
+  '/parent/documents',
   '/parent/invoices',
-  '/parent/account',
 ]);
+const MOBILE_MENU_NAV = [
+  ...NAV,
+  { path: '/parent/notifications', label: 'Notifications', icon: BellRing },
+];
 
 // ─── Auth helper ─────────────────────────────────────────────────────────────
 export const useParentAuth = () => {
@@ -394,25 +399,25 @@ const ParentPortal = () => {
 
           {/* Mobile menu */}
           {mobileMenuOpen && (
-             <div className="parent-mobile-menu sm:hidden border-t border-white/10">
+               <div className="parent-mobile-menu sm:hidden border-t border-[#dce6ea]">
               {/* Child switcher for mobile */}
               {children && children.length > 0 && (
-                <div className="border-b border-white/10">
+                <div className="border-b border-[#dce6ea]">
                   <button
                     onClick={() => setMobileChildOpen(!mobileChildOpen)}
                     className="w-full flex items-center justify-between px-4 py-3"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-blue-400 flex items-center justify-center text-sm font-bold">
+                       <div className="parent-avatar w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold">
                         {selectedChild?.first_name?.[0]}{selectedChild?.last_name?.[0]}
                       </div>
-                      <div className="text-left">
-                        <p className="text-white font-medium text-sm">{selectedChild?.first_name} {selectedChild?.last_name}</p>
-                        <p className="text-blue-300 text-xs">{selectedChild?.grade_name}</p>
+                      <div className="min-w-0 text-left">
+                         <p className="parent-menu-title truncate font-medium text-sm">{selectedChild?.first_name} {selectedChild?.last_name}</p>
+                         <p className="parent-menu-muted text-xs">{selectedChild?.grade_name}</p>
                       </div>
                     </div>
                     {children.length > 1 && (
-                      <div className="flex items-center gap-1 text-blue-300 text-xs">
+                       <div className="parent-menu-muted flex items-center gap-1 text-xs">
                         <Users className="h-3.5 w-3.5" />
                         Switch
                         <ChevronDown className={`h-3.5 w-3.5 transition-transform ${mobileChildOpen ? 'rotate-180' : ''}`} />
@@ -420,19 +425,19 @@ const ParentPortal = () => {
                     )}
                   </button>
                   {mobileChildOpen && children.length > 1 && (
-                    <div className="bg-blue-900/50 border-t border-white/5">
+                     <div className="parent-child-list border-t">
                       {children.map((child) => (
                         <button
                           key={child.id}
                           onClick={() => { handleSelectChild(child); setMobileChildOpen(false); setMobileMenuOpen(false); }}
                           className={`w-full flex items-center gap-3 px-5 py-2.5 ${selectedChild?.id === child.id ? 'bg-white/10' : 'hover:bg-white/5'}`}
                         >
-                          <div className="w-7 h-7 rounded-full bg-blue-400 flex items-center justify-center text-xs font-bold">
+                           <div className="parent-avatar w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold">
                             {child.first_name?.[0]}{child.last_name?.[0]}
                           </div>
-                          <div className="text-left">
-                            <p className="text-white text-sm">{child.first_name} {child.last_name}</p>
-                            <p className="text-blue-300 text-xs">{child.grade_name}</p>
+                          <div className="min-w-0 text-left">
+                             <p className="parent-menu-title truncate text-sm">{child.first_name} {child.last_name}</p>
+                             <p className="parent-menu-muted text-xs">{child.grade_name}</p>
                           </div>
                         </button>
                       ))}
@@ -441,12 +446,12 @@ const ParentPortal = () => {
                 </div>
               )}
 
-              {NAV.map(({ path, label, icon: Icon }) => (
+              {MOBILE_MENU_NAV.map(({ path, label, icon: Icon }) => (
                 <button
                   key={path}
                   onClick={() => { navigate(path); setMobileMenuOpen(false); }}
                   className={`w-full flex items-center gap-3 px-4 py-3 text-sm transition-colors ${
-                    isActive(path) ? 'bg-white/10 text-white' : 'text-white/70 hover:text-white hover:bg-white/5'
+                     isActive(path) ? 'parent-menu-active' : 'parent-menu-item'
                   }`}
                 >
                   <Icon className="h-4 w-4" />
@@ -456,7 +461,7 @@ const ParentPortal = () => {
               ))}
               <button
                 onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-300 hover:text-red-200 border-t border-white/10"
+                 className="parent-signout w-full flex items-center gap-3 px-4 py-3 text-sm border-t"
               >
                 <LogOut className="h-4 w-4" />
                 Sign out
@@ -467,18 +472,18 @@ const ParentPortal = () => {
 
         {/* Push notification banner */}
         {!subscribed && !notifDismissed && permission !== 'denied' && permission !== 'unsupported' && 'PushManager' in window && (
-          <div className="bg-blue-700 text-white px-4 py-2.5 flex items-center gap-3 justify-center text-sm">
-            <BellRing className="h-4 w-4 shrink-0 text-blue-200" />
-            <span className="text-blue-100">{ownershipConflict ? 'This browser notification is linked to another account. You can enable notifications from a different browser profile.' : 'Get notified when new notices or documents are shared'}</span>
+           <div className="parent-notification-banner px-4 py-2.5 flex items-center gap-3 justify-center text-sm">
+             <BellRing className="h-4 w-4 shrink-0" />
+             <span>{ownershipConflict ? 'This browser notification is linked to another account. You can enable notifications from a different browser profile.' : 'Get notified when new notices or documents are shared'}</span>
             {!ownershipConflict && <button
               onClick={subscribe}
-              className="ml-1 bg-white text-blue-700 font-semibold text-xs px-3 py-1 rounded-full hover:bg-blue-50 transition-colors shrink-0"
+               className="ml-1 bg-white text-[#176b73] font-semibold text-xs px-3 py-1 rounded-full hover:bg-[#e8f1ef] transition-colors shrink-0"
             >
               Enable
             </button>}
             <button
               onClick={() => { setNotifDismissed(true); localStorage.setItem('notifBannerDismissed', '1'); }}
-              className="text-blue-300 hover:text-white transition-colors shrink-0"
+               className="text-[#617487] hover:text-[#19324a] transition-colors shrink-0"
             >
               <X className="h-4 w-4" />
             </button>
@@ -523,7 +528,7 @@ const ParentPortal = () => {
 
         {/* Bottom nav (mobile) */}
         <nav className="fixed bottom-0 left-0 right-0 z-20 flex border-t border-[#dce7eb] bg-[#fbfcfa]/95 shadow-[0_-8px_25px_rgba(31,65,83,.12)] backdrop-blur sm:hidden">
-          {NAV.filter(({ path }) => MOBILE_NAV_PATHS.has(path)).map(({ path, label, icon: Icon }) => (
+           {NAV.filter(({ path }) => MOBILE_NAV_PATHS.has(path)).map(({ path, label, icon: Icon }) => (
             <button
               key={path}
               onClick={() => navigate(path)}

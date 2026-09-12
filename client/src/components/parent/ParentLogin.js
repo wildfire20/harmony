@@ -3,12 +3,10 @@ import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { Eye, EyeOff, ArrowLeft, Phone } from 'lucide-react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
-import { useAppConfig } from '../../contexts/AppConfigContext';
 import { getReturnDestination } from './parentNavigation';
 import './ParentPortal.css';
 
 const ParentLogin = () => {
-  const { studentPortalEnabled } = useAppConfig();
   const navigate = useNavigate();
   const location = useLocation();
   const [form, setForm] = useState({ phone_number: '', password: '' });
@@ -135,15 +133,18 @@ const ParentLogin = () => {
 
             <div className="mt-6 pt-5 border-t border-gray-100 space-y-2">
               <p className="text-center text-xs text-gray-400">
-                First time? Contact the school office for your temporary password.
+                First time using the Parent Portal?{' '}
+                <button type="button" onClick={() => navigate('/parent/activate')} className="text-[#176b73] hover:underline font-medium">
+                  Activate your account.
+                </button>
               </p>
               <p className="text-center text-xs text-gray-400">
-                {studentPortalEnabled ? 'Staff or student?' : 'Staff member?'}{' '}
                 <button
+                  type="button"
                   onClick={() => navigate('/login')}
-                  className="text-blue-600 hover:underline font-medium"
+                  className="text-[#176b73] hover:underline font-medium"
                 >
-                  {studentPortalEnabled ? 'Use the staff/student portal' : 'Use the staff portal'}
+                  Use the Staff Portal
                 </button>
               </p>
             </div>

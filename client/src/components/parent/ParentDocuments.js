@@ -14,13 +14,13 @@ const TYPE_LABELS = {
 };
 
 const TYPE_COLORS = {
-  form:        'bg-purple-100 text-purple-700',
-  letter:      'bg-blue-100 text-blue-700',
+   form:        'bg-[#fcebea] text-[#ad5147]',
+   letter:      'bg-[#e8f1ef] text-[#176b73]',
   assessment:  'bg-orange-100 text-orange-700',
   homework:    'bg-green-100 text-green-700',
   notes:       'bg-yellow-100 text-yellow-700',
   worksheet:   'bg-teal-100 text-teal-700',
-  resource:    'bg-indigo-100 text-indigo-700',
+   resource:    'bg-[#edf2f2] text-[#617487]',
   other:       'bg-gray-100 text-gray-600',
 };
 
@@ -135,7 +135,7 @@ const ParentDocuments = ({ child }) => {
                   onClick={() => setFilter(t)}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
                     filter === t
-                      ? 'bg-blue-600 text-white'
+                       ? 'bg-[#176b73] text-white'
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                 >
@@ -168,8 +168,8 @@ const ParentDocuments = ({ child }) => {
                     key={doc.id}
                     className="bg-white rounded-2xl border border-gray-100 p-4 flex items-start gap-4 shadow-sm"
                   >
-                    <div className="bg-blue-50 rounded-xl p-3 shrink-0">
-                      <Icon className="h-6 w-6 text-blue-600" />
+                     <div className="bg-[#e8f1ef] rounded-xl p-3 shrink-0">
+                       <Icon className="h-6 w-6 text-[#176b73]" />
                     </div>
 
                     <div className="flex-1 min-w-0">
@@ -192,7 +192,7 @@ const ParentDocuments = ({ child }) => {
                           )}
                           <button
                             onClick={() => handleDownload(doc)}
-                            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors"
+                               className="flex items-center gap-1.5 bg-[#176b73] hover:bg-[#125b62] text-white text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors"
                           >
                             <Download className="h-3.5 w-3.5" />
                             Save

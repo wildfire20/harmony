@@ -19,8 +19,22 @@
 }
 
 .parent-portal .parent-mobile-menu {
-  background: var(--parent-navy-deep);
+  background: var(--parent-surface);
+  color: var(--parent-ink);
+  border-color: var(--parent-line) !important;
 }
+
+.parent-portal .parent-menu-title { color: var(--parent-navy); }
+.parent-portal .parent-menu-muted { color: var(--parent-muted); }
+.parent-portal .parent-menu-item { color: var(--parent-muted); }
+.parent-portal .parent-menu-item:hover,
+.parent-portal .parent-menu-active { background: #e8f1ef; color: var(--parent-teal); }
+.parent-portal .parent-child-list { background: #f6f8f6; border-color: var(--parent-line); }
+.parent-portal .parent-avatar { background: #dceef0; color: var(--parent-teal); }
+.parent-portal .parent-signout { border-color: var(--parent-line); color: var(--parent-coral); }
+.parent-portal .parent-notification-banner { background: #fff8ed; color: #8a5b22; border-bottom: 1px solid #f0dfc2; }
+.parent-portal .parent-stat { box-shadow: 0 8px 18px rgba(31, 65, 83, .08); }
+.parent-portal .parent-select:focus { border-color: var(--parent-teal); box-shadow: 0 0 0 3px rgba(44,116,117,.14); }
 
 .parent-login {
   --parent-navy: #17324d;
@@ -59,8 +73,36 @@
 }
 
 @media (max-width: 639px) {
+  .parent-portal { overflow-x: hidden; }
   .parent-portal main {
     padding: 1rem .875rem 5.5rem;
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
+  .parent-portal main > * {
+    min-width: 0;
+  }
+  .parent-portal .parent-mobile-menu {
+    max-height: calc(100dvh - 68px);
+    overflow-y: auto;
+    box-shadow: 0 12px 24px rgba(16,40,62,.12);
+  }
+  .parent-portal .parent-mobile-menu button {
+    min-height: 46px;
+  }
+  .parent-portal nav.fixed {
+    padding-bottom: env(safe-area-inset-bottom);
+    background: rgba(255,255,255,.98);
+    min-height: calc(64px + env(safe-area-inset-bottom));
+  }
+  .parent-portal nav.fixed button {
+    min-width: 0;
+    overflow: hidden;
+  }
+  .parent-portal nav.fixed button > svg {
+    flex: 0 0 auto;
+  }
+  .parent-portal nav.fixed button {
+    white-space: nowrap;
   }
   .parent-portal header {
     box-shadow: 0 4px 18px rgba(16, 40, 62, .15);

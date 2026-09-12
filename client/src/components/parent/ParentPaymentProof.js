@@ -189,7 +189,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
           {view === 'list' ? (
             <button
               onClick={() => { setView('form'); setSuccess(null); setError(null); }}
-              className="flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-xl active:scale-95 transition-transform"
+              className="flex items-center gap-2 bg-[#2c7475] text-white text-sm font-semibold px-4 py-2 rounded-xl active:scale-95 transition-transform"
             >
               <Upload className="h-4 w-4" /> Submit Proof
             </button>
@@ -207,7 +207,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
       {embedded && view === 'list' && (
         <button
           onClick={() => { setView('form'); setSuccess(null); setError(null); }}
-          className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white text-sm font-semibold px-4 py-3 rounded-2xl active:scale-95 transition-transform"
+          className="w-full flex items-center justify-center gap-2 bg-[#2c7475] text-white text-sm font-semibold px-4 py-3 rounded-2xl active:scale-95 transition-transform"
         >
           <Upload className="h-4 w-4" /> Submit New Proof of Payment
         </button>
@@ -251,7 +251,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
                     onClick={() => setMethod(m.value)}
                     className={`flex items-center gap-2 border-2 rounded-xl p-3 text-sm font-medium transition-colors ${
                       method === m.value
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        ? 'border-[#2c7475] bg-[#e8f1ef] text-[#176b73]'
                         : 'border-gray-100 text-gray-600 bg-gray-50'
                     }`}
                   >
@@ -279,19 +279,19 @@ export default function ParentPaymentProof({ child, embedded = false }) {
                         type="checkbox"
                         checked={checked}
                         onChange={() => toggleService(price)}
-                        className="w-4 h-4 accent-blue-600"
+                        className="w-4 h-4 accent-[#2c7475]"
                       />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-700">{price.label}</p>
                         {price.description && <p className="text-xs text-gray-400">{price.description}</p>}
                       </div>
-                      <span className="text-sm font-bold text-blue-600 shrink-0">{R(price.amount)}<span className="text-gray-400 font-normal text-xs">/mo</span></span>
+                       <span className="text-sm font-bold text-[#176b73] shrink-0">{R(price.amount)}<span className="text-gray-400 font-normal text-xs">/mo</span></span>
                     </label>
                   );
                 })}
               </div>
               {selectedServices.length > 0 && (
-                <div className="bg-blue-50 rounded-xl px-3 py-2 text-xs text-blue-700 font-medium">
+                <div className="bg-[#e8f1ef] rounded-xl px-3 py-2 text-xs text-[#176b73] font-medium">
                   Services subtotal: {R(selectedServices.reduce((s, p) => s + parseFloat(p.amount), 0))}
                 </div>
               )}
@@ -310,13 +310,13 @@ export default function ParentPaymentProof({ child, embedded = false }) {
                       type="checkbox"
                       checked={selectedFees.some(f => f.id === fee.id)}
                       onChange={() => toggleFee(fee)}
-                      className="w-4 h-4 accent-blue-600"
+                       className="w-4 h-4 accent-[#2c7475]"
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-700">{fee.name}</p>
                       {fee.description && <p className="text-xs text-gray-400 truncate">{fee.description}</p>}
                     </div>
-                    <span className="text-sm font-semibold text-blue-600 shrink-0">{R(fee.amount)}</span>
+                     <span className="text-sm font-semibold text-[#176b73] shrink-0">{R(fee.amount)}</span>
                   </label>
                 ))}
               </div>
@@ -334,7 +334,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
               value={amount}
               onChange={e => setAmount(e.target.value)}
               placeholder="0.00"
-              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-800 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-blue-300"
+               className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-800 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-[#2c7475]/30"
             />
           </div>
 
@@ -346,7 +346,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
               value={reference}
               onChange={e => setReference(e.target.value)}
               placeholder="e.g. EFT Ref 12345"
-              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
+               className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#2c7475]/30"
             />
           </div>
 
@@ -361,10 +361,10 @@ export default function ParentPaymentProof({ child, embedded = false }) {
               className="hidden"
             />
             {file ? (
-              <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5">
-                <Receipt className="h-4 w-4 text-blue-600 shrink-0" />
-                <p className="text-sm text-blue-700 font-medium truncate flex-1">{file.name}</p>
-                <button type="button" onClick={() => setFile(null)} className="text-blue-400 hover:text-red-500">
+               <div className="flex items-center gap-3 bg-[#e8f1ef] border border-[#c7dedd] rounded-xl px-3 py-2.5">
+                 <Receipt className="h-4 w-4 text-[#176b73] shrink-0" />
+                 <p className="text-sm text-[#176b73] font-medium truncate flex-1">{file.name}</p>
+                 <button type="button" onClick={() => setFile(null)} className="text-[#617487] hover:text-red-500">
                   <XCircle className="h-4 w-4" />
                 </button>
               </div>
@@ -372,7 +372,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
-                className="w-full flex flex-col items-center gap-2 border-2 border-dashed border-gray-200 rounded-xl py-6 text-gray-400 hover:border-blue-300 hover:text-blue-500 transition-colors"
+                 className="w-full flex flex-col items-center gap-2 border-2 border-dashed border-gray-200 rounded-xl py-6 text-gray-400 hover:border-[#7fa9a7] hover:text-[#176b73] transition-colors"
               >
                 <Upload className="h-6 w-6" />
                 <span className="text-sm">Tap to upload photo or PDF</span>
@@ -388,24 +388,24 @@ export default function ParentPaymentProof({ child, embedded = false }) {
               onChange={e => setNotes(e.target.value)}
               rows={2}
               placeholder="Any additional information for the admin..."
-              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
+               className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#2c7475]/30 resize-none"
             />
           </div>
 
           {/* Banking Details reminder */}
-          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
-            <p className="text-blue-800 font-semibold text-sm mb-2">Banking Details</p>
-            <div className="space-y-0.5 text-xs text-blue-700">
+           <div className="bg-[#f6f8f6] border border-[#dce6ea] rounded-2xl p-4">
+             <p className="text-[#19324a] font-semibold text-sm mb-2">Banking Details</p>
+             <div className="space-y-0.5 text-xs text-[#617487]">
                <p><span className="font-medium">Bank:</span> {banking?.bank || 'Loading…'}</p>
                <p><span className="font-medium">Account:</span> {banking?.accountNumber || 'Loading…'} &bull; Branch: {banking?.branchCode || 'Loading…'}</p>
-              <p className="mt-1 text-blue-600 font-semibold">Reference: {child?.student_number || 'your child\'s student number'}</p>
+               <p className="mt-1 text-[#176b73] font-semibold">Reference: {child?.student_number || 'your child\'s student number'}</p>
             </div>
           </div>
 
           <button
             type="submit"
             disabled={submitting}
-            className="w-full bg-blue-600 text-white font-bold py-3.5 rounded-2xl text-sm active:scale-95 transition-transform disabled:opacity-60"
+             className="w-full bg-[#2c7475] text-white font-bold py-3.5 rounded-2xl text-sm active:scale-95 transition-transform disabled:opacity-60"
           >
             {submitting ? 'Submitting…' : 'Submit Proof of Payment'}
           </button>
@@ -417,7 +417,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
         <>
           {loading ? (
             <div className="flex justify-center py-10">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#2c7475]" />
             </div>
           ) : submissions.length === 0 ? (
             <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center">
@@ -455,7 +455,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
                       <button
                         onClick={() => viewReceipt(sub.id, sub.receipt_file_name)}
                         disabled={receiptLoading === sub.id}
-                        className="mt-3 flex items-center gap-1.5 text-xs text-blue-600 font-medium disabled:opacity-50"
+                         className="mt-3 flex items-center gap-1.5 text-xs text-[#176b73] font-medium disabled:opacity-50"
                       >
                         <Receipt className="h-3.5 w-3.5" />
                         {receiptLoading === sub.id ? 'Opening…' : 'View receipt'}

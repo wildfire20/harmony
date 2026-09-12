@@ -6,7 +6,7 @@ const STATUS_CONFIG = {
   present: { label: 'Present', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500', icon: CheckCircle },
   absent:  { label: 'Absent',  color: 'bg-red-100 text-red-700',         dot: 'bg-red-500',     icon: XCircle },
   late:    { label: 'Late',    color: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-500',   icon: Clock },
-  excused: { label: 'Excused', color: 'bg-blue-100 text-blue-700',       dot: 'bg-blue-500',    icon: MinusCircle },
+   excused: { label: 'Excused', color: 'bg-[#e8f1ef] text-[#176b73]',     dot: 'bg-[#2c7475]', icon: MinusCircle },
 };
 
 const MONTHS = [
@@ -49,7 +49,7 @@ const ParentAttendance = ({ child }) => {
         <select
           value={month}
           onChange={(e) => setMonth(+e.target.value)}
-          className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+           className="parent-select px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none"
         >
           {MONTHS.slice(1).map((m, i) => (
             <option key={i + 1} value={i + 1}>{m}</option>
@@ -58,7 +58,7 @@ const ParentAttendance = ({ child }) => {
         <select
           value={year}
           onChange={(e) => setYear(+e.target.value)}
-          className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+           className="parent-select px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none"
         >
           {years.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>

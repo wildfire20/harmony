@@ -1,0 +1,260 @@
+Mini Phase 2 — Parent Portal Mobile Visual Polish
+
+Mini Phase 1 finance truth has now been deployed and production audits are clean.
+
+This phase is strictly focused on Parent Portal mobile/tablet appearance and usability.
+
+The desktop Parent Portal is visually approved and should remain essentially unchanged.
+
+Do not modify:
+
+finance calculations
+invoice logic
+discounts
+payment allocations
+authentication/session architecture
+learner authorization
+notifications backend
+announcement/document targeting
+admissions
+database schema
+
+Do not deploy automatically.
+Do not run migrations.
+
+1. Desktop is the visual source of truth
+
+The desktop Parent Portal currently has the desired Harmony appearance:
+
+dark navy header
+white/light-grey background
+clean white cards
+restrained teal/navy selected states
+professional spacing
+limited accent colors
+
+The mobile version should feel like a responsive version of this same interface.
+
+It must not look like a separate bright-blue/purple app.
+
+2. Remove the mobile blue/purple tint
+
+Current mobile screens still use excessive saturated blue/purple in:
+
+navigation drawer
+bottom navigation
+learner selector
+cards
+notices
+documents
+filters
+selected states
+
+Audit all mobile-specific CSS for:
+
+gradients
+background colors
+overlays
+opacity
+filters
+pseudo-elements
+inherited theme colors
+
+Remove any mobile-wide blue/purple tint.
+
+Use:
+
+Harmony navy
+white
+light neutral grey
+restrained teal active states
+Harmony red/coral as an accent
+semantic green/red/orange only where meaningful
+3. Mobile bottom navigation
+
+Keep:
+
+Home
+Attendance
+Notices
+Documents
+Fees
+
+Redesign the bar so it uses:
+
+white/light background
+subtle border/shadow
+navy/grey inactive icons
+restrained active highlight
+
+Remove the current appearance of multiple large connected bright-blue blocks.
+
+Make sure:
+
+safe areas are respected
+content is never hidden underneath the navigation
+labels fit at common phone widths
+4. Mobile menu/drawer
+
+Replace the oversized blue drawer with a clean white/light drawer matching desktop.
+
+Preserve:
+
+Harmony logo
+selected learner
+learner switching
+navigation
+Account
+Notifications
+Sign out
+
+Use subtle active rows rather than filling every item with blue.
+
+5. Branding
+
+Use the actual Harmony Learning Institute logo consistently on:
+
+Parent login
+mobile authenticated header
+desktop authenticated header
+
+Preserve aspect ratio.
+
+Do not replace it with generic icons or initials when the logo is available.
+
+6. Parent login wording
+
+Remove the obsolete text:
+
+First time? Contact the school office for your temporary password.
+
+Replace it with:
+
+First time using the Parent Portal? Activate your account.
+
+Keep the activation action compatible with the existing activation flow for now.
+
+Mini Phase 3 will introduce phone self-activation.
+
+Replace:
+
+Use the staff/student portal
+
+with:
+
+Use the Staff Portal
+
+Student Portal remains retired.
+
+7. Remember-me control
+
+Preserve existing remembered-session behavior.
+
+On mobile the control must have:
+
+visible unchecked state
+visible checked state
+no black blank rectangle
+proper label alignment
+accessible focus
+comfortable tap area
+8. Cards and content
+
+Restyle mobile:
+
+Dashboard
+Attendance
+Notices
+Notifications
+Documents
+Fees
+Account
+
+Use light cards and restrained accents.
+
+Do not fill entire cards/sections with bright blue unnecessarily.
+
+9. Fees mobile page
+
+Preserve Mini Phase 1 finance truth completely.
+
+Mobile must clearly display:
+
+gross charges
+discounts
+net due
+paid
+outstanding
+credit
+service/charge breakdown
+
+This is presentation only.
+
+No financial values or calculations may change.
+
+10. Responsive verification
+
+Check:
+
+320px
+360px
+375px
+390px
+412px
+tablet
+desktop regression
+
+Verify:
+
+no horizontal scrolling
+no clipped cards
+no hidden text
+learner names handle long values
+dialogs fit
+bottom navigation does not cover content
+page headers remain readable
+buttons are not oversized
+11. Preserve functionality
+
+Do not alter:
+
+Parent APIs
+sessions
+notification logic
+Gmail
+push
+payment proof
+finance
+document security
+announcement targeting
+Verification
+
+Run all Parent Portal frontend regressions and relevant backend tests.
+
+Visually verify:
+
+Login
+Home
+Attendance
+Notices
+Notifications
+Documents
+Fees
+Account
+Learner switcher
+Mobile menu
+
+Also verify desktop has not visually regressed.
+
+Return:
+
+Exact source of the previous blue/purple mobile styling
+Mobile theme changes
+Navigation changes
+Login wording changes
+Files changed
+Tests passed
+Screen sizes/pages visually tested
+Any remaining mobile issue
+
+Do not deploy or run migrations automatically.

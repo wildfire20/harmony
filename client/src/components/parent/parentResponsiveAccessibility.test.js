@@ -8,6 +8,8 @@ test('parent navigation keeps grades out of visible navigation', () => {
   expect(portal).not.toMatch(/\{ path: ['"]\/parent\/grades['"]/);
   expect(portal).toMatch(/label: 'Attendance'/);
   expect(portal).toMatch(/label: 'Account'/);
+  expect(portal).toMatch(/label: 'Notifications'/);
+  expect(portal).toMatch(/MOBILE_NAV_PATHS\.has\(path\)/);
 });
 
 test('parent login remember control exposes a visible accessible state', () => {
@@ -18,9 +20,27 @@ test('parent login remember control exposes a visible accessible state', () => {
 });
 
 test('parent surfaces include a narrow viewport layout and original logo asset', () => {
-  expect(source('ParentPortal.css')).toMatch(/@media \(max-width: 639px\)/);
+  const css = source('ParentPortal.css');
+  expect(css).toMatch(/@media \(max-width: 639px\)/);
+  expect(css).toMatch(/env\(safe-area-inset-bottom\)/);
+  expect(css).toMatch(/\.parent-mobile-menu[\s\S]*background: var\(--parent-surface\)/);
   expect(source('ParentLogin.js')).toMatch(/\/images\/harmony-logo\.png/);
   expect(source('ParentPortal.js')).toMatch(/\/images\/harmony-logo\.png/);
+});
+
+test('parent login uses the current activation and staff-only wording', () => {
+  const login = source('ParentLogin.js');
+  expect(login).toMatch(/First time using the Parent Portal\?/);
+  expect(login).toMatch(/Activate your account\./);
+  expect(login).toMatch(/navigate\('\/parent\/activate'\)/);
+  expect(login).toMatch(/Use the Staff Portal/);
+  expect(login).not.toMatch(/temporary password|staff\/student portal|studentPortalEnabled/i);
+});
+
+test('embedded payment proof uses the restrained Parent Portal palette', () => {
+  const proof = source('ParentPaymentProof.js');
+  expect(proof).toMatch(/bg-\[#2c7475\]/);
+  expect(proof).not.toMatch(/bg-blue-(50|100|600)|text-blue-(600|700|800)|border-blue-(100|200|500)/);
 });
 
 test('legacy Grades URLs redirect without changing startup session hydration', () => {

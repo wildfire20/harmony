@@ -53,7 +53,7 @@ const ParentInvoices = ({ child }) => {
           onClick={() => setTab('invoices')}
           className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
             tab === 'invoices'
-              ? 'bg-white shadow text-blue-700'
+               ? 'bg-white shadow text-[#176b73]'
               : 'text-gray-500 hover:text-gray-700'
           }`}
         >
@@ -64,7 +64,7 @@ const ParentInvoices = ({ child }) => {
           onClick={() => setTab('pay')}
           className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
             tab === 'pay'
-              ? 'bg-white shadow text-blue-700'
+               ? 'bg-white shadow text-[#176b73]'
               : 'text-gray-500 hover:text-gray-700'
           }`}
         >
@@ -78,8 +78,8 @@ const ParentInvoices = ({ child }) => {
         <>
           {/* Summary cards */}
           <div className="grid grid-cols-3 gap-3">
-            <div className="bg-blue-600 rounded-2xl p-4 text-white text-center">
-              <p className="text-blue-200 text-xs font-medium">Total Billed</p>
+             <div className="bg-[#19324a] rounded-2xl p-4 text-white text-center">
+               <p className="text-[#c9dddf] text-xs font-medium">Total Billed</p>
               <p className="text-lg font-bold mt-0.5">{R(totals.totalDue)}</p>
             </div>
             <div className="bg-emerald-500 rounded-2xl p-4 text-white text-center">
@@ -94,12 +94,12 @@ const ParentInvoices = ({ child }) => {
 
           {/* Enrolled services */}
           {serviceComponents.length > 0 && (
-            <div className="bg-purple-50 border border-purple-100 rounded-2xl p-4">
-               <p className="text-purple-800 font-semibold text-sm mb-1">Services &amp; Billing</p>
-               <p className="text-purple-600 text-xs mb-2">Enrollment is separate from what is billed on an invoice.</p>
+             <div className="bg-[#f6f8f6] border border-[#dce6ea] rounded-2xl p-4">
+                <p className="text-[#19324a] font-semibold text-sm mb-1">Services &amp; Billing</p>
+                <p className="text-[#617487] text-xs mb-2">Enrollment is separate from what is billed on an invoice.</p>
               <div className="grid grid-cols-2 gap-2">
                 {serviceComponents.map((component) => (
-                  <span key={component.key} className="flex items-center justify-between gap-2 bg-white/70 text-purple-700 text-xs font-semibold px-2.5 py-1.5 rounded-lg">
+                     <span key={component.key} className="flex items-center justify-between gap-2 bg-white text-[#617487] text-xs font-semibold px-2.5 py-1.5 rounded-lg">
                     <span className="flex items-center gap-1.5">
                       {component.key === 'boarding' && <Bed className="h-3.5 w-3.5" />}
                       {component.key === 'transport' && <Bus className="h-3.5 w-3.5" />}
@@ -123,15 +123,15 @@ const ParentInvoices = ({ child }) => {
           </button>
 
           {/* Banking details */}
-          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
-            <p className="text-blue-800 font-semibold text-sm mb-2">Banking Details</p>
-            <div className="space-y-1 text-xs text-blue-700">
+           <div className="bg-[#f6f8f6] border border-[#dce6ea] rounded-2xl p-4">
+             <p className="text-[#19324a] font-semibold text-sm mb-2">Banking Details</p>
+             <div className="space-y-1 text-xs text-[#617487]">
                <p><span className="font-medium">Bank:</span> {banking?.bank || 'Loading…'}</p>
                <p><span className="font-medium">Account Holder:</span> {banking?.accountHolder || 'Loading…'}</p>
                <p><span className="font-medium">Account Number:</span> {banking?.accountNumber || 'Loading…'}</p>
                <p><span className="font-medium">Branch Code:</span> {banking?.branchCode || 'Loading…'}</p>
                <p><span className="font-medium">Account Type:</span> {banking?.accountType || 'Loading…'}</p>
-              <p className="mt-2 text-blue-600 font-semibold">
+               <p className="mt-2 text-[#176b73] font-semibold">
                 Reference: Use your child's student number ({child?.student_number || '—'})
               </p>
             </div>
