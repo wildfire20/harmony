@@ -14,6 +14,8 @@ const ParentManagement = () => {
   const [editingParent, setEditingParent] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [filterText, setFilterText] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [metrics, setMetrics] = useState({});
   const [tempPassResult, setTempPassResult] = useState(null);
   const [showPass, setShowPass] = useState(false);
 
@@ -36,6 +38,7 @@ const ParentManagement = () => {
     try {
       const res = await api.get('/parent/admin/list');
       setParents(res.data.parents || []);
+      setMetrics(res.data.metrics || {});
     } catch {
       toast.error('Failed to load parent accounts');
     } finally {
@@ -185,7 +188,7 @@ const ParentManagement = () => {
 
   const filtered = parents.filter((p) => {
     const q = filterText.toLowerCase();
-    return (
+    return (statusFilter === 'ALL' || p.rollout_status === statusFilter) && (
       p.first_name?.toLowerCase().includes(q) ||
       p.last_name?.toLowerCase().includes(q) ||
       p.phone_number?.includes(q) ||
@@ -218,15 +221,69 @@ const ParentManagement = () => {
       </div>
 
       {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-        <input
-          type="text"
-          placeholder="Search by name, phone number or student…"
-          value={filterText}
-          onChange={(e) => setFilterText(e.target.value)}
-          className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-        />
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-blue-600">Parent Portal rollout</p>
+            <h3 className="mt-1 text-lg font-bold text-slate-900">{metrics.activated || 0} / {metrics.total || 0} activated</h3>
+            <p className="text-sm text-slate-500">{metrics.activation_percentage || 0}% activation</p>
+          </div>
+          <div className="text-right text-xs text-slate-500">
+            <p>{metrics.activated_today || 0} activated today</p>
+            <p>{metrics.activated_this_week || 0} in the last 7 days</p>
+          </div>
+        </div>
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+          <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, metrics.activation_percentage || 0)}%` }} />
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+          {[
+            ['Total Parents', metrics.total, 'text-slate-900'],
+            ['Activated', metrics.activated, 'text-emerald-700'],
+            ['Awaiting Activation', metrics.awaiting_activation, 'text-amber-700'],
+            ['Ready to Activate', metrics.ready_to_activate, 'text-blue-700'],
+            ['Needs Attention', metrics.needs_attention, 'text-red-700'],
+            ['Disabled', metrics.disabled, 'text-slate-600'],
+          ].map(([label, value, tone]) => (
+            <div key={label} className="rounded-xl bg-slate-50 p-3">
+              <p className={`text-xl font-bold ${tone}`}>{value || 0}</p>
+              <p className="mt-1 text-xs text-slate-500">{label}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500">
+          <span>Never activated: {metrics.never_activated || 0}</span>
+          <span>Email verified: {metrics.email_verified || 0}</span>
+          <span>Email missing: {metrics.email_missing || 0}</span>
+          <span>Multi-learner Parents: {metrics.multi_learner_parents || 0}</span>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+        <h3 className="font-semibold text-blue-950">Self-activation instructions</h3>
+        <p className="mt-1 text-sm text-blue-800">Parents visit the website, open Parent Portal, select Activate your account, enter their registered mobile and email, verify the emailed OTP, then create a password.</p>
+        <button type="button" onClick={() => copyToClipboard('Visit the Harmony Learning Institute website and open Parent Portal. Select “Activate your account”, enter the mobile number registered with the school and your email address, enter the OTP sent by email, then create your password.')} className="mt-3 inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-blue-700 shadow-sm">
+          <Copy className="h-3.5 w-3.5" /> Copy instructions
+        </button>
+      </section>
+
+      <div className="grid gap-2 sm:grid-cols-[1fr_220px]">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search by name, phone number or student…"
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+            className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+          />
+        </div>
+        <select aria-label="Filter by rollout status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm">
+          <option value="ALL">All rollout statuses</option>
+          {['ACTIVATED', 'READY_TO_ACTIVATE', 'INVALID_MOBILE', 'MISSING_MOBILE', 'DUPLICATE_MOBILE', 'DISABLED', 'NEEDS_REVIEW'].map(status => (
+            <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>
+          ))}
+        </select>
       </div>
 
       {/* Temp password result panel */}
@@ -435,10 +492,18 @@ const ParentManagement = () => {
                       {p.phone_number || <span className="text-red-400">No phone</span>}
                     </div>
                     <div className="flex flex-wrap gap-2 mt-2 text-xs text-gray-500">
-                      <span className={`px-2 py-0.5 rounded-full ${portalStatus(p) === 'ACTIVATED' ? 'bg-emerald-100 text-emerald-700' : portalStatus(p) === 'DISABLED' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{portalStatus(p)}</span>
+                      <span className={`px-2 py-0.5 rounded-full ${p.rollout_status === 'ACTIVATED' ? 'bg-emerald-100 text-emerald-700' : ['DISABLED', 'INVALID_MOBILE', 'MISSING_MOBILE', 'DUPLICATE_MOBILE', 'NEEDS_REVIEW'].includes(p.rollout_status) ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>{(p.rollout_status || portalStatus(p)).replaceAll('_', ' ')}</span>
+                      <span>{p.linked_learner_count || 0} linked learner{p.linked_learner_count === 1 ? '' : 's'}</span>
+                      <span>Email: {(p.email_status || 'MISSING').toLowerCase()}</span>
+                      <span>Account: {(p.account_state || 'ACTIVE').toLowerCase()}</span>
                       {(p.invitation_sent_at || p.invited_at) && <span>Invited {new Date(p.invitation_sent_at || p.invited_at).toLocaleDateString()}</span>}
                       {(p.last_login_at || p.lastLoginAt) && <span>Last login {new Date(p.last_login_at || p.lastLoginAt).toLocaleDateString()}</span>}
                     </div>
+                    {p.activation_history?.[0] && (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Activated {new Date(p.activation_history[0].activated_at).toLocaleString()} via {p.activation_history[0].method === 'SELF_EMAIL_OTP' ? 'Self Activation' : 'Admin-assisted activation'} · Email {p.activation_history[0].email_verified ? 'verified' : 'not verified'}
+                      </p>
+                    )}
 
                     {/* Children list */}
                     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -462,7 +527,7 @@ const ParentManagement = () => {
                   <button onClick={() => parentAction(p, p.is_active === false ? 'enable' : 'disable', p.is_active === false ? 'Parent re-enabled' : 'Parent disabled')} className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg font-medium ${p.is_active === false ? 'text-emerald-600 bg-emerald-50' : 'text-red-600 bg-red-50'}`}>
                     {p.is_active === false ? <ShieldCheck className="h-3.5 w-3.5" /> : <ShieldOff className="h-3.5 w-3.5" />}{p.is_active === false ? 'Re-enable' : 'Disable'}
                   </button>
-                  <button onClick={() => parentAction(p, 'invitation', 'Invitation sent')} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg font-medium"><Mail className="h-3.5 w-3.5" />{p.invitation_sent_at ? 'Reissue Invitation' : 'Send Invitation'}</button>
+                  <button disabled={!p.email} title={!p.email ? 'Add an email address before sending an invitation' : 'Admin-assisted activation'} onClick={() => parentAction(p, 'invitation', 'Invitation sent')} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg font-medium disabled:cursor-not-allowed disabled:opacity-40"><Mail className="h-3.5 w-3.5" />{p.invitation_sent_at ? 'Reissue Invitation' : 'Send Invitation'}</button>
                   <button onClick={async () => { try { const res = await api.post(`/parent/admin/${p.id}/copy-link`); if (res.data?.activationLink) copyToClipboard(res.data.activationLink); else toast.error('No activation link was returned'); } catch (err) { toast.error(err.response?.data?.message || 'Could not generate activation link'); } }} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-indigo-600 bg-indigo-50 rounded-lg font-medium"><Link2 className="h-3.5 w-3.5" />Generate/Copy Link</button>
                   <button onClick={() => parentAction(p, 'reset-access', 'Parent access reset')} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg font-medium"><RotateCcw className="h-3.5 w-3.5" />Reset Access</button>
                   <button

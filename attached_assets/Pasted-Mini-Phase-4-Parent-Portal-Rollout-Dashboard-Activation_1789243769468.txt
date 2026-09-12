@@ -1,0 +1,226 @@
+Mini Phase 4 — Parent Portal Rollout Dashboard & Activation Management
+
+Parent self-activation is now production-ready and has passed a real live pilot.
+
+Current verified production state:
+
+Total Parent accounts: 297
+Activated: 2
+Unactivated: 295
+Ready for self-activation: 291
+Invalid mobile: 4
+Missing mobile: 0
+Duplicate/shared mobile: 0
+Multi-learner Parent accounts: 25
+
+Parent activation flow is:
+
+registered mobile
+→ email
+→ Gmail OTP
+→ OTP verification
+→ password
+→ activation
+→ automatic Parent login
+
+Do NOT redesign the activation security model.
+Do NOT change Parent authentication/session behavior.
+Do NOT change finance, admissions, learner authorization or learner links.
+Do NOT run migrations automatically.
+Do NOT deploy automatically.
+
+1. Admin Parent Rollout Dashboard
+
+Add a clear Parent Portal rollout section to Admin.
+
+Show summary cards for:
+
+Total Parents
+Activated
+Awaiting Activation
+Ready to Activate
+Needs Attention
+Disabled
+
+Also show activation percentage, for example:
+
+2 / 297 activated
+0.7%
+
+Counts must come from authoritative Parent-account data, not hardcoded values.
+
+2. Parent rollout table
+
+Provide an Admin table/list with:
+
+Parent name
+Registered mobile
+linked learner count
+activation status
+email status
+account state
+rollout/readiness status
+
+Suggested statuses:
+
+ACTIVATED
+READY_TO_ACTIVATE
+INVALID_MOBILE
+MISSING_MOBILE
+DUPLICATE_MOBILE
+DISABLED
+NEEDS_REVIEW
+
+Allow Admin to filter by status.
+
+3. Admin cleanup workflow
+
+For invalid/missing phone cases, Admin should be able to correct the Parent's registered mobile number using the existing Parent edit workflow.
+
+After correction, rollout eligibility must recalculate automatically.
+
+Do not automatically activate the Parent.
+
+Do not automatically send an OTP.
+
+4. Activation progress
+
+Show useful rollout metrics such as:
+
+Activated today
+Activated this week
+Never activated
+Email verified
+Email still missing
+
+Keep this simple and operational.
+
+5. Activation history
+
+Admin should be able to see safe high-level activation history such as:
+
+activation date/time
+activation method: SELF_EMAIL_OTP / ADMIN_EMAIL_LINK
+verified email status
+
+Never expose:
+
+OTPs
+password hashes
+refresh tokens
+activation token hashes
+6. Parent communication
+
+We currently have Gmail available and verified Parent emails gradually become available after activation.
+
+Add support for sending appropriate rollout-related emails only where an email address already exists.
+
+Do NOT attempt to email the 294 Parents who currently have no email address.
+
+Do NOT introduce paid WhatsApp/SMS APIs in this phase.
+
+Portal notifications remain the durable in-system source.
+
+7. Activation instructions for Admin
+
+Add a simple rollout help/instructions area so Admin knows what to tell Parents:
+
+1. Visit Harmony Learning Institute website
+2. Open Parent Portal
+3. Select Activate your account
+4. Enter the mobile number registered with the school
+5. Enter your email address
+6. Enter the OTP received by email
+7. Create your password
+
+Provide a copyable short message Admin can send through the school's existing communication channels.
+
+8. Do not manually invite hundreds of Parents
+
+The rollout dashboard must support the self-activation model.
+
+Admin should only need to intervene for exceptions such as:
+
+invalid phone number
+missing Parent account
+duplicate/shared mobile
+disabled account
+Parent unable to complete activation
+9. Account assistance
+
+From the rollout table, preserve existing Admin tools:
+
+Edit Parent
+Disable
+Reset Access
+Generate/Copy Link
+Send Invitation where email exists
+
+Clearly distinguish:
+
+Self Activation
+Admin-assisted activation
+
+Do not remove existing Admin recovery capabilities.
+
+10. Rollout safety
+
+Preserve:
+
+Parent anti-enumeration
+email OTP security
+activation challenge limits
+one-time completion capability
+Parent session security
+Keep Me Signed In
+Admin disable/revoke
+password reset
+multi-child authorization
+11. Responsive Admin UX
+
+Desktop Admin is primary, but dashboard/table must remain usable on tablet and mobile.
+
+Use the existing Harmony Admin visual language.
+
+12. Tests
+
+Test:
+
+activated Parent counted correctly
+eligible Parent counted correctly
+invalid mobile categorized correctly
+corrected mobile becomes eligible
+multi-child Parent counted once
+verified email status
+status filters
+disabled Parent
+self-activation regression
+normal login regression
+Keep Me Signed In regression
+existing Admin invitation tools
+13. Migration
+
+Prefer existing data and existing activation audit records.
+
+Do not create new schema unless genuinely required.
+
+If a migration is necessary, explain exactly why and provide an idempotent runner/audit.
+
+Do not run it automatically.
+
+Final report
+
+Return:
+
+Rollout dashboard implemented
+Metrics available
+Status categories
+Admin cleanup workflow
+Activation history behavior
+Communication capabilities
+Files changed
+Migration required or not
+Backend/frontend tests
+Any remaining blocker before broad Parent rollout
+
+Do not deploy automatically.

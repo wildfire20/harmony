@@ -16,6 +16,7 @@ const {
   PARENT_OTP_RESEND_COOLDOWN_SECONDS, PARENT_OTP_DAILY_RESEND_LIMIT,
 } = require('../services/parentAuth');
 const { getStudentLedger } = require('../services/financeLedger');
+const { buildParentRollout } = require('../services/parentRollout');
 const {
   isParentSelfActivationEnabled,
   isParentSelfActivationPilotParentAllowed,
@@ -598,7 +599,8 @@ router.get('/admin/list', requireAdmin, async (req, res) => {
     // Get all parents with all their linked children
     const parentsRes = await db.query(`
        SELECT u.id, u.first_name, u.last_name, u.phone_number, u.email, u.is_active,
-              u.must_change_password, u.created_at, u.invitation_sent_at, u.last_login_at,
+               u.must_change_password, u.created_at, u.invitation_sent_at, u.last_login_at,
+               u.activated_at, u.email_verified_at, u.parent_account_status,
               CASE WHEN u.is_active=false THEN 'DISABLED'
                 WHEN u.activated_at IS NOT NULL THEN 'ACTIVATED'
                 WHEN u.invitation_sent_at IS NOT NULL THEN 'INVITE_SENT'
@@ -609,7 +611,7 @@ router.get('/admin/list', requireAdmin, async (req, res) => {
     `);
 
     const parents = parentsRes.rows;
-    if (parents.length === 0) return res.json({ parents: [] });
+    if (parents.length === 0) return res.json({ parents: [], metrics: buildParentRollout([]).metrics });
 
     const parentIds = parents.map(p => p.id);
     const childrenRes = await db.query(`
@@ -633,6 +635,7 @@ router.get('/admin/list', requireAdmin, async (req, res) => {
     const result = parents.map(p => ({
       ...p,
       children: childMap[p.id] || [],
+      linked_learner_count: childMap[p.id]?.length || 0,
       // Backward compat fields
       child_name: childMap[p.id]?.[0]?.child_name,
       child_id:   childMap[p.id]?.[0]?.child_id,
@@ -640,7 +643,15 @@ router.get('/admin/list', requireAdmin, async (req, res) => {
       child_grade: childMap[p.id]?.[0]?.child_grade,
     }));
 
-    res.json({ parents: result });
+    const historyRes = await db.query(`
+      SELECT entity_id, action, created_at
+      FROM audit_logs
+      WHERE entity_type='parent'
+        AND action IN ('parent_self_activation_completed','parent_admin_email_link_activated')
+        AND entity_id = ANY($1)
+      ORDER BY created_at DESC
+    `, [parentIds]);
+    res.json(buildParentRollout(result, historyRes.rows));
   } catch (err) {
     console.error('Admin parent list error:', err);
     res.status(500).json({ message: 'Server error' });
@@ -1203,6 +1214,13 @@ router.post('/activate', async (req, res) => {
         FROM users WHERE id=$1 AND role='parent' AND is_active=true FOR UPDATE`, [found.rows[0].user_id]);
       if (!user.rows.length) throw Object.assign(new Error('inactive'), { status: 400 });
       activatedUser = user.rows[0];
+      await logAudit({
+        executor: client, required: true, userId: activatedUser.id,
+        userName: `${activatedUser.first_name || ''} ${activatedUser.last_name || ''}`.trim(),
+        userRole: 'parent', action: 'parent_admin_email_link_activated',
+        entityType: 'parent', entityId: activatedUser.id, ipAddress: getIp(req),
+        details: { email_verified: Boolean(activatedUser.email) },
+      });
     });
     const session = await authenticateSession(req, res, activatedUser, true);
     const children = await getChildren(activatedUser.id);
@@ -1230,9 +1248,13 @@ async function adminInvite(req, res) {
   try {
     const parent = await db.query(`SELECT id,email,first_name FROM users WHERE id=$1 AND role='parent'`, [req.params.parentId]);
     if (!parent.rows.length) return res.status(404).json({ message: 'Parent account not found' });
+    const isCopyOnly = req.path.endsWith('/copy-link');
+    if (!isCopyOnly && !parent.rows[0].email) {
+      return res.status(400).json({ message: 'Add an email address before sending an invitation.' });
+    }
     const token = await issueAuthToken(req.params.parentId, 'activation', req.user.id);
     const link = parentPortalUrl('/parent/activate', token);
-    const emailed = req.path.endsWith('/copy-link') ? { success: false, skipped: true }
+    const emailed = isCopyOnly ? { success: false, skipped: true }
       : (parent.rows[0].email ? await sendParentAuthEmail(parent.rows[0].email, token, 'activation', parent.rows[0].first_name) : { success: false });
     res.json({ success: true, emailed: Boolean(emailed.success), activationLink: link });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
