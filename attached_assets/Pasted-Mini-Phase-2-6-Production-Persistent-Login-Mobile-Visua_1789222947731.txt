@@ -1,0 +1,146 @@
+Mini Phase 2.6 — Production Persistent Login & Mobile Visual Verification
+
+Mini Phase 2 mobile styling and Mini Phase 2.5 finance corrections are complete.
+
+Production testing shows two remaining concerns.
+
+Do not change finance logic.
+Do not change learner authorization.
+Do not change admissions.
+Do not deploy automatically.
+Do not run migrations automatically unless absolutely required.
+
+1. Persistent login is not behaving as a persistent session
+
+Current production behavior:
+
+Parent checks Keep me signed in on this device
+Parent successfully logs in
+Browser is fully closed
+Parent later returns to Harmony Parent Portal
+Login page appears again
+
+On desktop, Chrome may autofill the phone/password, but that is browser password-manager behavior and must not be treated as successful session restoration.
+
+Correct remembered-session behavior is:
+
+parent returns to Parent Portal
+refresh token/session family is restored securely
+parent goes directly into the authenticated Parent Portal
+login form is not shown
+
+Audit the complete production flow:
+
+checkbox React state
+request payload sent on login
+whether rememberMe=true reaches the server
+parent session-family creation
+persistent refresh-cookie Max-Age / expiry
+HttpOnly
+Secure
+SameSite=Lax
+cookie Path
+cookie Domain if used
+refresh endpoint path
+startup refresh request
+credentials behavior
+mobile Chrome behavior
+redirect timing
+frontend auth hydration
+selected learner restoration
+
+Add safe temporary diagnostics if necessary, but never log:
+
+refresh tokens
+cookies
+passwords
+hashes
+session secrets
+
+A remembered session must remain bounded by the fixed 30-day family lifetime.
+
+Logout, password reset/change, Admin disable, replay detection, and logout-all must still revoke it.
+
+2. Distinguish browser autofill from authentication
+
+Tests must prove that remembered-session restoration succeeds even when:
+
+password manager/autofill is disabled
+login input fields are empty
+
+Session restoration must come from the secure refresh session, not stored form credentials.
+
+3. Mobile Mini Phase 2 production verification
+
+After the Mini Phase 2 code is applied, verify that mobile actually shows the new approved Harmony styling.
+
+Production screenshots before deployment still show:
+
+saturated blue/purple tabs
+blue bottom navigation blocks
+blue action buttons
+old temporary-password wording
+old staff/student portal wording
+
+Confirm whether this is simply because Mini Phase 2 had not yet been deployed.
+
+The deployed mobile interface must use:
+
+dark Harmony navy header
+white/light neutral body
+white/light navigation
+restrained teal active states
+Harmony red/coral accents
+semantic green/red/orange only where meaningful
+
+It must visually resemble the desktop Parent Portal.
+
+4. Cache/version safety
+
+Check whether stale frontend assets/service worker/browser caching could cause an older Parent Portal bundle to continue rendering after deployment.
+
+Ensure a new production deployment serves the new build and that stale service-worker assets cannot indefinitely retain the old mobile styling.
+
+Do not disable caching globally without reason.
+
+5. Verification
+
+Test:
+
+desktop Chrome remembered login
+Android Chrome remembered login
+browser fully closed and reopened
+password autofill disabled
+one learner
+multiple learners
+logout
+password reset
+Admin disable
+normal non-remembered login
+30-day remembered login contract
+
+Visually verify mobile:
+
+Login
+Home
+Fees
+Attendance
+Notices
+Documents
+Notifications
+Account
+Drawer
+Bottom navigation
+
+Return:
+
+Exact remembered-session root cause
+Whether rememberMe reaches the server
+Cookie/session behavior before and after
+Whether old mobile screenshots were caused by undeployed/stale Mini Phase 2 code
+Any cache/service-worker issue
+Files changed
+Tests passed
+Any remaining launch blocker
+
+Do not deploy automatically.

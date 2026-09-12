@@ -28,6 +28,18 @@ test('parent surfaces include a narrow viewport layout and original logo asset',
   expect(source('ParentPortal.js')).toMatch(/\/images\/harmony-logo\.png/);
 });
 
+test('mobile navigation cannot fall back to the legacy blue-purple treatment', () => {
+  const css = source('ParentPortal.css');
+  const portal = source('ParentPortal.js');
+  expect(portal).toMatch(/parent-mobile-header/);
+  expect(portal).toMatch(/parent-mobile-bottom-nav/);
+  expect(portal).toMatch(/parent-mobile-bottom-item/);
+  expect(css).toMatch(/\.parent-mobile-bottom-nav[\s\S]*background: rgba\(255,255,255,.98\) !important/);
+  expect(css).toMatch(/\.parent-mobile-bottom-item[\s\S]*background-image: none !important/);
+  expect(css).toMatch(/\.parent-mobile-header[\s\S]*background: var\(--parent-navy\) !important/);
+  expect(css).not.toMatch(/#4f46e5|#6366f1|linear-gradient\([^)]*(blue|purple|indigo)/i);
+});
+
 test('parent login uses the current activation and staff-only wording', () => {
   const login = source('ParentLogin.js');
   expect(login).toMatch(/First time using the Parent Portal\?/);

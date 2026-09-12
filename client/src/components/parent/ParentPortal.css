@@ -73,7 +73,11 @@
 }
 
 @media (max-width: 639px) {
-  .parent-portal { overflow-x: hidden; }
+  .parent-portal {
+    overflow-x: hidden;
+    background: var(--parent-wash) !important;
+    color: var(--parent-ink);
+  }
   .parent-portal main {
     padding: 1rem .875rem 5.5rem;
     padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
@@ -82,29 +86,53 @@
     min-width: 0;
   }
   .parent-portal .parent-mobile-menu {
+    background: var(--parent-surface) !important;
+    color: var(--parent-ink) !important;
     max-height: calc(100dvh - 68px);
     overflow-y: auto;
     box-shadow: 0 12px 24px rgba(16,40,62,.12);
   }
   .parent-portal .parent-mobile-menu button {
+    background-image: none !important;
+    border-radius: 0 !important;
+  }
+  .parent-portal .parent-menu-item {
+    background: var(--parent-surface) !important;
+    color: var(--parent-muted) !important;
+  }
+  .parent-portal .parent-menu-active {
+    background: #e8f1ef !important;
+    color: var(--parent-teal) !important;
+  }
+  .parent-portal .parent-mobile-menu button {
     min-height: 46px;
   }
-  .parent-portal nav.fixed {
+  .parent-portal .parent-mobile-bottom-nav {
     padding-bottom: env(safe-area-inset-bottom);
-    background: rgba(255,255,255,.98);
+    background: rgba(255,255,255,.98) !important;
+    background-image: none !important;
+    border-color: var(--parent-line) !important;
     min-height: calc(64px + env(safe-area-inset-bottom));
   }
-  .parent-portal nav.fixed button {
+  .parent-portal .parent-mobile-bottom-item {
+    background: transparent !important;
+    background-image: none !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+  .parent-portal .parent-mobile-bottom-nav button {
     min-width: 0;
     overflow: hidden;
   }
-  .parent-portal nav.fixed button > svg {
+  .parent-portal .parent-mobile-bottom-nav button > svg {
     flex: 0 0 auto;
   }
-  .parent-portal nav.fixed button {
+  .parent-portal .parent-mobile-bottom-nav button {
     white-space: nowrap;
   }
-  .parent-portal header {
+  .parent-portal .parent-mobile-header {
+    background: var(--parent-navy) !important;
+    background-image: none !important;
     box-shadow: 0 4px 18px rgba(16, 40, 62, .15);
   }
 }

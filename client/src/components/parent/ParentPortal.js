@@ -359,7 +359,7 @@ const ParentPortal = () => {
     <ChildContext.Provider value={{ child: selectedChild, children, onSelectChild: handleSelectChild }}>
       <div className="parent-portal min-h-[100dvh] bg-[#f4f7f5] flex flex-col text-[#334b5d]">
         {/* Top bar */}
-        <header className="sticky top-0 z-30 border-b border-white/10 bg-[#19324a] text-white shadow-[0_8px_22px_rgba(25,50,74,.18)]">
+        <header className="parent-mobile-header sticky top-0 z-30 border-b border-white/10 bg-[#19324a] text-white shadow-[0_8px_22px_rgba(25,50,74,.18)]">
           <div className="mx-auto flex h-[68px] max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
             <div className="flex items-center gap-2 shrink-0">
                <div className="grid h-9 w-9 place-items-center rounded-xl bg-white p-1"><img src="/images/harmony-logo.png" alt="" className="max-h-full max-w-full object-contain" /></div>
@@ -527,12 +527,12 @@ const ParentPortal = () => {
         </div>
 
         {/* Bottom nav (mobile) */}
-        <nav className="fixed bottom-0 left-0 right-0 z-20 flex border-t border-[#dce7eb] bg-[#fbfcfa]/95 shadow-[0_-8px_25px_rgba(31,65,83,.12)] backdrop-blur sm:hidden">
+        <nav className="parent-mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 flex border-t border-[#dce7eb] bg-[#fbfcfa]/95 shadow-[0_-8px_25px_rgba(31,65,83,.12)] backdrop-blur sm:hidden">
            {NAV.filter(({ path }) => MOBILE_NAV_PATHS.has(path)).map(({ path, label, icon: Icon }) => (
             <button
               key={path}
               onClick={() => navigate(path)}
-                className={`flex min-h-[64px] flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] font-semibold transition-colors ${
+                className={`parent-mobile-bottom-item flex min-h-[64px] flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] font-semibold transition-colors ${
                   isActive(path) ? 'text-[#176b73]' : 'text-[#84929e]'
               }`}
             >
