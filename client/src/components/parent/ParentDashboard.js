@@ -30,11 +30,7 @@ const ParentDashboard = ({ child, user }) => {
       .finally(() => setLoading(false));
   }, [child?.id]);
 
-  if (loading) return (
-    <div className="flex items-center justify-center py-20">
-      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
-    </div>
-  );
+  if (loading) return <div className="space-y-4"><div className="h-32 animate-pulse rounded-3xl bg-[#dfe9e7]" /><div className="grid grid-cols-2 gap-3"><div className="h-24 animate-pulse rounded-2xl bg-[#dfe9e7]" /><div className="h-24 animate-pulse rounded-2xl bg-[#dfe9e7]" /></div></div>;
   if (error) return (
     <div className="flex items-center gap-3 bg-red-50 border border-red-200 text-red-700 rounded-xl p-4">
       <AlertCircle className="h-5 w-5 shrink-0" />
@@ -49,10 +45,11 @@ const ParentDashboard = ({ child, user }) => {
     : null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       {/* Welcome */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Good day, {user?.first_name} 👋</h1>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b5473a]">Harmony Learning Institute</p>
+        <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#19324a]">Good day, {user?.first_name}</h1>
         {child ? (
           <p className="text-gray-500 text-sm mt-1">
             Viewing updates for <span className="font-semibold text-gray-700">{child.first_name} {child.last_name}</span>
@@ -67,8 +64,8 @@ const ParentDashboard = ({ child, user }) => {
       </div>
 
       {/* Attendance this week */}
-      <section>
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">This Week's Attendance</h2>
+      <section className="rounded-3xl border border-[#dce7eb] bg-white p-4 shadow-[0_12px_35px_rgba(31,65,83,.07)]">
+        <h2 className="mb-3 text-sm font-bold uppercase tracking-[0.12em] text-[#617487]">This week at a glance</h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatCard label="Present" value={weekAttendance?.present ?? '–'} color="bg-emerald-500" icon={CheckCircle} />
           <StatCard label="Absent"  value={weekAttendance?.absent  ?? '–'} color="bg-red-500"     icon={XCircle} />
@@ -84,11 +81,11 @@ const ParentDashboard = ({ child, user }) => {
       </section>
 
       {/* Outstanding balance */}
-      {outstandingBalance > 0 && (
+      {Number(outstandingBalance) > 0 && (
         <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
           <CreditCard className="h-5 w-5 text-amber-600 shrink-0" />
           <div>
-            <p className="text-amber-800 font-semibold text-sm">Outstanding fees</p>
+             <p className="text-amber-800 font-semibold text-sm">Action needed: outstanding fees</p>
             <p className="text-amber-700 text-xs">R{Number(outstandingBalance).toFixed(2)} is currently due. View the Fees tab for details.</p>
           </div>
         </div>

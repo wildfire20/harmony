@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
   Home, CalendarDays, GraduationCap, Bell, CreditCard, FolderOpen,
-  LogOut, Menu, X, BookOpen, ChevronDown, ChevronRight, Users, BellRing
+  LogOut, Menu, X, BookOpen, ChevronDown, ChevronRight, Users, BellRing, Settings2
 } from 'lucide-react';
 import ParentDashboard from './ParentDashboard';
 import ParentAttendance from './ParentAttendance';
@@ -10,6 +10,7 @@ import ParentGrades from './ParentGrades';
 import ParentAnnouncements from './ParentAnnouncements';
 import ParentInvoices from './ParentInvoices';
 import ParentDocuments from './ParentDocuments';
+import ParentAccount from './ParentAccount';
 
 const NAV = [
   { path: '/parent/dashboard',      label: 'Home',        icon: Home },
@@ -18,7 +19,15 @@ const NAV = [
   { path: '/parent/announcements',  label: 'Notices',     icon: Bell },
   { path: '/parent/documents',      label: 'Documents',   icon: FolderOpen },
   { path: '/parent/invoices',       label: 'Fees',        icon: CreditCard },
+  { path: '/parent/account',        label: 'Account',      icon: Settings2 },
 ];
+const MOBILE_NAV_PATHS = new Set([
+  '/parent/dashboard',
+  '/parent/attendance',
+  '/parent/grades',
+  '/parent/invoices',
+  '/parent/account',
+]);
 
 // ─── Auth helper ─────────────────────────────────────────────────────────────
 export const useParentAuth = () => {
@@ -286,14 +295,13 @@ const ParentPortal = () => {
 
   return (
     <ChildContext.Provider value={{ child: selectedChild, children }}>
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="parent-portal min-h-[100dvh] bg-[#f4f7f5] flex flex-col text-[#334b5d]">
         {/* Top bar */}
-        <header className="bg-gradient-to-r from-blue-900 to-blue-800 text-white sticky top-0 z-30 shadow-lg">
-          <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
+        <header className="sticky top-0 z-30 border-b border-white/10 bg-[#19324a] text-white shadow-[0_8px_22px_rgba(25,50,74,.18)]">
+          <div className="mx-auto flex h-[68px] max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
             <div className="flex items-center gap-2 shrink-0">
-              <BookOpen className="h-5 w-5 text-blue-300" />
-              <span className="font-bold text-sm hidden sm:block">Harmony Learning</span>
-              <span className="font-semibold text-blue-200 text-sm">| Parent Portal</span>
+              <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#e86e5b]"><BookOpen className="h-5 w-5 text-white" /></div>
+              <div><span className="block text-sm font-bold tracking-tight">Harmony Learning</span><span className="block text-[10px] uppercase tracking-[0.18em] text-[#b9d5d4]">Parent portal</span></div>
             </div>
 
             {/* Child switcher (desktop) */}
@@ -304,6 +312,13 @@ const ParentPortal = () => {
             />
 
             <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => navigate('/parent/announcements')}
+                aria-label="View school notices"
+                className="grid min-h-[44px] min-w-[44px] place-items-center rounded-xl text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <Bell className="h-5 w-5" />
+              </button>
               <button
                 onClick={handleLogout}
                 className="hidden sm:flex items-center gap-1.5 text-white/70 hover:text-white text-sm transition-colors"
@@ -413,17 +428,17 @@ const ParentPortal = () => {
           </div>
         )}
 
-        <div className="flex flex-1 max-w-5xl mx-auto w-full">
+        <div className="flex w-full max-w-6xl flex-1 mx-auto">
           {/* Sidebar (desktop) */}
-          <aside className="hidden sm:flex flex-col w-52 shrink-0 pt-6 px-3 gap-1">
+          <aside className="hidden w-56 shrink-0 flex-col gap-1 border-r border-[#dce7eb] px-4 pb-8 pt-7 sm:flex">
             {NAV.map(({ path, label, icon: Icon }) => (
               <button
                 key={path}
                 onClick={() => navigate(path)}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                   isActive(path)
-                    ? 'bg-blue-700 text-white shadow-md shadow-blue-700/30'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    ? 'bg-[#176b73] text-white shadow-md shadow-[#176b73]/20'
+                    : 'text-[#617487] hover:bg-[#e8f1ef]'
                 }`}
               >
                 <Icon className="h-4 w-4 shrink-0" />
@@ -433,7 +448,7 @@ const ParentPortal = () => {
           </aside>
 
           {/* Main content */}
-          <main className="flex-1 p-4 sm:p-6 min-w-0">
+          <main className="min-w-0 flex-1 p-4 pb-24 sm:p-7 sm:pb-10">
             <Routes>
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard"     element={<ParentDashboard  child={selectedChild} user={user} />} />
@@ -442,22 +457,23 @@ const ParentPortal = () => {
               <Route path="announcements" element={<ParentAnnouncements child={selectedChild} />} />
               <Route path="documents"       element={<ParentDocuments     child={selectedChild} />} />
               <Route path="invoices"        element={<ParentInvoices      child={selectedChild} />} />
+              <Route path="account"         element={<ParentAccount user={user} children={children} selectedChild={selectedChild} onSelectChild={handleSelectChild} onLogout={handleLogout} />} />
               <Route path="payment-proof"   element={<Navigate to="/parent/invoices" replace />} />
             </Routes>
           </main>
         </div>
 
         {/* Bottom nav (mobile) */}
-        <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex z-20 shadow-xl">
-          {NAV.map(({ path, label, icon: Icon }) => (
+        <nav className="fixed bottom-0 left-0 right-0 z-20 flex border-t border-[#dce7eb] bg-[#fbfcfa]/95 shadow-[0_-8px_25px_rgba(31,65,83,.12)] backdrop-blur sm:hidden">
+          {NAV.filter(({ path }) => MOBILE_NAV_PATHS.has(path)).map(({ path, label, icon: Icon }) => (
             <button
               key={path}
               onClick={() => navigate(path)}
-              className={`flex-1 flex flex-col items-center py-2 gap-0.5 text-xs transition-colors ${
-                isActive(path) ? 'text-blue-700' : 'text-gray-400'
+                className={`flex min-h-[64px] flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] font-semibold transition-colors ${
+                  isActive(path) ? 'text-[#176b73]' : 'text-[#84929e]'
               }`}
             >
-              <Icon className={`h-5 w-5 ${isActive(path) ? 'text-blue-700' : 'text-gray-400'}`} />
+              <Icon className={`h-5 w-5 ${isActive(path) ? 'text-[#176b73]' : 'text-[#84929e]'}`} />
               {label}
             </button>
           ))}
