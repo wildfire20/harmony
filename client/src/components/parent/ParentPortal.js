@@ -11,11 +11,13 @@ import ParentInvoices from './ParentInvoices';
 import ParentDocuments from './ParentDocuments';
 import ParentAccount from './ParentAccount';
 import ParentNotifications from './ParentNotifications';
+import ParentCalendar from './ParentCalendar';
 import { getSafeParentDestination, parentLoginPath } from './parentNavigation';
 import './ParentPortal.css';
 
 const NAV = [
   { path: '/parent/dashboard',      label: 'Home',        icon: Home },
+  { path: '/parent/calendar',       label: 'Calendar',    icon: CalendarDays },
   { path: '/parent/attendance',     label: 'Attendance',  icon: CalendarDays },
   { path: '/parent/announcements',  label: 'Notices',     icon: Bell },
   { path: '/parent/documents',      label: 'Documents',   icon: FolderOpen },
@@ -24,6 +26,7 @@ const NAV = [
 ];
 const MOBILE_NAV_PATHS = new Set([
   '/parent/dashboard',
+  '/parent/calendar',
   '/parent/attendance',
   '/parent/announcements',
   '/parent/documents',
@@ -527,6 +530,7 @@ const ParentPortal = () => {
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard"     element={<ParentDashboard  child={selectedChild} user={user} />} />
               <Route path="attendance"    element={<ParentAttendance child={selectedChild} />} />
+              <Route path="calendar"      element={<ParentCalendar />} />
                <Route path="grades"        element={<Navigate to="/parent/dashboard" replace />} />
               <Route path="announcements" element={<ParentAnnouncements child={selectedChild} />} />
               <Route path="notifications"  element={<ParentNotifications />} />

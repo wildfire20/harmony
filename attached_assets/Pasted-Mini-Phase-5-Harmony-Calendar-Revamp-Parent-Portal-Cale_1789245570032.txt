@@ -1,0 +1,405 @@
+Mini Phase 5 — Harmony Calendar Revamp + Parent Portal Calendar
+
+Harmony already has an Academic Calendar available in the Admin/Staff system.
+
+The underlying functionality works, but the interface is visually dated/clunky and event information does not always display cleanly inside calendar cells.
+
+We now want to:
+
+Redesign the existing Admin/Staff calendar.
+Preserve its existing functionality and event data.
+Add an appropriate read-only Calendar experience to the Parent Portal.
+
+Do not redesign unrelated modules.
+Do not modify finance.
+Do not modify Parent authentication.
+Do not modify admissions.
+Do not modify learner links.
+Do not run migrations automatically.
+Do not deploy automatically.
+
+1. Audit the existing calendar first
+
+Before changing implementation, document:
+
+existing calendar database/table/model
+existing event fields
+event categories
+current API routes
+current permissions
+who may create/edit/delete events
+whether events currently support grade/class targeting
+whether events currently distinguish public/Parent-visible events from internal Staff events
+
+Preserve existing events and functionality wherever possible.
+
+Do not create a second independent Parent calendar.
+
+There should be one authoritative calendar data source.
+
+2. Redesign the Admin/Staff Calendar UI
+
+The current desktop layout feels oversized and clunky.
+
+Redesign it to match the modern Harmony interface.
+
+Keep:
+
+Month view
+Week view
+Day view
+Previous/next navigation
+Today button
+Event categories
+Create Event
+
+But improve presentation significantly.
+
+Use:
+
+clean white/light surfaces
+restrained Harmony teal/navy
+subtle category colours
+modern spacing
+subtle borders/shadows
+responsive typography
+
+Avoid large blocks of unused visual space.
+
+3. Improve event rendering
+
+Events must not overflow calendar cells or display broken/clipped text.
+
+In Month view:
+
+show compact event chips
+display event title clearly
+truncate very long titles cleanly
+show category using a small coloured indicator
+show time where relevant
+
+If a day contains several events:
+
+Sports Day
+Maths Test
+Parents Meeting
++2 more
+
+Do not try to cram five full event descriptions into one day cell.
+
+Clicking an event should open a proper detail modal/panel.
+
+4. Event detail experience
+
+Event details should clearly display:
+
+title
+date
+start time
+end time
+event category
+description
+location if available
+relevant grade/class if available
+audience/visibility if supported
+
+Admin/authorized Staff may receive Edit/Delete controls.
+
+Parent view must remain read-only.
+
+Long descriptions must wrap normally and never overflow.
+
+5. Create/Edit Event UI
+
+Modernize the event form.
+
+Keep the form simple and clear.
+
+Fields should reflect the existing calendar schema where possible:
+
+Event title
+Category
+Date
+Start time
+End time
+Description
+Location
+Grade/Class targeting where supported
+Visibility/Audience
+
+Do not add unnecessary fields merely for appearance.
+
+Validation messages should be clear.
+
+6. Parent visibility and privacy
+
+This is important.
+
+Parents must not automatically see internal Staff-only calendar entries.
+
+Audit whether the current calendar already supports event visibility/audience.
+
+If it does, reuse it.
+
+If it does not, introduce the smallest safe visibility model required.
+
+Suggested audiences:
+
+SCHOOL_WIDE
+PARENTS
+STAFF_ONLY
+
+And where the existing system already supports grade/class targeting, preserve that targeting.
+
+Parent Portal should see:
+
+school-wide Parent-visible events
+relevant learner grade/class events
+holidays
+exams where relevant
+Parent meetings
+school events
+
+Parent Portal must NOT expose:
+
+internal Staff meetings
+Admin-only events
+internal operational notes
+
+If adding an audience field requires a migration, create an idempotent migration and verifier but DO NOT run it.
+
+Existing events must not accidentally become Parent-visible during migration.
+
+Default legacy visibility conservatively.
+
+7. Parent Portal Calendar
+
+Add:
+
+Calendar
+
+to the Parent Portal navigation.
+
+It must use the already-approved Parent Portal mobile/desktop visual language:
+
+Harmony navy header
+white/light neutral surfaces
+restrained teal
+responsive mobile design
+
+Parent Calendar is read-only.
+
+No Create/Edit/Delete controls.
+
+8. Parent learner context
+
+Respect the existing selected-learner behavior.
+
+If a Parent has one child:
+
+show calendar items relevant to that learner plus school-wide Parent events.
+
+If a Parent has multiple children:
+
+the selected learner determines grade/class-specific calendar events.
+
+School-wide Parent events remain visible regardless of selected learner.
+
+Switching learners should refresh relevant events without leaking another learner's restricted data.
+
+9. Parent mobile calendar design
+
+Do not simply shrink the desktop month grid onto a phone.
+
+For mobile, use a more practical design.
+
+Recommended:
+
+September 2026
+< Today >
+
+calendar/date selector
+
+Upcoming
+
+14 Sep
+Heritage Day Celebration
+09:00
+
+17 Sep
+Grade 2 Maths Assessment
+
+Parents should be able to switch between:
+
+Calendar
+Upcoming events
+
+or use a hybrid calendar + agenda design.
+
+The agenda/list view is especially important on small screens.
+
+10. Upcoming events
+
+Add a useful:
+
+Upcoming Events
+
+area.
+
+Show upcoming Parent-relevant calendar entries in chronological order.
+
+Useful information:
+
+date
+title
+time
+category
+grade/class where applicable
+
+Avoid overwhelming Parents with old calendar entries.
+
+11. Parent Dashboard integration
+
+Add a small optional dashboard section:
+
+Upcoming
+
+Show perhaps the next 2–3 relevant calendar events.
+
+Include:
+
+View Calendar
+
+Do not make the dashboard crowded.
+
+12. Event categories
+
+Preserve existing categories currently shown by the system, including where applicable:
+
+Assignments
+Quizzes
+Holidays
+Exams
+Meetings
+Other
+
+Review whether the category presentation can be made clearer.
+
+Category colours should be restrained and accessible.
+
+Do not use large saturated blocks.
+
+13. Responsive redesign
+
+Verify at:
+
+320px
+360px
+375px
+390px
+412px
+Tablet
+Desktop
+
+Specifically test:
+
+long event titles
+long descriptions
+several events on one day
+events with time ranges
+month boundaries
+empty months
+multi-child Parent switching
+very long grade/class names
+
+No:
+
+text overflow
+horizontal scrolling
+clipped event cards
+content beneath bottom navigation
+14. Preserve Admin/Staff permissions
+
+Do not accidentally broaden calendar editing permissions.
+
+Preserve existing role rules.
+
+Document exactly:
+
+who can create
+who can edit
+who can delete
+who can view
+
+Parent is always read-only.
+
+If current Staff permissions are unclear, audit and report them before changing them.
+
+15. Notifications
+
+Do not build an entirely new notification system.
+
+Review whether important Calendar events can reuse the existing Parent notification infrastructure.
+
+For example:
+
+Important calendar event published
+Event updated
+Event cancelled
+
+Only implement notifications if they can safely reuse the existing durable Parent notification system.
+
+Avoid email spam.
+
+16. Existing calendar data
+
+Existing calendar events must remain intact.
+
+Do not delete or recreate calendar records merely for UI purposes.
+
+UI changes should operate on existing calendar data.
+
+17. Required tests
+
+Test:
+
+Admin calendar loads
+Staff calendar loads
+existing events remain
+create event
+edit event
+delete event
+Month/Week/Day
+long title rendering
+multiple events per day
+Parent read-only calendar
+school-wide Parent event
+Staff-only event hidden from Parent
+grade/class targeting
+multi-child Parent switching
+Parent authorization
+mobile agenda view
+Parent dashboard upcoming events
+existing Parent login regression
+Keep Me Signed In regression
+18. Final report
+
+Return:
+
+Existing calendar architecture found
+Existing role permissions
+UI problems identified
+Admin/Staff redesign completed
+Parent Calendar implementation
+Parent visibility rules
+Mobile calendar behavior
+Upcoming-event/dashboard behavior
+Notification integration, if any
+Files changed
+Whether migration is required
+Exact migration/audit commands if required
+Backend/frontend test counts
+Any remaining issue
+
+Do not deploy automatically.
+Do not run migrations automatically.

@@ -63,13 +63,13 @@
 }
 
 .rbc-event {
-  background: linear-gradient(135deg, #10b981 0%, #14b8a6 100%);
+  background: #2c7475;
   border: none;
-  border-radius: 8px;
-  padding: 4px 8px;
+  border-radius: 6px;
+  padding: 2px 5px;
   font-size: 12px;
   font-weight: 500;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
   transition: all 0.2s ease;
 }
 

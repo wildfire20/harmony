@@ -204,6 +204,44 @@ router.get('/dashboard', requireParent, async (req, res) => {
   }
 });
 
+// ─── GET /api/parent/calendar — selected-learner scoped, read-only ───────────
+router.get('/calendar', requireParent, async (req, res) => {
+  try {
+    const child = await resolveChild(req.user.id, req.query.child_id);
+    const upcoming = req.query.upcoming === 'true';
+    const month = Number(req.query.month);
+    const year = Number(req.query.year);
+    const params = [child.grade_id, child.class_id];
+    let dateClause = '';
+    if (upcoming) {
+      dateClause = 'AND e.start_date >= CURRENT_DATE';
+    } else if (Number.isInteger(month) && month >= 1 && month <= 12 &&
+               Number.isInteger(year) && year >= 2000 && year <= 2200) {
+      params.push(month, year);
+      dateClause = `AND EXTRACT(MONTH FROM e.start_date)=$3 AND EXTRACT(YEAR FROM e.start_date)=$4`;
+    }
+    const result = await db.query(`
+      SELECT e.id,e.title,e.description,e.start_date,e.end_date,e.event_type,
+             e.grade_id,g.name AS grade_name,e.class_id,c.name AS class_name,e.parent_visible
+      FROM school_events e
+      LEFT JOIN grades g ON g.id=e.grade_id
+      LEFT JOIN classes c ON c.id=e.class_id
+      WHERE e.is_active=true AND e.parent_visible=true
+        AND (e.grade_id IS NULL OR e.grade_id=$1)
+        AND (e.class_id IS NULL OR e.class_id=$2)
+        ${dateClause}
+      ORDER BY e.start_date ASC
+      ${upcoming ? 'LIMIT 20' : ''}
+    `, params);
+    res.json({ events: result.rows, learner: { id: child.id, grade_id: child.grade_id, class_id: child.class_id } });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message });
+    if (err.code === '42703') return res.status(503).json({ message: 'Parent calendar is not yet available.' });
+    console.error('Parent calendar error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // ─── GET /api/parent/attendance ───────────────────────────────────────────────
 router.get('/attendance', requireParent, async (req, res) => {
   try {

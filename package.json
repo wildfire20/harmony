@@ -31,6 +31,8 @@
     "audit:mini-phase1-finance": "node scripts/run-mini-phase1-finance-migration.js --audit",
     "audit:parent-rollout-preflight": "node scripts/audit-parent-rollout-preflight.js",
     "audit:parent-schema-debug": "node scripts/audit-parent-schema-debug.js",
+    "audit:calendar-parent-visibility": "node scripts/audit-calendar-parent-visibility.js",
+    "migrate:calendar-parent-visibility": "node scripts/run-calendar-parent-visibility-migration.js",
     "fix:enrollment-status-width": "node scripts/fix-enrollment-status-width.js",
     "install-client": "cd client && npm install",
     "heroku-postbuild": "npm run build",

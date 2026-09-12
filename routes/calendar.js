@@ -4,6 +4,14 @@ const db = require('../config/database');
 const { authenticate, authorize, authorizeResourceAccess } = require('../middleware/auth');
 
 const router = express.Router();
+const hasParentVisibilitySchema = async () => {
+  const result = await db.query(`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='school_events'
+      AND column_name IN ('parent_visible','class_id')
+  `);
+  return result.rows.length === 2;
+};
 
 // Get calendar events for a user
 router.get('/', authenticate, async (req, res) => {
@@ -68,26 +76,30 @@ router.get('/', authenticate, async (req, res) => {
     events = events.concat(taskResult.rows);
 
     // Get school events
+    const parentVisibilityReady = await hasParentVisibilitySchema();
     let eventQuery = `
-      SELECT id, title, description, start_date, start_date as due_date, end_date, 'school_event' as event_type,
-             event_type as category, target_audience, created_by
-      FROM school_events
-      WHERE is_active = true
+      SELECT e.id, e.title, e.description, e.start_date, e.start_date as due_date, e.end_date, 'school_event' as event_type,
+              e.event_type as category, e.target_audience, e.created_by, e.grade_id,
+              ${parentVisibilityReady ? 'e.class_id' : 'NULL::integer AS class_id'},
+              ${parentVisibilityReady ? 'e.parent_visible' : 'false AS parent_visible'},
+              g.name AS grade_name
+       FROM school_events e LEFT JOIN grades g ON g.id=e.grade_id
+      WHERE e.is_active = true
     `;
     let eventParams = [];
 
     if (user.role === 'student') {
-      eventQuery += ` AND (target_audience = 'all' OR target_audience = 'students' OR grade_id = $1)`;
+      eventQuery += ` AND (e.target_audience = 'all' OR e.target_audience = 'students' OR e.grade_id = $1)`;
       eventParams = [user.grade_id];
     } else if (user.role === 'teacher') {
-      eventQuery += ` AND (target_audience = 'all' OR target_audience = 'teachers')`;
+      eventQuery += ` AND (e.target_audience = 'all' OR e.target_audience = 'teachers')`;
     }
 
     // Add month/year filter for events
     if (month && year) {
       const monthInt = parseInt(month);
       const yearInt = parseInt(year);
-      eventQuery += ` AND EXTRACT(MONTH FROM start_date) = $${eventParams.length + 1} AND EXTRACT(YEAR FROM start_date) = $${eventParams.length + 2}`;
+      eventQuery += ` AND EXTRACT(MONTH FROM e.start_date) = $${eventParams.length + 1} AND EXTRACT(YEAR FROM e.start_date) = $${eventParams.length + 2}`;
       eventParams.push(monthInt, yearInt);
     }
 
@@ -132,6 +144,8 @@ async function ensureSchoolEventsTimestamp() {
         event_type VARCHAR(50) NOT NULL,
         target_audience VARCHAR(50) NOT NULL,
         grade_id INTEGER REFERENCES grades(id),
+        class_id INTEGER REFERENCES classes(id),
+        parent_visible BOOLEAN NOT NULL DEFAULT false,
         created_by INTEGER REFERENCES users(id),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -183,6 +197,12 @@ router.post('/events', [
       }
     }
     return true;
+  }),
+  body('class_id').optional().custom((value) => {
+    if (value !== undefined && value !== null && value !== '' && !Number.isInteger(parseInt(value))) {
+      throw new Error('Class ID must be an integer');
+    }
+    return true;
   })
 ], async (req, res) => {
   try {
@@ -196,17 +216,26 @@ router.post('/events', [
       });
     }
 
-    const { title, description, start_date, end_date, event_type, target_audience, grade_id } = req.body;
+    const { title, description, start_date, end_date, event_type, target_audience, grade_id, class_id, parent_visible } = req.body;
     const user = req.user;
 
     const processedGradeId = grade_id && grade_id !== '' ? parseInt(grade_id) : null;
+    const processedClassId = class_id && class_id !== '' ? parseInt(class_id) : null;
+    const parentVisibilityReady = await hasParentVisibilitySchema();
+    if (parent_visible === true && !parentVisibilityReady) {
+      return res.status(503).json({ success: false, message: 'Run the Calendar Parent visibility migration before publishing this event to Parents.' });
+    }
 
     console.log('Creating event:', { title, description, start_date, end_date, event_type, target_audience, grade_id: processedGradeId });
 
-    const result = await db.query(`
+    const result = parentVisibilityReady ? await db.query(`
+      INSERT INTO school_events (title, description, start_date, end_date, event_type, target_audience, grade_id, class_id, parent_visible, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING id, title, description, start_date, end_date, event_type, target_audience, grade_id, class_id, parent_visible, created_at
+    `, [title, description, start_date, end_date || null, event_type, target_audience, processedGradeId, processedClassId, parent_visible === true, user.id]) : await db.query(`
       INSERT INTO school_events (title, description, start_date, end_date, event_type, target_audience, grade_id, created_by)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, title, description, start_date, end_date, event_type, target_audience, grade_id, created_at
+      RETURNING id, title, description, start_date, end_date, event_type, target_audience, grade_id, false AS parent_visible, created_at
     `, [title, description, start_date, end_date || null, event_type, target_audience, processedGradeId, user.id]);
 
     res.status(201).json({
@@ -233,7 +262,8 @@ router.put('/events/:id', [
   body('start_date').optional().isISO8601().withMessage('Start date must be a valid date'),
   body('end_date').optional().isISO8601().withMessage('End date must be a valid date'),
   body('event_type').optional().isIn(['holiday', 'exam', 'meeting', 'deadline', 'other']).withMessage('Invalid event type'),
-  body('target_audience').optional().isIn(['all', 'students', 'teachers', 'staff']).withMessage('Invalid target audience')
+  body('target_audience').optional().isIn(['all', 'students', 'teachers', 'staff']).withMessage('Invalid target audience'),
+  body('parent_visible').optional().isBoolean().withMessage('Parent visibility must be true or false')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -246,10 +276,17 @@ router.put('/events/:id', [
     }
 
     const { id } = req.params;
-    const updateFields = req.body;
+    const parentVisibilityReady = await hasParentVisibilitySchema();
+    if (req.body.parent_visible === true && !parentVisibilityReady) {
+      return res.status(503).json({ success: false, message: 'Run the Calendar Parent visibility migration before publishing this event to Parents.' });
+    }
+    const allowedFields = ['title', 'description', 'start_date', 'end_date', 'event_type', 'target_audience', 'grade_id'];
+    if (parentVisibilityReady) allowedFields.push('parent_visible', 'class_id');
+    const updateFields = Object.fromEntries(Object.entries(req.body).filter(([key]) => allowedFields.includes(key)));
     
     // Build dynamic update query
     const fields = Object.keys(updateFields);
+    if (!fields.length) return res.status(400).json({ success: false, message: 'No supported fields to update' });
     const values = Object.values(updateFields);
     const setClause = fields.map((field, index) => `${field} = $${index + 1}`).join(', ');
     

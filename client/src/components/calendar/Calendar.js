@@ -22,6 +22,8 @@ const CalendarComponent = () => {
   const [editingEvent, setEditingEvent] = useState(null);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [currentView, setCurrentView] = useState('month');
+  const [grades, setGrades] = useState([]);
+  const [classes, setClasses] = useState([]);
 
   const isDark = theme === 'dark';
   const cardBg = isDark ? 'bg-gray-900' : 'bg-white';
@@ -39,7 +41,9 @@ const CalendarComponent = () => {
     end_time: '10:00',
     event_type: 'other',
     target_audience: 'all',
-    grade_id: ''
+    grade_id: '',
+    class_id: '',
+    parent_visible: false
   };
 
   const [eventForm, setEventForm] = useState(defaultForm);
@@ -47,6 +51,22 @@ const CalendarComponent = () => {
   useEffect(() => {
     fetchCalendarEvents();
   }, [currentDate]);
+
+  useEffect(() => {
+    api.get('/classes/grades')
+      .then(response => setGrades(response.data?.grades || []))
+      .catch(() => setGrades([]));
+  }, []);
+
+  useEffect(() => {
+    if (!eventForm.grade_id) {
+      setClasses([]);
+      return;
+    }
+    api.get(`/classes/classes?grade_id=${eventForm.grade_id}`)
+      .then(response => setClasses(response.data?.classes || []))
+      .catch(() => setClasses([]));
+  }, [eventForm.grade_id]);
 
   const fetchCalendarEvents = async (dateToFetch = currentDate) => {
     try {
@@ -97,11 +117,15 @@ const CalendarComponent = () => {
         start_date: startDateTime,
         end_date: endDateTime,
         event_type: eventForm.event_type,
-        target_audience: eventForm.target_audience
+        target_audience: eventForm.target_audience,
+        parent_visible: eventForm.parent_visible === true
       };
 
       if (eventForm.grade_id && eventForm.grade_id !== '') {
         cleanedForm.grade_id = parseInt(eventForm.grade_id);
+      }
+      if (eventForm.class_id && eventForm.class_id !== '') {
+        cleanedForm.class_id = parseInt(eventForm.class_id);
       }
 
       let response;
@@ -147,7 +171,9 @@ const CalendarComponent = () => {
       end_time: endMoment ? endMoment.format('HH:mm') : '10:00',
       event_type: resource.category || resource.event_type || 'other',
       target_audience: resource.target_audience || 'all',
-      grade_id: resource.grade_id || ''
+      grade_id: resource.grade_id || '',
+      class_id: resource.class_id || '',
+      parent_visible: resource.parent_visible === true
     });
     setEditingEvent(resource);
     setSelectedEvent(null);
@@ -271,7 +297,6 @@ const CalendarComponent = () => {
 
   const handleNavigate = (date) => {
     setCurrentDate(date);
-    fetchCalendarEvents(date);
   };
 
   const isAdmin = user.role === 'admin' || user.role === 'super_admin';
@@ -334,6 +359,11 @@ const CalendarComponent = () => {
               {resource.target_audience && resource.target_audience !== 'all' && (
                 <span className="inline-block px-3 py-1.5 rounded-full text-sm font-medium bg-blue-100 text-blue-700">
                   {resource.target_audience}
+                </span>
+              )}
+              {resource.parent_visible && (
+                <span className="inline-block px-3 py-1.5 rounded-full text-sm font-medium bg-teal-100 text-teal-700">
+                  Visible to Parents
                 </span>
               )}
             </div>
@@ -423,7 +453,7 @@ const CalendarComponent = () => {
           events={events}
           startAccessor="start"
           endAccessor="end"
-          style={{ height: 650 }}
+          style={{ height: 590 }}
           date={currentDate}
           view={currentView}
           onView={setCurrentView}
@@ -435,16 +465,15 @@ const CalendarComponent = () => {
           popup
           popupOffset={{ x: 30, y: 20 }}
           showMultiDayTimes
+          allDayMaxRows={3}
           step={30}
           timeslots={2}
           components={{
             toolbar: CustomToolbar,
             event: ({ event }) => (
-              <div className="flex flex-col">
-                <span className="font-medium truncate">{event.title}</span>
-                <span className="text-xs opacity-80">
-                  {moment(event.start).format('h:mm A')}
-                </span>
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/80" />
+                <span className="truncate font-medium">{event.title}</span>
               </div>
             )
           }}
@@ -610,6 +639,44 @@ const CalendarComponent = () => {
                   </select>
                 </div>
               </div>
+
+              <div>
+                <label className={`block text-sm font-medium ${textSecondary} mb-2`}>Target Grade</label>
+                <select
+                  value={eventForm.grade_id}
+                  onChange={(e) => setEventForm({ ...eventForm, grade_id: e.target.value, class_id: '' })}
+                  className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${textPrimary} focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all`}
+                >
+                  <option value="">All grades</option>
+                  {grades.map(grade => <option key={grade.id} value={grade.id}>{grade.name}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-sm font-medium ${textSecondary} mb-2`}>Target Class</label>
+                <select
+                  value={eventForm.class_id}
+                  onChange={(e) => setEventForm({ ...eventForm, class_id: e.target.value })}
+                  disabled={!eventForm.grade_id}
+                  className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${textPrimary} disabled:opacity-50 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all`}
+                >
+                  <option value="">All classes in grade</option>
+                  {classes.map(schoolClass => <option key={schoolClass.id} value={schoolClass.id}>{schoolClass.name}</option>)}
+                </select>
+              </div>
+
+              <label className={`flex items-start gap-3 rounded-xl border p-4 ${inputBg}`}>
+                <input
+                  type="checkbox"
+                  checked={eventForm.parent_visible}
+                  onChange={(e) => setEventForm({ ...eventForm, parent_visible: e.target.checked })}
+                  className="mt-0.5 h-4 w-4 accent-teal-600"
+                />
+                <span>
+                  <span className={`block text-sm font-semibold ${textPrimary}`}>Visible in Parent Portal</span>
+                  <span className={`block text-xs ${textSecondary}`}>School-wide when no grade is selected, or limited to Parents of learners in the selected grade.</span>
+                </span>
+              </label>
 
               <div className={`flex gap-3 pt-4 border-t ${cardBorder}`}>
                 <button 

@@ -22,12 +22,14 @@ const ParentDashboard = ({ child, user }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [upcoming, setUpcoming] = useState([]);
 
   useEffect(() => {
     parentApi('/dashboard')
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+    parentApi('/calendar?upcoming=true').then(result => setUpcoming((result?.events || []).slice(0, 3))).catch(() => setUpcoming([]));
   }, [child?.id]);
 
   if (loading) return <div className="space-y-4"><div className="h-32 animate-pulse rounded-3xl bg-[#dfe9e7]" /><div className="grid grid-cols-2 gap-3"><div className="h-24 animate-pulse rounded-2xl bg-[#dfe9e7]" /><div className="h-24 animate-pulse rounded-2xl bg-[#dfe9e7]" /></div></div>;
@@ -90,6 +92,19 @@ const ParentDashboard = ({ child, user }) => {
           </div>
         </div>
       )}
+
+      <section className="rounded-3xl border border-[#dce7eb] bg-white p-4 shadow-[0_12px_35px_rgba(31,65,83,.07)]">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-bold uppercase tracking-[0.12em] text-[#617487]">Upcoming</h2>
+          <a href="/parent/calendar" className="text-xs font-semibold text-[#176b73]">View Calendar</a>
+        </div>
+        {upcoming.length ? <div className="space-y-2">{upcoming.map(event => (
+          <a key={event.id} href="/parent/calendar" className="flex min-w-0 items-center gap-3 rounded-xl bg-[#f4f7f5] p-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e8f1ef]"><CalendarDays className="h-5 w-5 text-[#176b73]" /></div>
+            <div className="min-w-0"><p className="truncate text-sm font-semibold text-[#19324a]">{event.title}</p><p className="text-xs text-[#617487]">{new Date(event.start_date).toLocaleDateString()}</p></div>
+          </a>
+        ))}</div> : <p className="text-sm text-[#84929e]">No upcoming calendar events.</p>}
+      </section>
 
       {/* Recent announcements */}
       <section>
