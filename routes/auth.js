@@ -434,7 +434,12 @@ router.post('/refresh', async (req, res) => {
       persistentCookieAttempted: remember,
       rotationSuccess: true,
     });
-    res.json({ token: accessToken(old, inserted.rows[0].id), sessionMode: remember ? 'remembered' : 'browser' });
+    const refreshedUser = {
+      id: old.user_id,
+      email: old.email,
+      role: old.role,
+    };
+    res.json({ token: accessToken(refreshedUser, inserted.rows[0].id), sessionMode: remember ? 'remembered' : 'browser' });
   } catch (error) {
     if (client) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); }
     console.error('Parent refresh error category:', error?.code || 'unclassified');

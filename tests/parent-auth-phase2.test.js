@@ -60,11 +60,23 @@ const db = {
       const familyCreatedAt = found && state.sessions
         .filter(s => s.family_id === found.family_id)
         .reduce((earliest, session) => session.created_at < earliest ? session.created_at : earliest, found.created_at);
-      return row(found ? [{ ...found, id: state.user.id, session_id: found.id,
-        session_user_id: found.user_id, user_id: state.user.id, email: state.user.email,
-        role: 'parent', is_active: true, auth_revoked_at: null,
-        refresh_token_hash: found.hash, family_expires_at: found.family_expires_at,
-        created_at: found.created_at, family_created_at: familyCreatedAt }] : []);
+      return row(found ? [{
+        session_id: found.id,
+        session_user_id: found.user_id,
+        refresh_token_hash: found.hash,
+        family_id: found.family_id,
+        family_expires_at: found.family_expires_at,
+        expires_at: found.expires_at,
+        revoked_at: found.revoked_at,
+        replaced_by_hash: found.replaced_by_hash,
+        created_at: found.created_at,
+        family_created_at: familyCreatedAt,
+        user_id: state.user.id,
+        email: state.user.email,
+        role: 'parent',
+        is_active: true,
+        auth_revoked_at: null,
+      }] : []);
     }
     if (/UPDATE parent_sessions SET revoked_at=NOW\(\) WHERE refresh_token_hash/.test(sql)) {
       const found = state.sessions.find(s => s.hash === params[0]); if (found) found.revoked_at = new Date(); return row([]);
@@ -211,6 +223,13 @@ test('rememberMe reaches the server and refresh cookies have secure flags with d
     'normal sessions use a browser-session cookie');
   const rotatedNormal = await json('/api/auth/refresh', { method: 'POST', headers: { cookie: normalCookie } });
   assert.equal(rotatedNormal.response.status, 200);
+  const normalLoginClaims = require('jsonwebtoken').decode(normal.body.token);
+  const normalRefreshClaims = require('jsonwebtoken').decode(rotatedNormal.body.token);
+  assert.equal(normalLoginClaims.id, state.user.id);
+  assert.equal(normalRefreshClaims.id, normalLoginClaims.id,
+    'refresh must preserve the same parent identity claim as login');
+  assert.equal(normalRefreshClaims.role, normalLoginClaims.role);
+  assert.ok(normalRefreshClaims.session_id);
   assert.doesNotMatch(rotatedNormal.response.headers.get('set-cookie'), /Max-Age=/,
     'rotating a normal session must not make it persistent');
   const remembered = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1', rememberMe: true }) });
@@ -219,6 +238,18 @@ test('rememberMe reaches the server and refresh cookies have secure flags with d
   assert.match(remembered.response.headers.get('set-cookie'), /SameSite=Lax/);
   assert.match(remembered.response.headers.get('set-cookie'), /Path=\/api\/auth/);
   assert.equal(remembered.body.sessionMode, 'remembered');
+  const rememberedCookie = remembered.response.headers.get('set-cookie').split(';')[0];
+  const rotatedRemembered = await json('/api/auth/refresh', {
+    method: 'POST',
+    headers: { cookie: rememberedCookie },
+  });
+  assert.equal(rotatedRemembered.response.status, 200);
+  const rememberedLoginClaims = require('jsonwebtoken').decode(remembered.body.token);
+  const rememberedRefreshClaims = require('jsonwebtoken').decode(rotatedRemembered.body.token);
+  assert.equal(rememberedRefreshClaims.id, rememberedLoginClaims.id,
+    'remembered verification refresh must preserve the parent identity claim');
+  assert.equal(rememberedRefreshClaims.role, 'parent');
+  assert.ok(rememberedRefreshClaims.session_id);
   assert.ok(state.sessions.every(s => s.family_expires_at instanceof Date));
   const family = state.sessions[0].family_expires_at.getTime();
   assert.equal(state.sessions[0].family_expires_at.getTime(), family);
