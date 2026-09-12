@@ -29,8 +29,9 @@ const PaymentDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [invoices, setInvoices] = useState([]);
   const [transactions, setTransactions] = useState([]);
-  const [summary, setSummary] = useState({});
+  const [summary, setSummary] = useState(null);
   const [pagination, setPagination] = useState({});
+  const [invoiceLoadError, setInvoiceLoadError] = useState(null);
   
   // Filter states
   const [filters, setFilters] = useState({
@@ -100,6 +101,7 @@ const PaymentDashboard = () => {
   const fetchInvoices = async () => {
     try {
       setLoading(true);
+      setInvoiceLoadError(null);
       const queryParams = new URLSearchParams();
       
       Object.entries(filters).forEach(([key, value]) => {
@@ -115,11 +117,10 @@ const PaymentDashboard = () => {
         }
       });
 
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(data.message || `HTTP error! status: ${response.status}`);
       }
-
-      const data = await response.json();
       
       if (data.success) {
         setInvoices(data.invoices);
@@ -130,6 +131,7 @@ const PaymentDashboard = () => {
       }
     } catch (error) {
       console.error('Fetch invoices error:', error);
+      setInvoiceLoadError(error.message || 'Finance data is unavailable');
       toast.error('Failed to load invoices');
     } finally {
       setLoading(false);
@@ -603,7 +605,9 @@ const PaymentDashboard = () => {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Total Students</p>
-                <p className="text-2xl font-semibold text-gray-900">{summary.totalStudents || 0}</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {summary ? (summary.totalStudents ?? 0) : 'Unavailable'}
+                </p>
               </div>
             </div>
           </div>
@@ -615,7 +619,9 @@ const PaymentDashboard = () => {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Paid</p>
-                <p className="text-2xl font-semibold text-gray-900">{summary.paidCount || 0}</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {summary ? (summary.paidCount ?? 0) : 'Unavailable'}
+                </p>
               </div>
             </div>
           </div>
@@ -627,7 +633,9 @@ const PaymentDashboard = () => {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Unpaid</p>
-                <p className="text-2xl font-semibold text-gray-900">{summary.unpaidCount || 0}</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {summary ? (summary.unpaidCount ?? 0) : 'Unavailable'}
+                </p>
               </div>
             </div>
           </div>
@@ -639,11 +647,36 @@ const PaymentDashboard = () => {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Total Outstanding</p>
-                <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.totalOutstanding)}</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {summary ? formatCurrency(summary.totalOutstanding) : 'Unavailable'}
+                </p>
               </div>
             </div>
           </div>
         </div>
+
+        {invoiceLoadError && (
+          <div className="mb-6 rounded-lg border border-red-300 bg-red-50 p-4 text-red-800" role="alert">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-semibold">Finance data is unavailable</p>
+                <p className="text-sm">
+                  {summary
+                    ? 'The latest refresh failed. Showing the last successfully loaded invoice data.'
+                    : 'Invoice totals and records could not be loaded. The values above are not zero balances.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={fetchInvoices}
+                className="inline-flex items-center justify-center rounded-md border border-red-400 bg-white px-3 py-2 text-sm font-medium text-red-800 hover:bg-red-100"
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Student Payment Export */}
         <StudentPaymentExport />
@@ -744,6 +777,10 @@ const PaymentDashboard = () => {
             <div className="flex justify-center py-8">
               <LoadingSpinner size="lg" />
             </div>
+          ) : invoiceLoadError && !summary ? (
+            <div className="px-6 py-10 text-center text-sm text-red-700">
+              Invoice data could not be loaded. Use Retry above to try again.
+            </div>
           ) : (
             <>
               <div className="overflow-x-auto">
@@ -777,7 +814,13 @@ const PaymentDashboard = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {invoices.map((invoice) => {
+                    {invoices.length === 0 ? (
+                      <tr>
+                        <td colSpan="8" className="px-6 py-10 text-center text-sm text-gray-500">
+                          No invoices found for the selected filters.
+                        </td>
+                      </tr>
+                    ) : invoices.map((invoice) => {
                       const isArrearsInvoice = (invoice.description || '').toLowerCase().includes('arrears');
                       return (
                         <tr key={invoice.id} className="hover:bg-gray-50">

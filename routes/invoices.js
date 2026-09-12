@@ -10,6 +10,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { notifyInvoice, notifyPayment } = require('../services/parentNotificationService');
 const { logAudit, getIp } = require('../utils/auditLogger');
 const { getStudentLedger, getFinanceSummary, allocatePayment } = require('../services/financeLedger');
+const { parseInvoiceListQuery, appendPeriodFilters } = require('../utils/invoiceQuery');
 
 const router = express.Router();
 
@@ -498,25 +499,15 @@ router.get('/', [
   authorize('admin', 'super_admin')
 ], async (req, res) => {
   try {
-    const { 
-      status, 
-      month, 
-      year, 
-      studentNumber, 
-      page = 1, 
-      limit = 50,
-      sortBy = 'due_date',
-      sortOrder = 'DESC'
-    } = req.query;
-    const allowedStatuses = ['Unpaid', 'Partial', 'Paid', 'Overpaid', 'Carried Forward'];
-    if (status && !allowedStatuses.includes(status)) {
-      return res.status(400).json({ success: false, message: 'Invalid invoice status filter' });
+    let filters;
+    try {
+      filters = parseInvoiceListQuery(req.query);
+    } catch (error) {
+      return res.status(400).json({ success: false, message: error.message });
     }
-    if ((month && !year) || (!month && year) ||
-        (month && (!Number.isInteger(Number(month)) || Number(month) < 1 || Number(month) > 12)) ||
-        (year && (!Number.isInteger(Number(year)) || Number(year) < 1900 || Number(year) > 2200))) {
-      return res.status(400).json({ success: false, message: 'Invalid invoice period filter' });
-    }
+    const {
+      status, month, year, studentNumber, page, limit, sortBy, sortOrder,
+    } = filters;
 
     // First, let's get the total count of active students
     const studentCountQuery = `
@@ -552,14 +543,11 @@ router.get('/', [
       queryParams.push(status);
     }
 
-    if (month && year) {
+    const invoicePeriodClauses = [];
+    appendPeriodFilters(invoicePeriodClauses, queryParams, 'i.due_date', { month, year });
+    for (const clause of invoicePeriodClauses) {
       paramCount++;
-      query += ` AND EXTRACT(MONTH FROM i.due_date) = $${paramCount}`;
-      queryParams.push(parseInt(month));
-      
-      paramCount++;
-      query += ` AND EXTRACT(YEAR FROM i.due_date) = $${paramCount}`;
-      queryParams.push(parseInt(year));
+      query += ` AND ${clause}`;
     }
 
     if (studentNumber) {
@@ -569,17 +557,13 @@ router.get('/', [
     }
 
     // Add sorting
-    const allowedSortFields = ['due_date', 'amount_due', 'status', 'student_number', 'created_at'];
-    const validSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'due_date';
-    const validSortOrder = ['ASC', 'DESC'].includes(sortOrder.toUpperCase()) ? sortOrder.toUpperCase() : 'DESC';
-    
-    query += ` ORDER BY i.${validSortBy} ${validSortOrder}`;
+    query += ` ORDER BY i.${sortBy} ${sortOrder}`;
 
     // Add pagination
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const offset = (page - 1) * limit;
     paramCount++;
     query += ` LIMIT $${paramCount}`;
-    queryParams.push(parseInt(limit));
+    queryParams.push(limit);
     
     paramCount++;
     query += ` OFFSET $${paramCount}`;
@@ -607,14 +591,11 @@ router.get('/', [
       countParams.push(status);
     }
 
-    if (month && year) {
+    const countPeriodClauses = [];
+    appendPeriodFilters(countPeriodClauses, countParams, 'i.due_date', { month, year });
+    for (const clause of countPeriodClauses) {
       countParamIndex++;
-      countQuery += ` AND EXTRACT(MONTH FROM i.due_date) = $${countParamIndex}`;
-      countParams.push(parseInt(month));
-      
-      countParamIndex++;
-      countQuery += ` AND EXTRACT(YEAR FROM i.due_date) = $${countParamIndex}`;
-      countParams.push(parseInt(year));
+      countQuery += ` AND ${clause}`;
     }
 
     if (studentNumber) {
@@ -631,8 +612,8 @@ router.get('/', [
     // source invoices while retaining them in the history list.
     const financeSummary = await getFinanceSummary({
       status,
-      month: month && year ? parseInt(month, 10) : undefined,
-      year: month && year ? parseInt(year, 10) : undefined,
+      month,
+      year,
       studentNumber,
     });
 
@@ -640,10 +621,10 @@ router.get('/', [
       success: true,
       invoices: result.rows,
       pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(totalInvoices / parseInt(limit)),
+        currentPage: page,
+        totalPages: Math.ceil(totalInvoices / limit),
         totalInvoices,
-        limit: parseInt(limit)
+        limit
       },
       summary: {
         totalStudents, // Add total students count here

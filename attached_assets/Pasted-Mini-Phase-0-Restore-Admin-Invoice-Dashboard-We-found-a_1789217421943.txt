@@ -1,0 +1,118 @@
+Mini Phase 0 — Restore Admin Invoice Dashboard
+
+We found a production regression in the Admin Payments dashboard.
+
+Do not deploy automatically.
+Do not run migrations automatically.
+Do not alter or delete invoice/payment data.
+Do not use Clear All Invoices, Remove Ghost Invoices, Fix Invoice Status, or Carry Forward Arrears as part of this investigation.
+
+Production symptoms
+
+On /payments:
+
+Invoice table is empty
+Total Students shows 0
+Paid shows 0
+Unpaid shows 0
+Total Outstanding shows R0.00
+UI displays Failed to load invoices
+
+Browser console shows repeated:
+
+GET /api/invoices?year=2026&page=1&limit=20 → HTTP 400
+Fetch invoices error: HTTP error! status: 400
+
+The Student Payment History Export still successfully finds learners and their payment histories, proving the underlying production finance data still exists.
+
+1. Find the exact 400 cause
+
+Audit:
+
+PaymentDashboard.js
+frontend invoice API service
+/api/invoices route
+query validation/parsing
+year parameter
+month filter
+status filter
+student-number filter
+page
+limit
+any validation introduced during the recent finance/ledger changes
+
+Capture the backend validation/error reason that causes this valid production request to return 400:
+
+/api/invoices?year=2026&page=1&limit=20
+
+Do not guess.
+
+2. Restore invoice listing
+
+The standard request above must successfully return the 2026 invoice list with:
+
+pagination
+summary totals
+student
+reference
+amount due
+amount paid
+outstanding
+due date
+status
+
+Existing filters must continue to work.
+
+Preserve the new authoritative finance ledger introduced previously.
+
+Do not bring back an older inconsistent finance calculation just to make the table load.
+
+3. Fix dangerous false-zero UI
+
+A failed invoice request must never make the Admin dashboard appear to have:
+
+0 students
+0 paid
+0 unpaid
+R0 outstanding
+
+when finance data could not actually be loaded.
+
+On fetch failure:
+
+clearly show that finance data is unavailable
+do not present failed data as legitimate zero totals
+preserve/retry safely where appropriate
+4. Keep payment-history export working
+
+Do not break the working Student Payment History Export.
+
+Check whether the export and dashboard use different finance services/endpoints and explain why one currently works while the other returns 400.
+
+5. Regression tests
+
+Test at minimum:
+
+/api/invoices?year=2026&page=1&limit=20
+pagination
+all statuses
+specific status
+all months
+specific month
+student-number search
+empty legitimate result
+backend failure state
+summary cards
+payment-history export
+Parent Portal finance regression
+Return
+Exact root cause of HTTP 400
+Files changed
+Backend fix
+Frontend failure-state fix
+Confirmation no finance data was modified
+Tests passed
+Whether a migration is required
+Any remaining blocker
+
+Do not deploy or run migrations automatically.

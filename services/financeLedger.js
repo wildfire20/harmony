@@ -9,6 +9,7 @@
  * Admin/Parent discrepancy.
  */
 const db = require('../config/database');
+const { appendPeriodFilters } = require('../utils/invoiceQuery');
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const nonNegative = (value) => Math.max(0, money(value));
@@ -181,17 +182,7 @@ async function getFinanceSummary(filters = {}, executor = db) {
     params.push(filters.status);
     clauses.push(`i.status = $${params.length}`);
   }
-  if (filters.month != null || filters.year != null) {
-    const month = Number(filters.month);
-    const year = Number(filters.year);
-    if (!Number.isInteger(month) || month < 1 || month > 12 ||
-        !Number.isInteger(year) || year < 1900 || year > 2200) {
-      throw new Error('Invalid invoice period filter');
-    }
-    params.push(month, year);
-    clauses.push(`EXTRACT(MONTH FROM i.due_date) = $${params.length - 1}`);
-    clauses.push(`EXTRACT(YEAR FROM i.due_date) = $${params.length}`);
-  }
+  appendPeriodFilters(clauses, params, 'i.due_date', filters);
   if (filters.studentNumber) {
     params.push(`%${String(filters.studentNumber)}%`);
     clauses.push(`i.student_number ILIKE $${params.length}`);
@@ -209,13 +200,12 @@ async function getFinanceSummary(filters = {}, executor = db) {
     transactionParams.push(`%${String(filters.studentNumber)}%`);
     transactionClauses.push(`pt.student_number ILIKE $${transactionParams.length}`);
   }
-  if (filters.month != null || filters.year != null) {
-    const month = Number(filters.month);
-    const year = Number(filters.year);
-    transactionParams.push(month, year);
-    transactionClauses.push(`EXTRACT(MONTH FROM COALESCE(pt.payment_date, pt.transaction_date)) = $${transactionParams.length - 1}`);
-    transactionClauses.push(`EXTRACT(YEAR FROM COALESCE(pt.payment_date, pt.transaction_date)) = $${transactionParams.length}`);
-  }
+  appendPeriodFilters(
+    transactionClauses,
+    transactionParams,
+    'COALESCE(pt.payment_date, pt.transaction_date)',
+    filters,
+  );
   const unallocatedResult = await executor.query(`
     SELECT COALESCE(SUM(pt.amount), 0) AS unallocated
     FROM payment_transactions pt
