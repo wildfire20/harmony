@@ -1,0 +1,278 @@
+Phase 3 Parent Notification Centre & Automated Parent Alerts has passed testing and security review.
+
+Proceed with Phase 4 — Parent Portal UX, Dashboard & Action Centre.
+
+The goal is to make the authenticated Parent Portal extremely simple for real parents to use on mobile while preserving all Phase 1–3 security, authentication, notifications, learner isolation and backend behavior.
+
+Do not rebuild backend architecture unnecessarily.
+Do not deploy automatically.
+Do not run migrations automatically.
+
+1. Redesign the Parent Dashboard around useful questions
+
+The dashboard should immediately answer:
+
+Is my child at school?
+How is my child performing?
+Do I owe the school money?
+Has Harmony sent me anything important?
+Is there anything I need to do?
+
+Create clear dashboard cards such as:
+
+Today / Attendance
+
+Present / Absent / Late
+current attendance percentage
+link to full Attendance
+
+Fees
+
+Outstanding balance
+next/important invoice information where available
+payment-proof status where relevant
+link to Fees & Payments
+
+Academic Progress
+
+latest graded result
+recent average where supported
+pending/overdue work count
+link to Grades
+
+What’s New
+
+latest important announcement
+unread notification count
+link to Notifications / Announcements
+
+Action Required
+Show only when something genuinely needs attention, such as:
+
+rejected payment proof
+overdue balance
+important unread notice
+required parent action
+
+Do not invent actions that do not exist in the current system.
+
+2. Make multiple-child switching obvious
+
+The selected learner must be visually prominent near the top of every relevant Parent Portal page.
+
+If the parent has multiple learners:
+
+show an easy learner switcher
+display learner name, grade/class and safe identifying information
+clearly indicate which learner is currently selected
+changing learner must refresh all learner-specific information
+
+Preserve Phase 1 authorization and never rely on frontend selection alone.
+
+If only one learner exists, do not clutter the interface with an unnecessary selector.
+
+3. Mobile-first navigation
+
+Most parents are expected to use phones.
+
+Audit and improve navigation for small screens.
+
+Parent Portal main areas should be easy to reach:
+
+Home
+Attendance
+Academics / Grades
+Fees & Payments
+Documents
+Announcements
+Notifications
+Account
+
+Use clear icons + text.
+
+Avoid hidden functionality that requires parents to guess what an icon means.
+
+Ensure:
+
+large touch targets
+readable font sizes
+no horizontal overflow
+no clipped cards
+no low-contrast text
+sticky/mobile navigation where useful
+4. Notification visibility
+
+Make the Phase 3 notification system prominent without being annoying.
+
+Add:
+
+notification bell
+unread badge
+latest important notification preview on dashboard
+
+Notifications should visually distinguish:
+
+Attendance
+Academics
+Payments
+Announcements
+Documents
+
+Parent should be able to mark notifications read and use the existing safe deep link.
+
+5. Fees & Payments UX
+
+Simplify the parent experience.
+
+Clearly display:
+
+Total outstanding
+Total paid
+Recent invoices
+Invoice status
+Enrolled services
+Payment-proof submissions
+
+Payment-proof statuses should be easy to understand:
+
+Pending review
+Approved
+Rejected
+
+If rejected, clearly display the safe rejection reason.
+
+Keep the verified Harmony banking details from the centralized configuration.
+
+Do not change payment/accounting logic in this phase.
+
+6. Attendance UX
+
+Present attendance in a parent-friendly way:
+
+current month summary
+Present
+Absent
+Late
+Excused
+attendance percentage
+
+Individual days should remain easy to inspect.
+
+Do not implement absence explanations yet.
+
+7. Academic progress UX
+
+Improve presentation of:
+
+latest grades
+teacher feedback
+pending assignments
+overdue assignments
+due dates
+performance indicators
+
+Parents must remain read-only.
+
+Do not restore Student Portal task submission.
+
+8. Documents
+
+Organize school documents so parents can quickly understand what each item is.
+
+Show safe information only:
+
+title
+document type
+publication date
+relevant learner/grade where appropriate
+secure View / Download
+
+Preserve Phase 1 secured document delivery.
+
+Never expose S3/internal storage information.
+
+9. Account section
+
+Add a clear Account/Security section containing:
+
+parent name
+registered phone
+registered email where available
+linked learners
+change password
+log out
+log out all devices if Phase 2 already supports it
+browser notification preference if Phase 3 supports it
+
+Do not allow sensitive parent identity information to be changed without a properly designed verification workflow.
+
+Editable profile information is a future phase unless already safe.
+
+10. Loading, empty and error states
+
+Every major screen must have a proper parent-friendly state for:
+
+loading
+no data
+network error
+no linked learner
+expired session
+unauthorized learner
+
+Avoid raw API/database error messages.
+
+11. Preserve security and existing functionality
+
+Do not weaken:
+
+Phase 1 learner isolation
+Phase 2 persistent sessions
+Phase 3 notification authorization
+Parent document security
+payment security
+Student Portal retirement
+admissions system
+Gmail API transport
+
+Do not add new Admin/teacher permissions in this phase.
+
+12. Testing
+
+Verify desktop, tablet and mobile behavior.
+
+Test:
+
+one-child parent
+multiple-child parent
+zero-child parent
+switching children
+dashboard values after switching
+unread notifications
+notification deep links
+attendance
+academics
+fees
+payment proof states
+documents
+remembered login
+expired login
+
+Rerun all Phase 1–3 regression/security tests and the production build.
+
+Perform an independent UI/security review.
+
+Return:
+
+Parent Portal UX changes
+Dashboard layout
+Mobile navigation changes
+Learner-switching UX
+Notification UX
+Fees/attendance/academic improvements
+Files changed
+Tests passed
+Screens/states visually verified
+Independent review
+Any blocker before Parent Portal production rollout
+
+Do not deploy or run migrations automatically.
