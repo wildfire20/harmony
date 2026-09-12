@@ -1,0 +1,298 @@
+The Phase 3 reconciliation audit is approved.
+
+There is no complete Phase 3 implementation to restore, so proceed with implementing Phase 3 — Parent Notification Centre & Automated Parent Alerts additively on top of the current Phase 4 Parent Portal.
+
+Do not roll back Phase 4.
+Do not deploy automatically.
+Do not run migrations automatically.
+
+Preserve:
+
+Phase 1 multi-learner isolation and payment/document security
+Phase 2 activation/session/password security
+Phase 4 Parent Portal UX
+Admissions functionality
+Student Portal retirement
+Existing Gmail API/OAuth transport
+1. Durable Parent Notification Centre
+
+Create a dedicated parent notification system separate from Admin admissions notifications.
+
+Add an idempotent manual migration for parent notifications.
+
+Suggested architecture:
+
+parent_notifications
+
+event type
+parent user reference
+learner reference where applicable
+safe title
+safe summary
+safe deep-link destination
+dedupe key
+created timestamp
+
+parent_notification_reads / recipients
+
+notification
+parent
+read timestamp
+dismissed timestamp where supported
+
+If a simpler secure schema is better, explain it.
+
+Read/unread state must be per parent.
+
+Never store secure tokens, storage keys, direct S3 URLs, passwords, or sensitive free-form information in notifications.
+
+2. Parent Notification APIs
+
+Add authenticated parent-owned endpoints:
+
+list notifications
+unread count
+mark one read
+mark all read
+
+Do not accept arbitrary parent IDs from the client.
+
+Parent identity must always come from the authenticated Phase 2 session.
+
+Learner-related notifications must be validated against the parent's current linked learners.
+
+3. Parent Portal UI
+
+Connect the existing Phase 4 bell to the real notification centre.
+
+Add:
+
+unread badge
+notification inbox
+newest-first ordering
+read/unread visual state
+timestamp
+learner name where appropriate
+notification categories/icons
+safe action button/deep link
+
+Suggested categories:
+
+Attendance
+Academics
+Payments
+Announcements
+Documents
+
+The current bell must no longer simply open Announcements.
+
+4. Attendance notifications
+
+Create meaningful parent notifications when a learner is marked:
+
+Absent
+Late
+
+Prevent duplicates when staff save/edit the same attendance record repeatedly.
+
+Example:
+
+Tariro was marked absent today.
+
+The notification should link safely to Attendance.
+
+Attendance remains staff-controlled.
+
+5. Academic notifications
+
+When a result becomes newly available to the parent, create a notification such as:
+
+New Mathematics result available for Tariro.
+
+Do not expose unnecessary marks or teacher comments in email/push previews.
+
+The full result remains inside the authenticated Parent Portal.
+
+Prevent duplicate notifications if a teacher saves the same grade repeatedly without a meaningful publication/change event.
+
+6. Payments
+
+Add parent notifications for:
+
+Payment proof successfully submitted
+Payment proof approved
+Payment proof rejected
+Safe rejection reason
+Payment applied to invoice/account
+New invoice generated where appropriate
+
+Make sure the notification identifies the correct learner and safe amount/status.
+
+Payment email/notification failure must never roll back the underlying payment transaction.
+
+7. Announcements
+
+Existing audience/grade/class targeting remains authoritative.
+
+Create Parent Portal notifications only for parents who are actually eligible to see the announcement.
+
+General announcements can notify all eligible parents.
+
+Grade/class announcements must respect exact linked-learner scope.
+
+8. Documents
+
+New parent/everyone documents should generate notifications only for parents authorized to see them.
+
+Preserve learner/grade/class targeting.
+
+Do not broadcast every document to all parent subscriptions.
+
+9. Email alerts
+
+Reuse the existing Gmail API/OAuth transport.
+
+Send email only for important events, not every notification.
+
+Examples:
+
+Absent learner
+Important announcement
+Payment approved/rejected
+Important new invoice/fee action
+
+Emails should contain:
+
+View in Parent Portal
+
+Use only allowlisted production deep links.
+
+If the parent has a valid remembered Phase 2 session, the link should take them directly to the relevant section.
+
+If authentication is required, login should safely return them to that intended section afterward.
+
+Preserve Harmony Reply-To and Powered by AutoM8 branding.
+
+10. Fix browser push security
+
+Audit and repair the existing push implementation.
+
+Specifically:
+
+Do not allow an existing push endpoint to be reassigned to a different parent.
+Fix the obsolete parent_student_links reference to the current parent_students relationship.
+Scope targeted push to the correct parent/learner.
+Preserve grade/class targeting for document/announcement events.
+Validate subscription payloads.
+Preserve unsubscribe.
+Handle stale 404/410 subscriptions.
+
+Push is an optional delivery channel.
+
+The durable Parent Notification Centre remains the source of truth.
+
+11. Deep-link allowlist
+
+Support only known Parent Portal destinations such as:
+
+Home
+Attendance
+Grades
+Fees
+Payment Proof
+Documents
+Announcements
+Notifications
+
+Never accept arbitrary external URLs or client-provided redirects.
+
+Revalidate learner authorization when opening learner-specific destinations.
+
+12. Deduplication
+
+Add database-backed or transactionally safe deduplication.
+
+The same underlying event must not create multiple notifications because:
+
+staff pressed Save twice
+a request retried
+email/push delivery retried
+two application instances processed the same event
+
+Delivery retry must not create a second durable notification.
+
+13. Transaction behavior
+
+Important school records must commit independently of notification delivery.
+
+For example:
+
+attendance saved
+→ commit
+→ notification/email/push processing
+
+Payment approved
+→ commit safely
+→ notify parent
+
+Email or push failure must never undo:
+
+attendance
+grades
+payments
+invoices
+announcements
+document publication
+14. Tests
+
+Add tests for:
+
+Parent A cannot see Parent B notifications
+multi-child notification labeling
+unread count
+mark read
+read all
+deduplication
+absent/late notification generation
+academic notification generation
+payment submitted/approved/rejected
+announcement targeting
+document targeting
+safe deep links
+remembered-session deep linking
+expired-session login return
+push endpoint ownership
+cross-parent push reassignment rejection
+unsubscribe
+stale subscription removal
+Gmail failure not rolling back source transaction
+
+Rerun:
+
+Phase 1 Parent Portal security tests
+Phase 2 authentication/session tests
+Phase 4 frontend tests
+payment security tests
+admissions tests
+Student Portal retirement tests
+Gmail tests
+production build
+
+Perform an independent security review.
+
+Return
+Notification architecture
+Migration/schema created
+Notification APIs
+Parent inbox UI
+Events implemented
+Email behavior
+Push-security fixes
+Deep-link behavior
+Files changed
+Tests passed
+Independent review findings
+Exact migration command
+Any blocker before production Parent Portal rollout
+
+Do not deploy and do not run migrations automatically.

@@ -1,0 +1,63 @@
+-- Phase 3 Parent Notification Centre.  This migration is deliberately manual,
+-- additive, and safe to run repeatedly.  It does not change source records.
+CREATE TABLE IF NOT EXISTS parent_notifications (
+  id BIGSERIAL PRIMARY KEY,
+  event_type VARCHAR(64) NOT NULL,
+  parent_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  learner_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  title VARCHAR(180) NOT NULL,
+  summary VARCHAR(500) NOT NULL,
+  deep_link VARCHAR(80) NOT NULL,
+  dedupe_key VARCHAR(240) NOT NULL,
+  important BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT parent_notifications_deep_link_check CHECK (
+    deep_link IN (
+      '/parent', '/parent/dashboard', '/parent/attendance', '/parent/grades',
+      '/parent/invoices', '/parent/payment-proof', '/parent/documents',
+      '/parent/announcements', '/parent/notifications'
+    )
+  ),
+  CONSTRAINT parent_notifications_dedupe_unique UNIQUE (parent_id, dedupe_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_parent_notifications_parent_created
+  ON parent_notifications (parent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_parent_notifications_learner
+  ON parent_notifications (learner_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS parent_notification_reads (
+  notification_id BIGINT NOT NULL REFERENCES parent_notifications(id) ON DELETE CASCADE,
+  parent_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  dismissed_at TIMESTAMPTZ,
+  PRIMARY KEY (notification_id, parent_id)
+);
+CREATE INDEX IF NOT EXISTS idx_parent_notification_reads_parent
+  ON parent_notification_reads (parent_id, read_at);
+
+-- Keep this migration independent of server startup order.  Existing Phase 4
+-- deployments already have this table; fresh/manual migration runs create it.
+CREATE TABLE IF NOT EXISTS parent_push_subscriptions (
+  id BIGSERIAL PRIMARY KEY,
+  parent_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL,
+  subscription JSONB NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE parent_push_subscriptions
+  ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE parent_push_subscriptions
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE parent_push_subscriptions
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+-- Existing deployments used endpoint as the subscription identity.  Keep that
+-- invariant: application code rejects an ownership change rather than taking
+-- ownership of an existing endpoint.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_parent_push_subscriptions_endpoint
+  ON parent_push_subscriptions (endpoint);
+CREATE INDEX IF NOT EXISTS idx_parent_push_subscriptions_parent_active
+  ON parent_push_subscriptions (parent_id, is_active);

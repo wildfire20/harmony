@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
+const { notifyPayment } = require('../services/parentNotificationService');
 const { authenticate, authorize } = require('../middleware/auth');
 const EnhancedCSVParser = require('../utils/enhancedCSVParser');
 const FNBPDFParser = require('../utils/fnbPDFParser');
@@ -690,12 +691,13 @@ async function processTransactions(transactions, userId) {
           : '';
 
         // Insert one payment_transaction row per invoice allocation
-        await client.query(`
+        const transactionResult = await client.query(`
           INSERT INTO payment_transactions (
             invoice_id, student_id, student_number, reference_number,
             amount, transaction_date, payment_date, description,
             payment_method, month, year
           ) VALUES ($1,$2,$3,$4,$5,$6,$6,$7,'bank_transfer',$8,$9)
+          RETURNING id
         `, [
           inv.id, studentId, studentNumber,
           transaction.reference,
@@ -705,7 +707,10 @@ async function processTransactions(transactions, userId) {
           txMonth, txYear
         ]);
 
+        // The transaction row is the stable source event ID for dedupe.
+        const transactionId = transactionResult.rows[0]?.id;
         allocations.push({
+          transactionId,
           invoiceId:     inv.id,
           reference:     inv.reference_number,
           month:         txMonth,
@@ -736,6 +741,14 @@ async function processTransactions(transactions, userId) {
 
       await client.query('COMMIT');
       console.log(`✅ Processed R${transaction.amount} for ${studentFirstName} ${studentLastName} (${studentNumber}) — ${allocations.length} invoice(s) updated`);
+      await Promise.allSettled(allocations
+        .filter((allocation) => allocation.transactionId != null)
+        .map((allocation) => notifyPayment({
+          kind: 'applied',
+          paymentId: allocation.transactionId,
+          learnerId: studentId,
+          amount: allocation.appliedAmount,
+        })));
 
       // ── Build result data for the response ──────────────────────────────────
       const arrearsAllocations  = allocations.filter(a => a.isArrears);
@@ -1437,6 +1450,12 @@ router.post('/manual-payment', [
       },
       ipAddress: getIp(req)
     });
+    await notifyPayment({
+      kind: 'applied',
+      paymentId: paymentResult.rows[0].id,
+      learnerId: student.id,
+      amount,
+    });
 
     res.json({
       success: true,
@@ -1776,12 +1795,13 @@ router.post('/manual-payment/apply-arrears-first', [
         const txYear  = invDue ? invDue.getFullYear()  : null;
         const isArrears = txYear !== null && txYear < thisYear;
 
-        await client.query(`
+        const transactionResult = await client.query(`
           INSERT INTO payment_transactions (
             invoice_id, student_id, student_number, reference_number, reference,
             amount, transaction_date, payment_date, description, payment_method,
             recorded_by, month, year
           ) VALUES ($1,$2,$3,$4,$4,$5,$6,$6,$7,'manual_entry',$8,$9,$10)
+          RETURNING id
         `, [
           inv.id, student_id, student.student_number, refValue,
           toApply, payment_date,
@@ -1789,7 +1809,11 @@ router.post('/manual-payment/apply-arrears-first', [
           req.user.id, txMonth, txYear
         ]);
 
-        allocations.push({ invoiceId: inv.id, reference: inv.reference_number, month: txMonth, year: txYear, appliedAmount: toApply, newStatus, isArrears });
+        allocations.push({
+          transactionId: transactionResult.rows[0]?.id,
+          invoiceId: inv.id, reference: inv.reference_number, month: txMonth, year: txYear,
+          appliedAmount: toApply, newStatus, isArrears
+        });
         remaining = Math.round((remaining - toApply) * 100) / 100;
       }
 
@@ -1820,6 +1844,14 @@ router.post('/manual-payment/apply-arrears-first', [
       },
       ipAddress: getIp(req)
     });
+    await Promise.allSettled(allocations
+      .filter((allocation) => allocation.transactionId != null)
+      .map((allocation) => notifyPayment({
+        kind: 'applied',
+        paymentId: allocation.transactionId,
+        learnerId: student.id,
+        amount: allocation.appliedAmount,
+      })));
 
     res.json({
       success: true,
@@ -1914,7 +1946,7 @@ router.post('/allocate-unmatched', [
         description || 'Allocated from unmatched bank statement payment',
         adminId, student.student_number || ''
       ]);
-      txIds.push(tx.rows[0].id);
+      txIds.push({ id: tx.rows[0].id, amount: toApply });
       remaining -= toApply;
     }
 
@@ -1933,6 +1965,12 @@ router.post('/allocate-unmatched', [
     }
 
     console.log(`✅ Unmatched payment allocated: R${amount} → ${student.first_name} ${student.last_name}`);
+    await Promise.allSettled(txIds.map((transaction) => notifyPayment({
+      kind: 'applied',
+      paymentId: transaction.id,
+      learnerId: student.id,
+      amount: transaction.amount,
+    })));
     return res.json({
       success: true,
       message: `R${parseFloat(amount).toFixed(2)} allocated to ${student.first_name} ${student.last_name}`,

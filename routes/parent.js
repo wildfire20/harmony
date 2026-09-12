@@ -13,6 +13,38 @@ const { issueAuthToken, sendParentAuthEmail, hashToken, revokeUserSessions, with
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin  = [authenticate, authorize('admin', 'super_admin')];
 
+const PARENT_NOTIFICATION_LIMIT = 100;
+const safePushEndpoint = (value) => {
+  if (typeof value !== 'string' || value.length < 12 || value.length > 2048) return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' ? parsed.toString() : null;
+  } catch (_) {
+    return null;
+  }
+};
+const safePushKey = (value) => typeof value === 'string' &&
+  value.length >= 16 && value.length <= 256 && /^[A-Za-z0-9_-]+$/.test(value);
+const validatePushSubscription = (subscription) => {
+  if (!subscription || typeof subscription !== 'object' || Array.isArray(subscription)) {
+    return 'Invalid subscription object';
+  }
+  const endpoint = safePushEndpoint(subscription.endpoint);
+  if (!endpoint) return 'Push endpoint must be an HTTPS URL no longer than 2048 characters';
+  if (!subscription.keys || typeof subscription.keys !== 'object' ||
+      !safePushKey(subscription.keys.p256dh) || !safePushKey(subscription.keys.auth)) {
+    return 'Push subscription keys are invalid';
+  }
+  if (subscription.expirationTime != null &&
+      (typeof subscription.expirationTime !== 'number' || !Number.isFinite(subscription.expirationTime))) {
+    return 'Push subscription expirationTime is invalid';
+  }
+  if (Buffer.byteLength(JSON.stringify(subscription), 'utf8') > 8192) {
+    return 'Push subscription is too large';
+  }
+  return null;
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function normalizePhone(raw) {
@@ -269,6 +301,127 @@ router.get('/invoices', requireParent, async (req, res) => {
   }
 });
 
+// ─── Parent notification centre (durable inbox) ──────────────────────────────
+// All ownership comes from the authenticated Phase 2 session.  Learner rows
+// are joined through parent_students on every read, so unlinking a learner
+// immediately removes that learner's notifications from the inbox.
+router.get('/notifications', requireParent, async (req, res) => {
+  try {
+    const requested = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isSafeInteger(requested)
+      ? Math.min(PARENT_NOTIFICATION_LIMIT, Math.max(1, requested))
+      : 50;
+    const result = await db.query(`
+      SELECT n.id, n.event_type, n.title, n.summary, n.deep_link,
+             CASE
+               WHEN n.event_type LIKE 'attendance_%' THEN 'attendance'
+               WHEN n.event_type LIKE 'academic_%' THEN 'grades'
+               WHEN n.event_type LIKE 'payment_%' OR n.event_type LIKE 'invoice_%' THEN 'payments'
+               WHEN n.event_type LIKE 'document_%' THEN 'documents'
+               WHEN n.event_type LIKE 'announcement_%' THEN 'announcements'
+               ELSE 'notifications'
+             END AS category,
+             CASE
+               WHEN n.event_type LIKE 'attendance_%' THEN 'attendance'
+               WHEN n.event_type LIKE 'academic_%' THEN 'grades'
+               WHEN n.event_type LIKE 'payment_%' OR n.event_type LIKE 'invoice_%' THEN 'payments'
+               WHEN n.event_type LIKE 'document_%' THEN 'documents'
+               WHEN n.event_type LIKE 'announcement_%' THEN 'announcements'
+               ELSE 'notifications'
+             END AS action,
+             n.learner_id, n.created_at, n.important,
+             CASE WHEN r.read_at IS NULL THEN false ELSE true END AS read,
+             r.read_at,
+             CASE WHEN n.learner_id IS NULL THEN NULL
+                  ELSE concat_ws(' ', learner.first_name, learner.last_name) END AS learner_name
+      FROM parent_notifications n
+      LEFT JOIN parent_notification_reads r
+        ON r.notification_id = n.id AND r.parent_id = n.parent_id
+      LEFT JOIN users learner ON learner.id = n.learner_id
+      WHERE n.parent_id = $1
+        AND (n.learner_id IS NULL OR EXISTS (
+          SELECT 1 FROM parent_students current_link
+          WHERE current_link.parent_id = $1 AND current_link.student_id = n.learner_id
+        ))
+      ORDER BY n.created_at DESC, n.id DESC
+      LIMIT $2
+    `, [req.user.id, limit]);
+    res.json({ notifications: result.rows });
+  } catch (error) {
+    // A not-yet-applied manual migration should not be confused with an
+    // authorization failure, but the inbox remains unavailable until applied.
+    console.error('Parent notification list error:', error.message);
+    res.status(503).json({ message: 'Parent notifications are not yet available.' });
+  }
+});
+
+router.get('/notifications/unread-count', requireParent, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT COUNT(*)::int AS count
+      FROM parent_notifications n
+      LEFT JOIN parent_notification_reads r
+        ON r.notification_id = n.id AND r.parent_id = n.parent_id
+      WHERE n.parent_id = $1 AND r.read_at IS NULL
+        AND (n.learner_id IS NULL OR EXISTS (
+          SELECT 1 FROM parent_students current_link
+          WHERE current_link.parent_id = $1 AND current_link.student_id = n.learner_id
+        ))
+    `, [req.user.id]);
+    res.json({ count: result.rows[0]?.count || 0 });
+  } catch (error) {
+    console.error('Parent notification count error:', error.message);
+    res.status(503).json({ message: 'Parent notifications are not yet available.' });
+  }
+});
+
+router.put('/notifications/:id/read', requireParent, async (req, res) => {
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid notification ID' });
+    const result = await db.query(`
+      INSERT INTO parent_notification_reads (notification_id, parent_id, read_at)
+      SELECT n.id, n.parent_id, CURRENT_TIMESTAMP
+      FROM parent_notifications n
+      WHERE n.id = $1 AND n.parent_id = $2
+        AND (n.learner_id IS NULL OR EXISTS (
+          SELECT 1 FROM parent_students ps
+          WHERE ps.parent_id = $2 AND ps.student_id = n.learner_id
+        ))
+      ON CONFLICT (notification_id, parent_id)
+      DO UPDATE SET read_at = COALESCE(parent_notification_reads.read_at, CURRENT_TIMESTAMP)
+      RETURNING notification_id, read_at
+    `, [id, req.user.id]);
+    if (!result.rows.length) return res.status(404).json({ message: 'Notification not found' });
+    res.json({ success: true, notification_id: result.rows[0].notification_id, read_at: result.rows[0].read_at });
+  } catch (error) {
+    console.error('Mark parent notification read error:', error.message);
+    res.status(503).json({ message: 'Parent notifications are not yet available.' });
+  }
+});
+
+router.put('/notifications/read-all', requireParent, async (req, res) => {
+  try {
+    const result = await db.query(`
+      INSERT INTO parent_notification_reads (notification_id, parent_id, read_at)
+      SELECT n.id, n.parent_id, CURRENT_TIMESTAMP
+      FROM parent_notifications n
+      WHERE n.parent_id = $1
+        AND (n.learner_id IS NULL OR EXISTS (
+          SELECT 1 FROM parent_students ps
+          WHERE ps.parent_id = $1 AND ps.student_id = n.learner_id
+        ))
+      ON CONFLICT (notification_id, parent_id)
+      DO UPDATE SET read_at = COALESCE(parent_notification_reads.read_at, CURRENT_TIMESTAMP)
+      RETURNING notification_id
+    `, [req.user.id]);
+    res.json({ success: true, marked: result.rowCount || 0 });
+  } catch (error) {
+    console.error('Mark all parent notifications read error:', error.message);
+    res.status(503).json({ message: 'Parent notifications are not yet available.' });
+  }
+});
+
 // ─── GET /api/parent/vapid-key ───────────────────────────────────────────────
 router.get('/vapid-key', (req, res) => {
   res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || null });
@@ -278,15 +431,27 @@ router.get('/vapid-key', (req, res) => {
 router.post('/push/subscribe', requireParent, async (req, res) => {
   try {
     const { subscription } = req.body;
-    if (!subscription || !subscription.endpoint) {
-      return res.status(400).json({ message: 'Invalid subscription object' });
+    const validationError = validatePushSubscription(subscription);
+    if (validationError) return res.status(400).json({ message: validationError });
+    const endpoint = safePushEndpoint(subscription.endpoint);
+    const existing = await db.query(
+      'SELECT parent_id FROM parent_push_subscriptions WHERE endpoint = $1',
+      [endpoint],
+    );
+    if (existing.rows.length && Number(existing.rows[0].parent_id) !== Number(req.user.id)) {
+      return res.status(409).json({ message: 'This push endpoint is already registered to another parent.' });
     }
-    await db.query(`
+    const saved = await db.query(`
       INSERT INTO parent_push_subscriptions (parent_id, endpoint, subscription, is_active)
       VALUES ($1, $2, $3, true)
       ON CONFLICT (endpoint) DO UPDATE
-        SET parent_id = $1, subscription = $3, is_active = true, updated_at = CURRENT_TIMESTAMP
-    `, [req.user.id, subscription.endpoint, JSON.stringify(subscription)]);
+        SET subscription = EXCLUDED.subscription, is_active = true, updated_at = CURRENT_TIMESTAMP
+        WHERE parent_push_subscriptions.parent_id = EXCLUDED.parent_id
+      RETURNING id
+    `, [req.user.id, endpoint, JSON.stringify({ ...subscription, endpoint })]);
+    if (!saved.rows.length) {
+      return res.status(409).json({ message: 'This push endpoint is already registered to another parent.' });
+    }
     res.json({ success: true });
   } catch (err) {
     console.error('Push subscribe error:', err);
@@ -298,10 +463,10 @@ router.post('/push/subscribe', requireParent, async (req, res) => {
 router.post('/push/unsubscribe', requireParent, async (req, res) => {
   try {
     const { endpoint } = req.body;
-    if (endpoint) {
-      await db.query('UPDATE parent_push_subscriptions SET is_active = false WHERE endpoint = $1 AND parent_id = $2',
-        [endpoint, req.user.id]);
-    }
+    const safeEndpoint = safePushEndpoint(endpoint);
+    if (!safeEndpoint) return res.status(400).json({ message: 'A valid HTTPS endpoint is required' });
+    await db.query('UPDATE parent_push_subscriptions SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE endpoint = $1 AND parent_id = $2',
+      [safeEndpoint, req.user.id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
@@ -856,3 +1021,5 @@ router.post('/admin/direct-link', requireAdmin, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.validatePushSubscription = validatePushSubscription;
+module.exports.safePushEndpoint = safePushEndpoint;

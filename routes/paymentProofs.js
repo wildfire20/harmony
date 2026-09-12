@@ -8,6 +8,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const s3Service = require('../services/s3Service');
 const { logAudit, getIp } = require('../utils/auditLogger');
 const { detectType } = require('../services/admissionsDocumentService');
+const { notifyPayment } = require('../services/parentNotificationService');
 
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin = [authenticate, authorize('admin', 'super_admin')];
@@ -197,6 +198,12 @@ router.post('/', requireParent, uploadReceipt, async (req, res) => {
         receiptFileName, receiptFilePath, receiptS3Key, receiptS3Url, receiptMime, receiptData]);
 
     const submission = result.rows[0];
+    await notifyPayment({
+      kind: 'submitted',
+      paymentId: submission.id,
+      learnerId: child.id,
+      amount: submission.amount,
+    });
     res.status(201).json({
       message: 'Proof of payment submitted successfully',
       submission: { id: submission.id, amount: submission.amount, payment_method: submission.payment_method,
@@ -406,6 +413,18 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
       ipAddress: getIp(req), executor: client, required: true
     });
     await client.query('COMMIT');
+     await notifyPayment({
+       kind: 'approved',
+       paymentId: proof.id,
+       learnerId: proof.student_id,
+       amount: proof.amount,
+     });
+     await notifyPayment({
+       kind: 'applied',
+       paymentId: proof.id,
+       learnerId: proof.student_id,
+       amount: proof.amount,
+     });
     res.json({ message: 'Payment approved and applied to student balance', status: 'approved', transaction_ids: txIds });
   } catch (err) {
     if (client) {
@@ -426,7 +445,7 @@ router.post('/:id/reject', requireAdmin, async (req, res) => {
     if (!proof) return res.status(404).json({ message: 'Submission not found' });
     if (proof.status !== 'pending') return res.status(400).json({ message: `This submission is already ${proof.status}` });
 
-    const { admin_note } = req.body;
+    const admin_note = boundedText(req.body?.admin_note, 2000, 'Admin note');
     await db.query(`
       UPDATE pending_payments
       SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, admin_note=$2
@@ -440,6 +459,12 @@ router.post('/:id/reject', requireAdmin, async (req, res) => {
       details: { summary: `Rejected payment proof of R${proof.amount}`, amount: proof.amount, student_id: proof.student_id, reason: admin_note || null },
       ipAddress: getIp(req)
     });
+     await notifyPayment({
+       kind: 'rejected',
+       paymentId: proof.id,
+       learnerId: proof.student_id,
+       reason: admin_note,
+     });
     res.json({ message: 'Submission rejected' });
   } catch (err) {
     console.error('Reject proof error:', err);

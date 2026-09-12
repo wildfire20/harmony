@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
+const { notifyAcademicResult } = require('../services/parentNotificationService');
 const { authenticate, authorize, authorizeResourceAccess, authorizeTeacherAssignment, requireTeacherAssignment } = require('../middleware/auth');
 
 const router = express.Router();
@@ -1233,7 +1234,7 @@ router.put('/:id/results/:submissionId', [
 
     // Get submission and quiz information
     const submissionResult = await db.query(`
-      SELECT s.*, t.grade_id, t.class_id, t.max_points
+      SELECT s.*, t.grade_id, t.class_id, t.max_points, t.title
       FROM submissions s
       JOIN tasks t ON s.task_id = t.id
       JOIN quizzes q ON q.task_id = t.id
@@ -1272,6 +1273,15 @@ router.put('/:id/results/:submissionId', [
       WHERE id = $4
       RETURNING *
     `, [score, feedback, user.id, submissionId]);
+
+    if (submission.status !== 'graded' || Number(submission.score) !== Number(score)) {
+      await notifyAcademicResult({
+        submissionId,
+        learnerId: submission.student_id,
+        subject: submission.title || 'quiz',
+        publicationKey: `${submissionId}:${score}`,
+      });
+    }
 
     res.json({
       message: 'Grade updated successfully',

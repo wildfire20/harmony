@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const { Parser } = require('json2csv');
 const db = require('../config/database');
+const { notifyAcademicResult } = require('../services/parentNotificationService');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logAudit, getIp } = require('../utils/auditLogger');
 const { generateKidFriendlyPassword } = require('../utils/passwordGenerator');
@@ -961,6 +962,15 @@ router.put('/submissions/:id/grade', [
       WHERE id = $4
       RETURNING *
     `, [score, feedback, user.id, id]);
+
+    if (submission.status !== 'graded' || Number(submission.score) !== Number(score)) {
+      await notifyAcademicResult({
+        submissionId: id,
+        learnerId: submission.student_id,
+        subject: submission.title,
+        publicationKey: `${id}:${score}`,
+      });
+    }
 
     res.json({
       message: 'Grade updated successfully',

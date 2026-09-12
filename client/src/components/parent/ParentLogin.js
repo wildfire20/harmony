@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { Eye, EyeOff, BookOpen, ArrowLeft, Phone } from 'lucide-react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 import { useAppConfig } from '../../contexts/AppConfigContext';
+import { getReturnDestination } from './parentNavigation';
 
 const ParentLogin = () => {
   const { studentPortalEnabled } = useAppConfig();
   const navigate = useNavigate();
+  const location = useLocation();
   const [form, setForm] = useState({ phone_number: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -36,7 +38,7 @@ const ParentLogin = () => {
         navigate('/parent/change-password');
       } else {
         toast.success(`Welcome, ${user.first_name}!`);
-        navigate('/parent/dashboard');
+        navigate(getReturnDestination(location.search), { replace: true });
       }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Login failed. Check your phone number and password.');

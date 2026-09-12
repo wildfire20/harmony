@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize, authorizeResourceAccess, authorizeTeacherAssignment, requireTeacherAssignment } = require('../middleware/auth');
+const { notifyAnnouncement } = require('../services/parentNotificationService');
 
 const router = express.Router();
 
@@ -227,16 +228,13 @@ router.post('/', [
     const result = await db.query(`
       INSERT INTO announcements (title, content, priority, grade_id, class_id, target_audience, created_by)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, title, content, priority, grade_id, class_id, target_audience, created_at
+      RETURNING id, title, content, priority, grade_id, class_id, target_audience, created_at, updated_at
     `, [title, content, priority || 'normal', gradeId, classId, target_audience || 'everyone', user.id]);
 
     console.log('✅ Announcement created successfully:', result.rows[0]);
 
     const ann = result.rows[0];
-    if (ann.target_audience === 'everyone' || ann.target_audience === 'students') {
-      const { notifyNewAnnouncement } = require('../services/pushNotification');
-      notifyNewAnnouncement(ann.title, ann.content).catch(() => {});
-    }
+    await notifyAnnouncement(ann);
 
     res.status(201).json({
       success: true,
@@ -312,12 +310,18 @@ router.put('/:id', [
       UPDATE announcements 
       SET ${updateFields.join(', ')}
       WHERE id = $${paramCount}
-      RETURNING id, title, content, priority, target_audience, updated_at
+      RETURNING id, title, content, priority, target_audience,
+                grade_id, class_id, updated_at, created_at
     `, params);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Announcement not found' });
     }
+
+    // Use the authoritative post-update row.  req.resource is the
+    // pre-update authorization snapshot and must never overwrite audience,
+    // targeting, priority, or timestamp fields used for notification scope.
+    await notifyAnnouncement(result.rows[0]);
 
     res.json({
       message: 'Announcement updated successfully',

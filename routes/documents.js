@@ -6,6 +6,7 @@ const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize, authorizeTeacherAssignment, requireTeacherAssignment, authenticateFlexible } = require('../middleware/auth');
 const s3Service = require('../services/s3Service');
+const { notifyDocument } = require('../services/parentNotificationService');
 
 const router = express.Router();
 
@@ -430,7 +431,7 @@ router.post('/upload', [
       INSERT INTO documents (title, description, document_type, file_name, file_path, original_file_name, file_size, 
                            grade_id, class_id, uploaded_by, s3_key, s3_url, target_audience)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-      RETURNING id, title, description, document_type, file_name, file_path, original_file_name, file_size, uploaded_at, target_audience, s3_key
+       RETURNING id, title, description, document_type, file_name, file_path, original_file_name, file_size, uploaded_at, target_audience, s3_key, grade_id, class_id
     `, [
       title,
       description || null,
@@ -450,10 +451,7 @@ router.post('/upload', [
     console.log('✅ Document uploaded successfully:', result.rows[0]);
 
     const uploadedDoc = result.rows[0];
-    if (uploadedDoc.target_audience === 'parents' || uploadedDoc.target_audience === 'everyone') {
-      const { notifyNewDocument } = require('../services/pushNotification');
-      notifyNewDocument(uploadedDoc.title, uploadedDoc.document_type).catch(() => {});
-    }
+    await notifyDocument(uploadedDoc);
 
     res.status(201).json({
       success: true,

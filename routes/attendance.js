@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { notifyAttendance } = require('../services/parentNotificationService');
 
 const router = express.Router();
 
@@ -63,6 +64,7 @@ router.post('/submit', [
 
       // Insert all attendance records
       let insertedCount = 0;
+      const savedAttendance = [];
       for (const record of attendance) {
         if (!validStudentIds.has(record.student_id)) {
           console.log('Skipping invalid student:', record.student_id);
@@ -83,9 +85,26 @@ router.post('/submit', [
           user.id
         ]);
         insertedCount++;
+        // Only retain rows after their insert succeeds.  Notifications below
+        // must never be derived from an unvalidated request item.
+        savedAttendance.push({
+          student_id: record.student_id,
+          status: record.status || 'present',
+        });
       }
 
       await client.query('COMMIT');
+
+      // Notification work starts only after attendance has committed.  It is
+      // best-effort and can never turn a successful attendance save into an
+      // error response.
+      await Promise.allSettled(savedAttendance
+        .filter(record => ['absent', 'late'].includes(String(record.status || '').toLowerCase()))
+        .map(record => notifyAttendance({
+          learnerId: record.student_id,
+          status: record.status,
+          date,
+        })));
 
       console.log('✅ Attendance submitted:', insertedCount, 'records');
 

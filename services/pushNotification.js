@@ -34,8 +34,8 @@ async function sendToParentsOfStudents(studentIds, payload) {
     const result = await db.query(`
       SELECT DISTINCT pps.id, pps.subscription
       FROM parent_push_subscriptions pps
-      JOIN parent_student_links psl ON psl.parent_id = pps.parent_id
-      WHERE psl.student_id = ANY($1::int[])
+      JOIN parent_students ps ON ps.parent_id = pps.parent_id
+      WHERE ps.student_id = ANY($1::int[])
         AND pps.is_active = true
     `, [studentIds]);
 
@@ -51,6 +51,33 @@ async function sendToParentsOfStudents(studentIds, payload) {
     await Promise.allSettled(sends);
   } catch (err) {
     console.error('Push notification (targeted) error:', err.message);
+  }
+}
+
+// Durable notifications identify the exact parent recipients.  Do not broaden
+// a learner event to every subscription belonging to the school.
+async function sendToParents(parentIds, payload) {
+  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) return;
+  const ids = (Array.isArray(parentIds) ? parentIds : [])
+    .map(Number).filter(Number.isSafeInteger);
+  if (!ids.length) return;
+  try {
+    const result = await db.query(`
+      SELECT id, subscription
+      FROM parent_push_subscriptions
+      WHERE parent_id = ANY($1::int[]) AND is_active = true
+    `, [ids]);
+    await Promise.allSettled(result.rows.map(async (row) => {
+      try {
+        await webpush.sendNotification(row.subscription, JSON.stringify(payload));
+      } catch (err) {
+        if (err.statusCode === 404 || err.statusCode === 410) {
+          await db.query('UPDATE parent_push_subscriptions SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [row.id]);
+        }
+      }
+    }));
+  } catch (err) {
+    console.error('Push notification (parent-targeted) error:', err.message);
   }
 }
 
@@ -87,4 +114,4 @@ async function notifyNewFee(feeName, amount, gradeName, studentIds) {
   });
 }
 
-module.exports = { sendToAllParents, sendToParentsOfStudents, notifyNewAnnouncement, notifyNewDocument, notifyNewFee };
+module.exports = { sendToAllParents, sendToParentsOfStudents, sendToParents, notifyNewAnnouncement, notifyNewDocument, notifyNewFee };

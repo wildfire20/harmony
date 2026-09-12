@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
+const { notifyAcademicResult } = require('../services/parentNotificationService');
 const { authenticate, authorize, authorizeResourceAccess, authorizeTeacherAssignment } = require('../middleware/auth');
 const s3Service = require('../services/s3Service');
 
@@ -527,7 +528,8 @@ router.put('/:id/grade', [
 
     // Get submission details
     const submissionResult = await db.query(`
-      SELECT s.id, s.max_score, s.student_id, t.grade_id, t.class_id
+      SELECT s.id, s.score AS previous_score, s.status AS previous_status,
+             s.max_score, s.student_id, t.grade_id, t.class_id, t.title AS task_title
       FROM submissions s
       JOIN tasks t ON s.task_id = t.id
       WHERE s.id = $1
@@ -553,6 +555,18 @@ router.put('/:id/grade', [
       WHERE id = $4
       RETURNING id, score, max_score, feedback, status, graded_at
     `, [score, feedback, user.id, id]);
+
+    // A repeated save of the same published score is not a new event.  A
+    // first publication or a changed score is; this runs after the source
+    // update and delivery failure cannot affect it.
+    if (submission.previous_status !== 'graded' || Number(submission.previous_score) !== Number(score)) {
+      await notifyAcademicResult({
+        submissionId: id,
+        learnerId: submission.student_id,
+        subject: submission.task_title,
+        publicationKey: `${id}:${score}`,
+      });
+    }
 
     res.json({
       message: 'Submission graded successfully',

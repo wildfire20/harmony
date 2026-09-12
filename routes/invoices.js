@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { notifyInvoice, notifyPayment } = require('../services/parentNotificationService');
 const { logAudit, getIp } = require('../utils/auditLogger');
 
 const router = express.Router();
@@ -120,6 +121,11 @@ router.post('/generate-monthly', [
 
     const invoiceResults = await Promise.all(invoicePromises);
     const createdInvoices = invoiceResults.map(result => result.rows[0]);
+    await Promise.allSettled(createdInvoices.map((invoice) => notifyInvoice({
+      invoiceId: invoice.id,
+      learnerId: invoice.student_id,
+      amount: invoice.amount_due,
+    })));
     const siblingDiscountCount = studentsToInvoice.filter(s => s.has_sibling_discount && !s.has_teacher_discount).length;
     const teacherDiscountCount = studentsToInvoice.filter(s => s.has_teacher_discount).length;
 
@@ -142,7 +148,6 @@ router.post('/generate-monthly', [
       },
       ipAddress: getIp(req)
     });
-
     res.status(201).json({
       success: true,
       message: `Successfully generated ${createdInvoices.length} invoices for ${month}/${year}${skipMsg}${discountMsg}`,
@@ -250,6 +255,11 @@ router.post('/manual-arrears', [
       },
       ipAddress: getIp(req)
     });
+    await notifyInvoice({
+      invoiceId: result.rows[0].id,
+      learnerId: student.id,
+      amount: result.rows[0].amount_due,
+    });
 
     res.json({
       success: true,
@@ -356,6 +366,11 @@ router.post('/carry-forward', [
       await client.query('COMMIT');
 
       console.log(`Carried forward arrears for ${created.length} students from ${fromYear}`);
+      await Promise.allSettled(created.map((invoice) => notifyInvoice({
+        invoiceId: invoice.id,
+        learnerId: invoice.student_id,
+        amount: invoice.amount_due,
+      })));
 
       await logAudit({
         userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
@@ -1032,6 +1047,12 @@ router.post('/process-bank-statement', [
         // Commit the transaction
         await client.query('COMMIT');
         console.log(`Successfully processed transaction for ${transaction.reference}`);
+        await notifyPayment({
+          kind: 'applied',
+          paymentId: transactionResult.rows[0].id,
+          learnerId: invoice.student_id,
+          amount: transaction.amount,
+        });
 
         // Add to results AFTER successful commit
         if (resultCategory === 'matched') {

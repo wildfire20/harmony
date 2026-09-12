@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const { notifyAnnouncement } = require('../services/parentNotificationService');
 const { authenticate, authorize } = require('../middleware/auth');
 
 const requireAdmin = [authenticate, authorize('admin', 'super_admin')];
@@ -67,14 +68,9 @@ router.post('/', requireAdmin, async (req, res) => {
 
     // Get grade name for announcement
     let gradeName = null;
-    let studentIds = [];
     if (grade_id) {
       const gradeRes = await db.query('SELECT name FROM grades WHERE id=$1', [grade_id]);
       gradeName = gradeRes.rows[0]?.name || null;
-      const studentRes = await db.query(
-        `SELECT id FROM users WHERE role='student' AND grade_id=$1 AND is_active=true`, [grade_id]
-      );
-      studentIds = studentRes.rows.map(r => r.id);
     }
 
     // Auto-create announcement for this fee
@@ -87,14 +83,12 @@ router.post('/', requireAdmin, async (req, res) => {
         'Please submit proof of payment via the Fees screen.'
       ].filter(Boolean).join('\n');
 
-      await db.query(`
+      const announcementResult = await db.query(`
         INSERT INTO announcements (title, content, priority, grade_id, class_id, target_audience, created_by)
         VALUES ($1, $2, 'high', $3, NULL, 'students', $4)
+        RETURNING id, title, priority, grade_id, class_id, target_audience, created_at
       `, [annTitle, annBody, grade_id || null, req.user.id]);
-
-      // Fire push notification to affected parents
-      const { notifyNewFee } = require('../services/pushNotification');
-      notifyNewFee(name, amount, gradeName, studentIds).catch(() => {});
+      await notifyAnnouncement(announcementResult.rows[0]);
     } catch (notifyErr) {
       console.warn('Fee notification/announcement error:', notifyErr.message);
     }

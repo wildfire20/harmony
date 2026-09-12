@@ -11,6 +11,8 @@ import ParentAnnouncements from './ParentAnnouncements';
 import ParentInvoices from './ParentInvoices';
 import ParentDocuments from './ParentDocuments';
 import ParentAccount from './ParentAccount';
+import ParentNotifications from './ParentNotifications';
+import { getSafeParentDestination, parentLoginPath } from './parentNavigation';
 
 const NAV = [
   { path: '/parent/dashboard',      label: 'Home',        icon: Home },
@@ -41,20 +43,26 @@ export const useParentAuth = () => {
 
 // ─── API helper (auto-injects auth + child_id) ────────────────────────────────
 export const parentApi = async (path, opts = {}) => {
+  const { skipChildId, ...requestOptions } = opts;
   const storage = sessionStorage;
   const token = storage.getItem('parentToken');
   const selected = JSON.parse(storage.getItem('parentChild') || 'null');
-  const requestPath = path.includes('child_id=') || !selected?.id
+  const requestPath = skipChildId || path.includes('child_id=') || !selected?.id
     ? path
     : `${path}${path.includes('?') ? '&' : '?'}child_id=${encodeURIComponent(selected.id)}`;
   const request = (authToken) => fetch(`/api/parent${requestPath}`, {
-    ...opts, credentials: 'include',
+    ...requestOptions, credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...(opts.headers || {}) },
   });
   let res = await request(token);
   if (res.status === 401) {
     try { res = await request(await refreshParentAccess()); }
-    catch (_) { sessionStorage.clear(); window.location.href = '/parent/login'; return null; }
+    catch (_) {
+      const destination = getSafeParentDestination(`${window.location.pathname}${window.location.search}`);
+      sessionStorage.clear();
+      window.location.href = parentLoginPath(destination);
+      return null;
+    }
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -64,7 +72,7 @@ export const parentApi = async (path, opts = {}) => {
 };
 
 // ─── Child context ────────────────────────────────────────────────────────────
-export const ChildContext = createContext({ child: null, children: [] });
+export const ChildContext = createContext({ child: null, children: [], onSelectChild: () => {} });
 export const useSelectedChild = () => useContext(ChildContext);
 
 let parentRefreshPromise = null;
@@ -164,13 +172,45 @@ const ChildSwitcher = ({ children, selectedChild, onSelect }) => {
 };
 
 // ─── Push Notification Hook ───────────────────────────────────────────────────
-const usePushNotifications = () => {
+export const verifyParentPushSubscription = async (subscription) => {
+  const token = sessionStorage.getItem('parentToken') || localStorage.getItem('parentToken');
+  const response = await fetch('/api/parent/push/subscribe', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ subscription }),
+  });
+  if (!response.ok) {
+    const error = new Error('Push subscription could not be verified');
+    error.status = response.status;
+    throw error;
+  }
+  return response;
+};
+
+const usePushNotifications = (enabled = true) => {
   const [permission, setPermission] = useState(
     typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
   );
   const [subscribed, setSubscribed] = useState(false);
+  const [ownershipConflict, setOwnershipConflict] = useState(false);
+
+  const verifySubscription = async (subscription) => {
+    try {
+      await verifyParentPushSubscription(subscription);
+      setOwnershipConflict(false);
+      setSubscribed(true);
+    } catch (error) {
+      if (error.status === 403 || error.status === 409) {
+        setOwnershipConflict(true);
+        setSubscribed(false);
+      }
+      throw error;
+    }
+  };
 
   const subscribe = async () => {
+    if (!enabled) return;
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
     try {
       const keyRes = await fetch('/api/parent/vapid-key');
@@ -179,7 +219,10 @@ const usePushNotifications = () => {
 
       const reg = await navigator.serviceWorker.ready;
       const existing = await reg.pushManager.getSubscription();
-      if (existing) { setSubscribed(true); return; }
+      if (existing) {
+        await verifySubscription(existing);
+        return;
+      }
 
       const perm = await Notification.requestPermission();
       setPermission(perm);
@@ -190,28 +233,23 @@ const usePushNotifications = () => {
         applicationServerKey: urlBase64ToUint8Array(publicKey),
       });
 
-      const token = (sessionStorage.getItem('parentToken') || localStorage.getItem('parentToken'));
-      await fetch('/api/parent/push/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ subscription: sub }),
-      });
-      setSubscribed(true);
+      await verifySubscription(sub);
     } catch (err) {
       console.error('Push subscribe error:', err);
     }
   };
 
   useEffect(() => {
+    if (!enabled) return;
     if (!('serviceWorker' in navigator)) return;
     navigator.serviceWorker.register('/sw.js').catch(() => {});
     navigator.serviceWorker.ready.then(async (reg) => {
       const sub = await reg.pushManager.getSubscription().catch(() => null);
-      if (sub) setSubscribed(true);
+      if (sub) verifySubscription(sub).catch(() => {});
     });
-  }, []);
+  }, [enabled]);
 
-  return { permission, subscribed, subscribe };
+  return { permission, subscribed, ownershipConflict, subscribe };
 };
 
 const urlBase64ToUint8Array = (base64String) => {
@@ -232,17 +270,18 @@ const ParentPortal = () => {
   );
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileChildOpen, setMobileChildOpen] = useState(false);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [notifDismissed, setNotifDismissed] = useState(
     () => localStorage.getItem('notifBannerDismissed') === '1'
   );
-  const { permission, subscribed, subscribe } = usePushNotifications();
+  const { permission, subscribed, ownershipConflict, subscribe } = usePushNotifications(isAuthenticated);
 
   useEffect(() => {
     if (!isAuthenticated) {
       refreshParentAccess().catch(() => {}).finally(() => {
         setBootstrapping(false);
         if (sessionStorage.getItem('parentToken')) window.location.reload();
-        else navigate('/parent/login', { replace: true });
+        else navigate(parentLoginPath(getSafeParentDestination(`${location.pathname}${location.search}`)), { replace: true });
       });
     } else setBootstrapping(false);
   }, [isAuthenticated, navigate]);
@@ -276,6 +315,16 @@ const ParentPortal = () => {
       .catch(() => {});
   }, [isAuthenticated]);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const refreshUnreadCount = () => parentApi('/notifications/unread-count', { skipChildId: true })
+      .then((data) => setUnreadNotificationCount(Number(data?.count ?? data?.unread_count ?? data ?? 0)))
+      .catch(() => {});
+    refreshUnreadCount();
+    window.addEventListener('parent-notifications-updated', refreshUnreadCount);
+    return () => window.removeEventListener('parent-notifications-updated', refreshUnreadCount);
+  }, [isAuthenticated, location.pathname]);
+
   if (bootstrapping || !isAuthenticated) return null;
 
   const handleSelectChild = (child) => {
@@ -294,7 +343,7 @@ const ParentPortal = () => {
   const isActive = (path) => location.pathname === path;
 
   return (
-    <ChildContext.Provider value={{ child: selectedChild, children }}>
+    <ChildContext.Provider value={{ child: selectedChild, children, onSelectChild: handleSelectChild }}>
       <div className="parent-portal min-h-[100dvh] bg-[#f4f7f5] flex flex-col text-[#334b5d]">
         {/* Top bar */}
         <header className="sticky top-0 z-30 border-b border-white/10 bg-[#19324a] text-white shadow-[0_8px_22px_rgba(25,50,74,.18)]">
@@ -313,11 +362,11 @@ const ParentPortal = () => {
 
             <div className="flex items-center gap-2 shrink-0">
               <button
-                onClick={() => navigate('/parent/announcements')}
-                aria-label="View school notices"
+                onClick={() => navigate('/parent/notifications')}
+                aria-label="View notifications"
                 className="grid min-h-[44px] min-w-[44px] place-items-center rounded-xl text-white/80 transition-colors hover:bg-white/10 hover:text-white"
               >
-                <Bell className="h-5 w-5" />
+                <span className="relative"><Bell className="h-5 w-5" />{unreadNotificationCount > 0 && <span aria-label={`${unreadNotificationCount} unread notifications`} className="absolute -right-2 -top-2 grid min-h-[17px] min-w-[17px] place-items-center rounded-full bg-[#e86e5b] px-1 text-[10px] font-bold text-white">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}</span>
               </button>
               <button
                 onClick={handleLogout}
@@ -412,13 +461,13 @@ const ParentPortal = () => {
         {!subscribed && !notifDismissed && permission !== 'denied' && permission !== 'unsupported' && 'PushManager' in window && (
           <div className="bg-blue-700 text-white px-4 py-2.5 flex items-center gap-3 justify-center text-sm">
             <BellRing className="h-4 w-4 shrink-0 text-blue-200" />
-            <span className="text-blue-100">Get notified when new notices or documents are shared</span>
-            <button
+            <span className="text-blue-100">{ownershipConflict ? 'This browser notification is linked to another account. You can enable notifications from a different browser profile.' : 'Get notified when new notices or documents are shared'}</span>
+            {!ownershipConflict && <button
               onClick={subscribe}
               className="ml-1 bg-white text-blue-700 font-semibold text-xs px-3 py-1 rounded-full hover:bg-blue-50 transition-colors shrink-0"
             >
               Enable
-            </button>
+            </button>}
             <button
               onClick={() => { setNotifDismissed(true); localStorage.setItem('notifBannerDismissed', '1'); }}
               className="text-blue-300 hover:text-white transition-colors shrink-0"
@@ -455,6 +504,7 @@ const ParentPortal = () => {
               <Route path="attendance"    element={<ParentAttendance child={selectedChild} />} />
               <Route path="grades"        element={<ParentGrades     child={selectedChild} />} />
               <Route path="announcements" element={<ParentAnnouncements child={selectedChild} />} />
+              <Route path="notifications"  element={<ParentNotifications />} />
               <Route path="documents"       element={<ParentDocuments     child={selectedChild} />} />
               <Route path="invoices"        element={<ParentInvoices      child={selectedChild} />} />
               <Route path="account"         element={<ParentAccount user={user} children={children} selectedChild={selectedChild} onSelectChild={handleSelectChild} onLogout={handleLogout} />} />
