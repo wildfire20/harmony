@@ -756,7 +756,12 @@ async function reversePayment(executor, { transactionId, recordedBy, description
       `, [successorDue.toFixed(2), successorStatus, successor.id]);
       targetInvoiceId = successor.id;
     } else {
-      const amountPaid = nonNegative(money(invoice.amount_paid) - amount);
+      const currentPaid = money(invoice.amount_paid);
+      if (currentPaid < amount) {
+        await executor.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        throw new Error('Cannot reverse payment: invoice balance is lower than the payment allocation');
+      }
+      const amountPaid = money(currentPaid - amount);
       const amountDue = money(invoice.amount_due);
        const status = amountPaid > amountDue ? 'Overpaid' :
          amountDue === 0 ? 'Paid' : amountPaid >= amountDue ? 'Paid' :

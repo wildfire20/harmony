@@ -1,0 +1,193 @@
+Mini Phase 2.5 — Admin Payment Corrections & Parent Finance Sync
+
+Preserve all Mini Phase 1 finance truth and immutable audit behavior.
+
+The school Admin must retain practical control over learner payments.
+
+Do not deploy automatically.
+Do not run migrations automatically.
+
+Goal
+
+Admin must be able to:
+
+add a manual payment
+correct an incorrect payment amount
+reduce/remove an incorrectly recorded payment
+reverse a payment
+correct the payment date/reference/method where safe
+apply an unallocated payment to the correct invoice
+
+All resulting balances must immediately reconcile across:
+
+Admin payment summary
+Admin monthly history
+Parent Portal
+Parent notifications
+Excel/payment-history export
+1. Do not silently delete financial history
+
+Preserve immutable payment history.
+
+An Admin action that looks like “remove payment” in the UI should be implemented safely using:
+
+reversal transaction
+compensating adjustment
+corrected replacement transaction where appropriate
+
+Never erase the original financial event without audit history.
+
+2. Manual payment
+
+Admin must be able to select:
+
+learner
+invoice/month
+amount
+payment date
+payment method
+reference
+optional note
+
+The amount should allocate through the same authoritative allocator used by other payment flows.
+
+Do not directly manipulate invoice.amount_paid independently of the ledger.
+
+3. Correcting a payment
+
+If Admin entered the wrong amount:
+
+Example:
+
+Original:
+R2,000
+
+Correct:
+R2,350
+
+Do not overwrite the original transaction invisibly.
+
+Create an auditable correction so the final authoritative allocation is R2,350.
+
+Record:
+
+original transaction
+correction/reversal relationship
+Admin user
+timestamp
+reason
+4. Reducing/removing payment
+
+If Admin needs to remove or reduce an incorrect payment, calculate the safe reversal/adjustment.
+
+Prevent:
+
+negative invoice payments
+reversing the same payment twice
+corrupting carry-forward lineage
+removing money already safely reassigned without explicit handling
+
+Require an Admin reason for reversal/correction.
+
+5. Parent Portal synchronization
+
+Parent Portal must read only the resulting authoritative ledger.
+
+Example:
+
+If Admin manually changes Milton September from:
+
+Due: R2,350
+Paid: R0
+Outstanding: R2,350
+Status: Unpaid
+
+to a legitimate payment of R2,350:
+
+Parent Portal must then show:
+
+Due: R2,350
+Paid: R2,350
+Outstanding: R0
+Status: Paid
+
+The overall Parent Portal totals must update too.
+
+No separate Parent-side calculation.
+
+6. Notifications
+
+For meaningful Admin payment changes, create a Parent Portal notification.
+
+Examples:
+
+Payment recorded
+Payment adjusted
+Payment reversed
+
+Keep wording parent-safe.
+
+Do not expose internal audit details.
+
+Email/WhatsApp delivery can follow the existing notification-channel rules.
+
+Notification failure must never roll back the finance correction.
+
+7. Admin UX
+
+Keep practical controls such as:
+
+Add Payment
+Adjust Payment
+Reverse Payment
+View Audit History
+
+If the current UI says “Delete Payment,” consider changing it to Reverse Payment so the behavior matches the audit-safe implementation.
+
+Require confirmation for destructive-looking actions.
+
+8. Audit Log
+
+Record:
+
+Admin identity
+learner
+invoice
+original transaction
+correction/reversal transaction
+previous effective amount
+new effective amount
+reason
+timestamp
+9. Tests
+
+Include:
+
+add full manual payment
+add partial manual payment
+increase payment
+decrease payment
+reverse payment
+double-reversal blocked
+Admin totals update
+Parent totals update
+monthly status update
+Excel export update
+notification generated
+multi-child isolation
+overpayment/credit
+arrears-first allocation
+existing payment-proof flow regression
+
+Return:
+
+Current Admin payment-edit behavior
+Any unsafe direct-edit/delete behavior found
+Corrections made
+Parent synchronization behavior
+Notification behavior
+Files changed
+Migration required
+Tests passed
+
+Do not deploy or run migrations automatically.

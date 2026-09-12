@@ -260,7 +260,8 @@ export const paymentsAPI = {
   applyArrearsFirst: (data) => api.post('/enhanced-invoices/manual-payment/apply-arrears-first', data),
   getStudentPayments: (studentId) => api.get(`/enhanced-invoices/student-payments/${studentId}`),
   updateManualPayment: (paymentId, data) => api.put(`/enhanced-invoices/manual-payment/${paymentId}`, data),
-  deleteManualPayment: (paymentId) => api.delete(`/enhanced-invoices/manual-payment/${paymentId}`),
+  reverseManualPayment: (paymentId, reason) => api.delete(`/enhanced-invoices/manual-payment/${paymentId}`, { data: { reason } }),
+  applyUnallocatedPayment: (paymentId, data) => api.post(`/enhanced-invoices/manual-payment/${paymentId}/apply`, data),
   searchStudents: (query) => api.get('/enhanced-invoices/search-students', { params: { q: query } }),
 };
 

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { DollarSign, Search, Plus, Edit, Trash2, Check, X, Zap } from 'lucide-react';
+import { DollarSign, Search, Plus, Edit, RotateCcw, Check, X, Zap } from 'lucide-react';
 import { paymentsAPI, adminAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 import toast from 'react-hot-toast';
@@ -17,6 +17,9 @@ const ManualPayments = () => {
     payment_date: new Date().toISOString().split('T')[0],
     description: '',
     reference: '',
+    invoice_id: '',
+    payment_method: 'manual_entry',
+    reason: '',
     month: new Date().getMonth() + 1,
     year: new Date().getFullYear()
   });
@@ -27,6 +30,7 @@ const ManualPayments = () => {
     description: '',
     reference: ''
   });
+  const [allocationTargets, setAllocationTargets] = useState({});
   const queryClient = useQueryClient();
 
   const { data: studentsData, isLoading: searchLoading } = useQuery(
@@ -82,16 +86,32 @@ const ManualPayments = () => {
     }
   );
 
-  const deletePaymentMutation = useMutation(
-    (paymentId) => paymentsAPI.deleteManualPayment(paymentId),
+  const reversePaymentMutation = useMutation(
+    ({ paymentId, reason }) => paymentsAPI.reverseManualPayment(paymentId, reason),
     {
       onSuccess: () => {
-        toast.success('Payment deleted successfully');
+        toast.success('Payment reversed successfully');
         queryClient.invalidateQueries(['studentPayments', selectedStudent?.id]);
       },
       onError: (error) => {
-        toast.error(error.response?.data?.message || 'Failed to delete payment');
+        toast.error(error.response?.data?.message || 'Failed to reverse payment');
       }
+    }
+  );
+
+  const applyUnallocatedMutation = useMutation(
+    ({ paymentId, invoiceId, reason }) => paymentsAPI.applyUnallocatedPayment(paymentId, {
+      invoice_id: invoiceId,
+      reason,
+    }),
+    {
+      onSuccess: () => {
+        toast.success('Unallocated payment applied successfully');
+        queryClient.invalidateQueries(['studentPayments', selectedStudent?.id]);
+      },
+      onError: (error) => {
+        toast.error(error.response?.data?.message || 'Failed to apply unallocated payment');
+      },
     }
   );
 
@@ -138,6 +158,9 @@ const ManualPayments = () => {
       payment_date: new Date().toISOString().split('T')[0],
       description: '',
       reference: '',
+      invoice_id: '',
+      payment_method: 'manual_entry',
+      reason: '',
       month: new Date().getMonth() + 1,
       year: new Date().getFullYear()
     });
@@ -147,10 +170,24 @@ const ManualPayments = () => {
     e.preventDefault();
     if (!selectedStudent) { toast.error('Please select a student first'); return; }
     if (!paymentData.amount || parseFloat(paymentData.amount) <= 0) { toast.error('Please enter a valid amount'); return; }
+    if (editingPayment && paymentData.reason.trim().length < 3) { toast.error('Enter a reason for this correction'); return; }
+    if (!editingPayment && !paymentData.invoice_id) { toast.error('Select the invoice receiving this payment'); return; }
     if (editingPayment) {
+      if (!window.confirm(
+        `Adjust payment #${editingPayment.id} to R ${Number(paymentData.amount).toFixed(2)}? ` +
+        'The existing payment will remain in history and a reversal plus replacement will be recorded.'
+      )) return;
       updatePaymentMutation.mutate({ paymentId: editingPayment.id, data: paymentData });
     } else {
-      addPaymentMutation.mutate({ student_id: selectedStudent.id, ...paymentData, amount: parseFloat(paymentData.amount) });
+      const invoice = invoices.find(item => item.id === Number(paymentData.invoice_id));
+      const outstanding = Number(invoice?.outstanding_balance || 0);
+      const amount = Number(paymentData.amount);
+      const applied = Math.min(amount, outstanding);
+      const credit = Math.max(amount - outstanding, 0);
+      const impact = `R ${applied.toFixed(2)} will be applied to ${invoice?.reference_number || `invoice #${paymentData.invoice_id}`}` +
+        (credit > 0 ? ` and R ${credit.toFixed(2)} will remain as unallocated credit.` : '.');
+      if (!window.confirm(`Record this payment?\n\n${impact}`)) return;
+      addPaymentMutation.mutate({ student_id: selectedStudent.id, ...paymentData, amount });
     }
   };
 
@@ -175,20 +212,42 @@ const ManualPayments = () => {
       payment_date: payment.payment_date?.split('T')[0] || '',
       description: payment.description || '',
       reference: payment.reference || '',
+      invoice_id: payment.invoice_id || '',
+      payment_method: payment.payment_method || 'manual_entry',
+      reason: '',
       month: payment.month,
       year: payment.year
     });
     setShowPaymentForm(true);
   };
 
-  const handleDeletePayment = (paymentId) => {
-    if (window.confirm('Are you sure you want to delete this payment? This will update the invoice balance.')) {
-      deletePaymentMutation.mutate(paymentId);
+  const handleReversePayment = (paymentId) => {
+    const reason = window.prompt('Why is this payment being reversed? This action keeps the original payment and creates an audit-safe reversal.');
+    if (reason == null) return;
+    if (reason.trim().length < 3) { toast.error('Enter a reason for the reversal'); return; }
+    if (window.confirm('Reverse this payment? The original record will remain visible in the audit history.')) {
+      reversePaymentMutation.mutate({ paymentId, reason: reason.trim() });
+    }
+  };
+
+  const handleApplyUnallocated = (payment) => {
+    const invoiceId = Number(allocationTargets[payment.id]);
+    if (!invoiceId) { toast.error('Select the invoice receiving this payment'); return; }
+    const reason = window.prompt('Why is this unallocated payment being applied to the selected invoice?');
+    if (reason == null) return;
+    if (reason.trim().length < 3) { toast.error('Enter an allocation reason'); return; }
+    const invoice = invoices.find(item => item.id === invoiceId);
+    if (window.confirm(
+      `Apply R ${Math.abs(Number(payment.amount)).toFixed(2)} to ${invoice?.reference_number || `invoice #${invoiceId}`}? ` +
+      'The original unallocated event will remain in the audit history.'
+    )) {
+      applyUnallocatedMutation.mutate({ paymentId: payment.id, invoiceId, reason: reason.trim() });
     }
   };
 
   const students = studentsData?.data?.students || studentsData?.students || [];
   const payments = paymentsData?.data?.payments || paymentsData?.payments || [];
+  const invoices = paymentsData?.data?.invoices || paymentsData?.invoices || [];
 
   const months = [
     { value: 1, label: 'January' },
@@ -299,7 +358,7 @@ const ManualPayments = () => {
                     className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 flex items-center gap-2 text-sm"
                   >
                     <Plus className="h-4 w-4" />
-                    Specific Month/Year
+                    Add Payment
                   </button>
                 </div>
               )}
@@ -364,6 +423,33 @@ const ManualPayments = () => {
                   </div>
                 )}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                   {!editingPayment && (
+                     <div className="md:col-span-2 lg:col-span-3">
+                       <label className="block text-sm font-medium text-gray-700 mb-1">Invoice *</label>
+                       <select
+                         value={paymentData.invoice_id}
+                         onChange={e => {
+                           const invoice = invoices.find(item => item.id === Number(e.target.value));
+                           const dueDate = invoice?.due_date ? new Date(invoice.due_date) : null;
+                           setPaymentData({
+                             ...paymentData,
+                             invoice_id: e.target.value,
+                             month: dueDate ? dueDate.getUTCMonth() + 1 : paymentData.month,
+                             year: dueDate ? dueDate.getUTCFullYear() : paymentData.year,
+                           });
+                         }}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"
+                         required
+                       >
+                         <option value="">Select an outstanding invoice</option>
+                         {invoices.map(invoice => (
+                           <option key={invoice.id} value={invoice.id}>
+                             {invoice.reference_number || `Invoice #${invoice.id}`} — {new Date(invoice.due_date).toLocaleDateString()} — R {Number(invoice.outstanding_balance).toFixed(2)} outstanding
+                           </option>
+                         ))}
+                       </select>
+                     </div>
+                   )}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Amount (R) *</label>
                     <input type="number" step="0.01" min="0.01" value={paymentData.amount}
@@ -397,11 +483,43 @@ const ManualPayments = () => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500" />
                   </div>
                   <div>
+                     <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method *</label>
+                     <select value={paymentData.payment_method}
+                       onChange={e => setPaymentData({ ...paymentData, payment_method: e.target.value })}
+                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500" required>
+                       <option value="manual_entry">Manual entry</option>
+                       <option value="cash">Cash</option>
+                       <option value="bank_transfer">Bank transfer</option>
+                       <option value="card">Card</option>
+                       <option value="other">Other</option>
+                     </select>
+                   </div>
+                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Bank Reference</label>
                     <input type="text" value={paymentData.reference} placeholder="Original bank reference (if known)"
                       onChange={e => setPaymentData({ ...paymentData, reference: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500" />
                   </div>
+                   {editingPayment && (
+                     <div className="md:col-span-2 lg:col-span-3">
+                       <label className="block text-sm font-medium text-gray-700 mb-1">Correction Reason *</label>
+                       <input type="text" value={paymentData.reason} placeholder="Why is this payment being corrected?"
+                         onChange={e => setPaymentData({ ...paymentData, reason: e.target.value })}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500" required minLength={3} />
+                     </div>
+                   )}
+                   {!editingPayment && paymentData.invoice_id && paymentData.amount && (() => {
+                     const invoice = invoices.find(item => item.id === Number(paymentData.invoice_id));
+                     const outstanding = Number(invoice?.outstanding_balance || 0);
+                     const amount = Number(paymentData.amount || 0);
+                     return (
+                       <div className="md:col-span-2 lg:col-span-3 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900">
+                         <strong>Allocation impact:</strong> R {Math.min(amount, outstanding).toFixed(2)} to{' '}
+                         {invoice?.reference_number || `invoice #${paymentData.invoice_id}`}
+                         {amount > outstanding ? `; R ${(amount - outstanding).toFixed(2)} remains as unallocated credit.` : '.'}
+                       </div>
+                     );
+                   })()}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
                     <input type="text" value={paymentData.description} placeholder="e.g., Parent name, reason for manual entry"
@@ -423,7 +541,7 @@ const ManualPayments = () => {
           </div>
 
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Payment History</h3>
+             <h3 className="text-lg font-semibold text-gray-900 mb-4">Payment Audit History</h3>
             
             {paymentsLoading ? (
               <LoadingSpinner />
@@ -452,7 +570,10 @@ const ManualPayments = () => {
                              <span className="ml-2 text-xs text-gray-500">(reversal)</span>
                            )}
                            {!payment.is_reversal && payment.is_reversed && (
-                             <span className="ml-2 text-xs text-gray-500">(reversed)</span>
+                              <span className="ml-2 text-xs text-gray-500">(corrected / reversed)</span>
+                            )}
+                            {!payment.is_reversal && !payment.is_reversed && payment.invoice_id == null && (
+                              <span className="ml-2 text-xs text-amber-700">(unallocated)</span>
                            )}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-900">
@@ -470,24 +591,47 @@ const ManualPayments = () => {
                             {payment.payment_method === 'manual_entry' ? 'Manual' : 'Bank Import'}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-sm space-x-2">
+                         <td className="px-4 py-3 text-sm">
+                           {payment.invoice_id == null && Number(payment.amount) > 0 && !payment.is_reversed && (
+                             <div className="mb-2 flex min-w-[240px] items-center gap-2">
+                               <select
+                                 aria-label={`Invoice for payment ${payment.id}`}
+                                 value={allocationTargets[payment.id] || ''}
+                                 onChange={e => setAllocationTargets({ ...allocationTargets, [payment.id]: e.target.value })}
+                                 className="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-xs"
+                               >
+                                 <option value="">Select invoice</option>
+                                 {invoices.map(invoice => (
+                                   <option key={invoice.id} value={invoice.id}>
+                                     {invoice.reference_number || `#${invoice.id}`} — R {Number(invoice.outstanding_balance).toFixed(2)}
+                                   </option>
+                                 ))}
+                               </select>
+                               <button
+                                 onClick={() => handleApplyUnallocated(payment)}
+                                 className="whitespace-nowrap text-xs font-semibold text-green-700 hover:text-green-900"
+                               >
+                                 Apply
+                               </button>
+                             </div>
+                           )}
                            {!payment.is_reversal && !payment.is_reversed && (
-                             <>
+                              <div className="space-x-2">
                                <button
                                  onClick={() => handleEditPayment(payment)}
                                  className="text-blue-600 hover:text-blue-800"
-                                 title="Edit"
+                                  title="Adjust Payment"
                                >
                                  <Edit className="h-4 w-4" />
                                </button>
                                <button
-                                 onClick={() => handleDeletePayment(payment.id)}
+                                  onClick={() => handleReversePayment(payment.id)}
                                  className="text-red-600 hover:text-red-800"
-                                 title="Delete"
+                                  title="Reverse Payment"
                                >
-                                 <Trash2 className="h-4 w-4" />
+                                  <RotateCcw className="h-4 w-4" />
                                </button>
-                             </>
+                              </div>
                            )}
                         </td>
                       </tr>

@@ -8,6 +8,8 @@ const ACTION_LABELS = {
   manual_payment_add:         'Manual payment added',
   manual_payment_edit:        'Manual payment edited',
   manual_payment_delete:      'Manual payment deleted',
+  manual_payment_reverse:     'Manual payment reversed',
+  manual_payment_reallocated: 'Unallocated payment applied',
   manual_payment_arrears:     'Arrears payment applied (manual)',
   bank_statement_upload:      'Bank statement uploaded',
   invoice_generate:           'Invoices generated',

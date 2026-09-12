@@ -7,6 +7,8 @@ const ACTION_COLOURS = {
   manual_payment_add:      'bg-green-100 text-green-800',
   manual_payment_edit:     'bg-blue-100  text-blue-800',
   manual_payment_delete:   'bg-red-100   text-red-800',
+  manual_payment_reverse:  'bg-red-100   text-red-800',
+  manual_payment_reallocated: 'bg-teal-100 text-teal-800',
   manual_payment_arrears:  'bg-purple-100 text-purple-800',
   bank_statement_upload:   'bg-indigo-100 text-indigo-800',
   invoice_generate:        'bg-cyan-100  text-cyan-800',

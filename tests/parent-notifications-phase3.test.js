@@ -393,6 +393,9 @@ test('attendance, academic, payment, and invoice notification contracts include 
     reason: 'Receipt unclear. Contact finance at parent@example.test; ref 123456789.',
   });
   const applied = await notificationService.notifyPayment({ kind: 'applied', paymentId: 12, learnerId: 101, amount: 20 });
+  const recorded = await notificationService.notifyPayment({ kind: 'recorded', paymentId: 14, learnerId: 101, amount: 2350 });
+  const adjusted = await notificationService.notifyPayment({ kind: 'adjusted', paymentId: 15, learnerId: 101, amount: 1175 });
+  const reversed = await notificationService.notifyPayment({ kind: 'reversed', paymentId: 16, learnerId: 101, amount: 1175 });
   const invoice = await notificationService.notifyInvoice({ invoiceId: 13, learnerId: 102, amount: 100 });
   assert.equal(absent.created, 1);
   assert.equal(late.created, 1);
@@ -402,11 +405,15 @@ test('attendance, academic, payment, and invoice notification contracts include 
   assert.equal(approved.created, 1);
   assert.equal(rejected.created, 1);
   assert.equal(applied.created, 1);
+  assert.equal(recorded.created, 1);
+  assert.equal(adjusted.created, 1);
+  assert.equal(reversed.created, 1);
   assert.equal(invoice.created, 1);
   assert.deepEqual(state.notifications.map((n) => n.event_type), [
     'attendance_absent', 'attendance_late', 'academic_result_published',
     'payment_proof_submitted', 'payment_proof_approved', 'payment_proof_rejected',
-    'payment_applied', 'invoice_created',
+    'payment_applied', 'payment_recorded', 'payment_adjusted', 'payment_reversed',
+    'invoice_created',
   ]);
   assert.ok(state.notifications.every((n) => n.learner_id != null));
   assert.equal(state.notifications.find((n) => n.event_type === 'invoice_created').deep_link, '/parent/invoices');
@@ -560,7 +567,7 @@ test('review blocker contracts: post-update targeting, saved attendance rows, pa
   assert.equal((invoicesSource.match(/notifyPayment\(\{/g) || []).length, 1,
     'bank-statement payment writer notifies parents');
   const enhancedSource = fs.readFileSync(require.resolve('../routes/enhanced-invoices'), 'utf8');
-  assert.equal((enhancedSource.match(/notifyPayment\(\{/g) || []).length, 4,
+  assert.equal((enhancedSource.match(/notifyPayment\(\{/g) || []).length, 7,
     'all enhanced payment writers notify parents');
   assert.match(enhancedSource, /manual-payment\/apply-arrears-first/);
   assert.match(enhancedSource, /transactionId/);

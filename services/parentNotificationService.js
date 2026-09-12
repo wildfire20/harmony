@@ -25,6 +25,9 @@ const EVENT = Object.freeze({
   PROOF_APPROVED: 'payment_proof_approved',
   PROOF_REJECTED: 'payment_proof_rejected',
   PAYMENT_APPLIED: 'payment_applied',
+  PAYMENT_RECORDED: 'payment_recorded',
+  PAYMENT_ADJUSTED: 'payment_adjusted',
+  PAYMENT_REVERSED: 'payment_reversed',
   INVOICE: 'invoice_created',
   ANNOUNCEMENT: 'announcement_published',
   DOCUMENT: 'document_published',
@@ -276,6 +279,9 @@ async function notifyPayment({ kind, paymentId, learnerId, amount, reason }) {
     approved: ['Payment proof approved', `${name}'s payment proof was approved.`, true],
     rejected: ['Payment proof needs attention', `${name}'s payment proof was not approved. Please review the Payment Proof section.`, true],
     applied: ['Payment applied', `A payment was applied to ${name}'s school account.`, true],
+    recorded: ['Payment recorded', `A payment was recorded on ${name}'s school account.`, true],
+    adjusted: ['Payment adjusted', `A payment on ${name}'s school account was adjusted.`, true],
+    reversed: ['Payment reversed', `A payment on ${name}'s school account was reversed.`, true],
   };
   const [title, baseSummary, important] = labels[kind] || labels.submitted;
   const summary = kind === 'rejected'
@@ -283,9 +289,13 @@ async function notifyPayment({ kind, paymentId, learnerId, amount, reason }) {
     : baseSummary;
   const amountText = Number.isFinite(Number(amount)) ? ` Amount recorded: R ${Number(amount).toFixed(2)}.` : '';
   return createParentNotifications({
-    eventType: EVENT[`PROOF_${String(kind).toUpperCase()}`] || EVENT.PAYMENT_APPLIED,
+    eventType: {
+      recorded: EVENT.PAYMENT_RECORDED,
+      adjusted: EVENT.PAYMENT_ADJUSTED,
+      reversed: EVENT.PAYMENT_REVERSED,
+    }[kind] || EVENT[`PROOF_${String(kind).toUpperCase()}`] || EVENT.PAYMENT_APPLIED,
     title,
-    summary: `${summary}${kind === 'approved' || kind === 'applied' ? amountText : ''}`,
+    summary: `${summary}${['approved', 'applied', 'recorded', 'adjusted', 'reversed'].includes(kind) ? amountText : ''}`,
     destination: 'payment-proof',
     dedupeKey: `payment:${kind}:${paymentId}`,
     learnerId,

@@ -1239,6 +1239,8 @@ router.post('/manual-payment', [
   body('student_id').isInt().withMessage('Student ID is required'),
   body('amount').isFloat({ min: 0.01 }).withMessage('Amount must be greater than 0'),
   body('payment_date').isISO8601().withMessage('Valid payment date is required'),
+  body('invoice_id').optional({ nullable: true }).isInt({ min: 1 }),
+  body('payment_method').optional().isIn(['manual_entry', 'cash', 'bank_transfer', 'card', 'other']),
   body('description').optional().isString(),
   body('reference').optional().isString()
 ], async (req, res) => {
@@ -1248,7 +1250,7 @@ router.post('/manual-payment', [
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    const { student_id, amount, payment_date, description, reference, month, year } = req.body;
+    const { student_id, amount, payment_date, description, reference, month, year, invoice_id, payment_method } = req.body;
     const adminId = req.user.id;
 
     // Verify student exists
@@ -1262,6 +1264,8 @@ router.post('/manual-payment', [
     }
 
     const student = studentResult.rows[0];
+    const paymentMonth = month || new Date(payment_date).getUTCMonth() + 1;
+    const paymentYear = year || new Date(payment_date).getUTCFullYear();
 
     // Manual, bank, and proof payments all use the same locked allocation
     // algorithm.  The requested month/year are retained in the audit details;
@@ -1277,16 +1281,48 @@ router.post('/manual-payment', [
         studentId: student_id,
         amount,
         paymentDate: payment_date,
-        paymentMethod: 'manual_entry',
+        paymentMethod: payment_method || 'manual_entry',
         reference: refValue,
         description: description || 'Manual payment entry by admin',
         recordedBy: adminId,
+        invoiceId: invoice_id == null ? null : Number(invoice_id),
+        transactionMonth: month || null,
+        transactionYear: year || null,
       });
+      if (invoice_id != null && !allocation.allocations.some((item) => item.invoiceId === Number(invoice_id))) {
+        const error = new Error('Selected invoice is not an outstanding invoice for this learner');
+        error.status = 409;
+        throw error;
+      }
       const firstPaymentId = allocation.allocations[0]?.transactionId;
       paymentResult = await client.query(
         'SELECT * FROM payment_transactions WHERE id = $1',
         [firstPaymentId],
       );
+      await logAudit({
+        userId: req.user.id,
+        userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        userRole: req.user.role,
+        action: 'manual_payment_add',
+        entityType: 'payment',
+        entityId: paymentResult.rows[0]?.id || null,
+        details: {
+          summary: `R${amount} recorded for ${student.first_name} ${student.last_name} (${student.student_number})`,
+          student: `${student.first_name} ${student.last_name}`,
+          student_number: student.student_number,
+          student_id,
+          amount,
+          month: paymentMonth,
+          year: paymentYear,
+          reference: refValue,
+          invoice_id: invoice_id == null ? null : Number(invoice_id),
+          allocation_transaction_ids: allocation.allocations.map((item) => item.transactionId),
+          invoice_updated: allocation.allocations.some((item) => item.invoiceId != null),
+        },
+        ipAddress: getIp(req),
+        executor: client,
+        required: true,
+      });
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -1294,26 +1330,12 @@ router.post('/manual-payment', [
     } finally {
       client.release();
     }
-    const paymentMonth = month || new Date(payment_date).getUTCMonth() + 1;
-    const paymentYear = year || new Date(payment_date).getUTCFullYear();
     const invoiceUpdated = allocation.allocations.some((item) => item.invoiceId != null);
 
     console.log(`✅ Manual payment recorded: R${amount} for ${student.first_name} ${student.last_name} (${student.student_number})`);
 
-    await logAudit({
-      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-      userRole: req.user.role, action: 'manual_payment_add',
-      entityType: 'payment', entityId: paymentResult.rows[0]?.id || null,
-      details: {
-        summary: `R${amount} recorded for ${student.first_name} ${student.last_name} (${student.student_number})`,
-        student: `${student.first_name} ${student.last_name}`, student_number: student.student_number,
-        amount, month: paymentMonth, year: paymentYear, reference: refValue,
-        invoice_updated: invoiceUpdated,
-      },
-      ipAddress: getIp(req)
-    });
     await notifyPayment({
-      kind: 'applied',
+      kind: 'recorded',
       paymentId: paymentResult.rows[0]?.id,
       learnerId: student.id,
       amount,
@@ -1380,6 +1402,15 @@ router.get('/student-payments/:studentId', [
       WHERE pt.student_id = $1
       ORDER BY COALESCE(pt.payment_date, pt.transaction_date) DESC
     `, [studentId]);
+    const invoicesResult = await db.query(`
+      SELECT id, reference_number, due_date, amount_due, amount_paid,
+             GREATEST(amount_due - amount_paid, 0) AS outstanding_balance, status
+      FROM invoices
+      WHERE student_id = $1
+        AND status <> 'Carried Forward'
+        AND amount_paid < amount_due
+      ORDER BY due_date ASC, id ASC
+    `, [studentId]);
 
     res.json({
       success: true,
@@ -1388,7 +1419,8 @@ router.get('/student-payments/:studentId', [
         name: `${student.first_name} ${student.last_name}`,
         studentNumber: student.student_number
       },
-      payments: paymentsResult.rows
+      payments: paymentsResult.rows,
+      invoices: invoicesResult.rows,
     });
 
   } catch (error) {
@@ -1409,15 +1441,20 @@ router.put('/manual-payment/:paymentId', [
   authorize('admin', 'super_admin'),
   body('amount').optional().isFloat({ min: 0.01 }),
   body('payment_date').optional().isISO8601(),
-  body('description').optional().isString()
+  body('description').optional().isString(),
+  body('payment_method').optional().isIn(['manual_entry', 'cash', 'bank_transfer', 'card', 'other']),
+  body('reason').isString().trim().isLength({ min: 3, max: 500 }).withMessage('A correction reason is required')
 ], async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
     const { paymentId } = req.params;
-    const { amount, payment_date, description, reference, month, year } = req.body;
+    const { amount, payment_date, description, reference, month, year, payment_method, reason } = req.body;
 
     const client = await db.pool.connect();
     let original;
     let replacement;
+    let replacementTransactionIds = [];
     let replacementPayment;
     let reversalId;
     try {
@@ -1442,7 +1479,7 @@ router.put('/manual-payment/:paymentId', [
       const reversal = await reversePayment(client, {
         transactionId: paymentId,
         recordedBy: req.user.id,
-        description: `Reversal for edit of payment ${paymentId}`,
+        description: `Correction reversal for payment ${paymentId}: ${reason}`,
       });
       if (reversal.alreadyReversed) {
         const error = new Error('Payment was already reversed and cannot be edited');
@@ -1454,9 +1491,9 @@ router.put('/manual-payment/:paymentId', [
         studentId: original.student_id,
         amount: newAmount,
         paymentDate: newDate,
-        paymentMethod: original.payment_method || 'manual_entry',
+        paymentMethod: payment_method || original.payment_method || 'manual_entry',
         reference: reference || original.reference || original.reference_number,
-        description: description || original.description || `Edited payment ${paymentId}`,
+        description: `Correction replacement for payment ${paymentId}: ${description || original.description || reason}`,
         recordedBy: req.user.id,
         // Preserve the original allocation identity. A month/year edit must
         // never touch every invoice for that student and period.
@@ -1468,6 +1505,7 @@ router.put('/manual-payment/:paymentId', [
         transactionYear: newYear,
       });
       replacement = allocation.allocations[0] || null;
+      replacementTransactionIds = allocation.allocations.map((item) => item.transactionId);
       if (replacement?.transactionId) {
         const replacementResult = await client.query(
           'SELECT * FROM payment_transactions WHERE id = $1',
@@ -1475,6 +1513,34 @@ router.put('/manual-payment/:paymentId', [
         );
         replacementPayment = replacementResult.rows[0] || null;
       }
+      await logAudit({
+        userId: req.user.id,
+        userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        userRole: req.user.role,
+        action: 'manual_payment_edit',
+        entityType: 'payment',
+        entityId: parseInt(paymentId),
+        details: {
+          summary: `Payment #${paymentId} corrected by reversal and replacement`,
+          student_id: original.student_id,
+          invoice_id: reversal.effectiveInvoiceId,
+          original_transaction_id: Number(paymentId),
+          reversal_transaction_id: reversalId,
+          replacement_transaction_ids: replacementTransactionIds,
+          old_amount: oldAmount,
+          new_amount: newAmount,
+          old_date: original.payment_date || original.transaction_date,
+          new_date: newDate,
+          old_reference: original.reference || original.reference_number,
+          new_reference: reference || original.reference || original.reference_number,
+          previous_method: original.payment_method,
+          new_method: payment_method || original.payment_method,
+          reason,
+        },
+        ipAddress: getIp(req),
+        executor: client,
+        required: true,
+      });
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -1485,24 +1551,18 @@ router.put('/manual-payment/:paymentId', [
 
     console.log(`✅ Manual payment ${paymentId} reversed and reapplied as transaction ${replacement?.transactionId || 'unallocated'}`);
 
-    await logAudit({
-      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-      userRole: req.user.role, action: 'manual_payment_edit',
-      entityType: 'payment', entityId: parseInt(paymentId),
-      details: {
-        summary: `Payment #${paymentId} edited`,
-        old_amount: parseFloat(original.amount), new_amount: amount == null ? parseFloat(original.amount) : parseFloat(amount),
-        replacement_transaction_id: replacement?.transactionId || null,
-        reversal_transaction_id: reversalId,
-        student_id: original.student_id
-      },
-      ipAddress: getIp(req)
+    await notifyPayment({
+      kind: 'adjusted',
+      paymentId: replacement?.transactionId || reversalId,
+      learnerId: original.student_id,
+      amount: amount == null ? original.amount : amount,
     });
 
     res.json({
       success: true,
       message: 'Payment updated successfully',
-      payment: replacementPayment || replacement
+      payment: replacementPayment || replacement,
+      replacement_transaction_ids: replacementTransactionIds,
     });
 
   } catch (error) {
@@ -1520,10 +1580,14 @@ router.put('/manual-payment/:paymentId', [
  */
 router.delete('/manual-payment/:paymentId', [
   authenticate,
-  authorize('admin', 'super_admin')
+  authorize('admin', 'super_admin'),
+  body('reason').isString().trim().isLength({ min: 3, max: 500 }).withMessage('A reversal reason is required')
 ], async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
     const { paymentId } = req.params;
+    const { reason } = req.body;
 
     const client = await db.pool.connect();
     let payment;
@@ -1541,11 +1605,40 @@ router.delete('/manual-payment/:paymentId', [
         return res.status(404).json({ success: false, message: 'Payment not found' });
       }
       payment = paymentResult.rows[0];
-      ({ reversalId } = await reversePayment(client, {
+      const reversal = await reversePayment(client, {
         transactionId: paymentId,
         recordedBy: req.user.id,
-        description: `Reversal of deleted payment ${paymentId}`,
-      }));
+        description: `Admin reversal of payment ${paymentId}: ${reason}`,
+      });
+      if (reversal.alreadyReversed) {
+        const error = new Error('Payment was already reversed');
+        error.status = 409;
+        throw error;
+      }
+      reversalId = reversal.reversalId;
+      await logAudit({
+        userId: req.user.id,
+        userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        userRole: req.user.role,
+        action: 'manual_payment_reverse',
+        entityType: 'payment',
+        entityId: parseInt(paymentId),
+        details: {
+          summary: `Payment #${paymentId} reversed (R${payment.amount})`,
+          student_id: payment.student_id,
+          invoice_id: payment.invoice_id,
+          original_transaction_id: Number(paymentId),
+          reversal_transaction_id: reversalId,
+          amount: payment.amount,
+          month: payment.month,
+          year: payment.year,
+          method: payment.payment_method,
+          reason,
+        },
+        ipAddress: getIp(req),
+        executor: client,
+        required: true,
+      });
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -1554,17 +1647,11 @@ router.delete('/manual-payment/:paymentId', [
       client.release();
     }
 
-    await logAudit({
-      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-      userRole: req.user.role, action: 'manual_payment_delete',
-      entityType: 'payment', entityId: parseInt(paymentId),
-      details: {
-        summary: `Payment #${paymentId} reversed (R${payment.amount})`,
-        amount: payment.amount, student_id: payment.student_id,
-        invoice_id: payment.invoice_id, reversal_transaction_id: reversalId,
-        month: payment.month, year: payment.year, method: payment.payment_method
-      },
-      ipAddress: getIp(req)
+    await notifyPayment({
+      kind: 'reversed',
+      paymentId: reversalId,
+      learnerId: payment.student_id,
+      amount: Math.abs(Number(payment.amount)),
     });
 
     res.json({
@@ -1577,8 +1664,143 @@ router.delete('/manual-payment/:paymentId', [
     console.error('Delete payment error:', error);
     res.status(error.status || 500).json({
       success: false,
-      message: 'Failed to delete payment',
+      message: 'Failed to reverse payment',
       error: error.message
+    });
+  }
+});
+
+/**
+ * Apply an existing unallocated payment to one exact outstanding invoice.
+ * The original event is reversed and a replacement allocation is created;
+ * neither event is overwritten or deleted.
+ */
+router.post('/manual-payment/:paymentId/apply', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+  body('invoice_id').isInt({ min: 1 }).withMessage('Invoice is required'),
+  body('reason').isString().trim().isLength({ min: 3, max: 500 }).withMessage('An allocation reason is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const paymentId = Number(req.params.paymentId);
+    const invoiceId = Number(req.body.invoice_id);
+    const reason = req.body.reason;
+    const client = await db.pool.connect();
+    let original;
+    let reversalId;
+    let replacement;
+    let replacementTransactionIds = [];
+    try {
+      await client.query('BEGIN');
+      const originalResult = await client.query(`
+        SELECT * FROM payment_transactions
+        WHERE id = $1
+        FOR UPDATE
+      `, [paymentId]);
+      if (!originalResult.rows.length) {
+        const error = new Error('Payment not found');
+        error.status = 404;
+        throw error;
+      }
+      original = originalResult.rows[0];
+      if (original.invoice_id != null || Number(original.amount) <= 0 || original.reverses_transaction_id != null) {
+        const error = new Error('Only a positive unallocated payment can be applied');
+        error.status = 409;
+        throw error;
+      }
+      const invoiceResult = await client.query(`
+        SELECT id FROM invoices
+        WHERE id = $1 AND student_id = $2
+          AND status IN ('Unpaid', 'Partial')
+          AND amount_paid < amount_due
+        FOR UPDATE
+      `, [invoiceId, original.student_id]);
+      if (!invoiceResult.rows.length) {
+        const error = new Error('Selected invoice is not an outstanding invoice for this learner');
+        error.status = 409;
+        throw error;
+      }
+
+      const reversal = await reversePayment(client, {
+        transactionId: paymentId,
+        recordedBy: req.user.id,
+        description: `Reallocation reversal for payment ${paymentId}: ${reason}`,
+      });
+      if (reversal.alreadyReversed) {
+        const error = new Error('Payment was already reversed');
+        error.status = 409;
+        throw error;
+      }
+      reversalId = reversal.reversalId;
+      const allocation = await allocatePayment(client, {
+        studentId: original.student_id,
+        amount: Number(original.amount),
+        paymentDate: original.payment_date || original.transaction_date,
+        paymentMethod: original.payment_method || 'manual_entry',
+        reference: original.reference || original.reference_number,
+        description: `Reallocated from payment ${paymentId}: ${original.description || reason}`,
+        recordedBy: req.user.id,
+        invoiceId,
+        transactionMonth: original.month,
+        transactionYear: original.year,
+      });
+      replacement = allocation.allocations[0] || null;
+      replacementTransactionIds = allocation.allocations.map((item) => item.transactionId);
+      if (!replacement || replacement.invoiceId !== invoiceId) {
+        throw new Error('Payment could not be applied to the selected invoice');
+      }
+      await logAudit({
+        userId: req.user.id,
+        userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        userRole: req.user.role,
+        action: 'manual_payment_reallocated',
+        entityType: 'payment',
+        entityId: paymentId,
+        details: {
+          summary: `Unallocated payment #${paymentId} applied to invoice #${invoiceId}`,
+          student_id: original.student_id,
+          invoice_id: invoiceId,
+          original_transaction_id: paymentId,
+          reversal_transaction_id: reversalId,
+          replacement_transaction_ids: replacementTransactionIds,
+          amount: Number(original.amount),
+          reason,
+        },
+        ipAddress: getIp(req),
+        executor: client,
+        required: true,
+      });
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    await notifyPayment({
+      kind: 'adjusted',
+      paymentId: replacement.transactionId,
+      learnerId: original.student_id,
+      amount: original.amount,
+    });
+
+    res.json({
+      success: true,
+      message: 'Unallocated payment applied successfully',
+      original_transaction_id: paymentId,
+      reversal_transaction_id: reversalId,
+      replacement_transaction_ids: replacementTransactionIds,
+      invoice_id: invoiceId,
+    });
+  } catch (error) {
+    console.error('Apply unallocated payment error:', error);
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.message || 'Failed to apply unallocated payment',
     });
   }
 });
