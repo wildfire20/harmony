@@ -39,7 +39,11 @@ async function main() {
 
 if (require.main === module) {
   main().catch((error) => {
-    console.error('Mini Phase 1 finance migration failed:', error.message);
+    const operation = process.argv.includes('--audit') || process.env.AUDIT_ONLY === 'true'
+      ? 'audit'
+      : 'migration';
+    const section = error.auditSection ? ` [section: ${error.auditSection}]` : '';
+    console.error(`Mini Phase 1 finance ${operation} failed${section}:`, error.message);
     process.exitCode = 1;
   });
 }

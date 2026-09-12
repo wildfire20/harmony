@@ -12,9 +12,20 @@ const REQUIRED_INDEXES = [
   'service_prices_bundle_idx',
 ];
 
+async function runAuditQuery(client, section, text, values = []) {
+  try {
+    return await client.query(text, values);
+  } catch (error) {
+    const wrapped = new Error(`Audit query failed in section "${section}": ${error.message}`);
+    wrapped.auditSection = section;
+    wrapped.cause = error;
+    throw wrapped;
+  }
+}
+
 async function verifyMiniPhase1FinanceSchema(client) {
   const missing = [];
-  const tables = await client.query(`
+  const tables = await runAuditQuery(client, 'required_tables', `
     SELECT table_name FROM information_schema.tables
     WHERE table_schema = 'public' AND table_name = ANY($1::text[])
   `, [REQUIRED_TABLES]);
@@ -23,7 +34,7 @@ async function verifyMiniPhase1FinanceSchema(client) {
     if (!tableSet.has(table)) missing.push(`table ${table}`);
   });
 
-  const columns = await client.query(`
+  const columns = await runAuditQuery(client, 'required_columns', `
     SELECT table_name, column_name FROM information_schema.columns
     WHERE table_schema = 'public'
       AND (table_name, column_name) IN (
@@ -36,7 +47,7 @@ async function verifyMiniPhase1FinanceSchema(client) {
     if (!columnSet.has(`${table}.${column}`)) missing.push(`column ${table}.${column}`);
   });
 
-  const indexes = await client.query(`
+  const indexes = await runAuditQuery(client, 'required_indexes', `
     SELECT indexname FROM pg_indexes
     WHERE schemaname = 'public' AND indexname = ANY($1::text[])
   `, [REQUIRED_INDEXES]);
@@ -45,7 +56,12 @@ async function verifyMiniPhase1FinanceSchema(client) {
     if (!indexSet.has(index)) missing.push(`index ${index}`);
   });
 
-  const constraints = await client.query(`
+  const constraintTables = [
+    'learner_discount_assignments',
+    'invoice_line_items',
+    'service_prices',
+  ];
+  const constraints = await runAuditQuery(client, 'required_check_constraints', `
     SELECT c.relname AS table_name, pg_get_constraintdef(pc.oid) AS definition
     FROM pg_constraint pc
     JOIN pg_class c ON c.oid = pc.conrelid
@@ -53,7 +69,7 @@ async function verifyMiniPhase1FinanceSchema(client) {
     WHERE n.nspname = 'public'
       AND c.relname = ANY($1::text[])
       AND pc.contype = 'c'
-  `, ['learner_discount_assignments', 'invoice_line_items', 'service_prices']);
+  `, [constraintTables]);
   const definitions = constraints.rows.map((row) => row.definition).join(' ');
   [
     'staff', 'sibling', 'custom', 'fixed', 'percentage',
@@ -62,7 +78,7 @@ async function verifyMiniPhase1FinanceSchema(client) {
     if (!definitions.toLowerCase().includes(fragment.toLowerCase())) missing.push(`check ${fragment}`);
   });
 
-  const trigger = await client.query(`
+  const trigger = await runAuditQuery(client, 'invoice_line_items_immutability_trigger', `
     SELECT 1 FROM pg_trigger
     WHERE tgname = 'invoice_line_items_immutable'
       AND NOT tgisinternal
@@ -77,4 +93,5 @@ module.exports = {
   REQUIRED_TABLES,
   REQUIRED_COLUMNS,
   REQUIRED_INDEXES,
+  runAuditQuery,
 };

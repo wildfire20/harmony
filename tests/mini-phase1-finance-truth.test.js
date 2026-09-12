@@ -9,8 +9,12 @@ const {
   invoiceStatus,
   buildInvoiceBreakdown,
   getStudentLedger,
+  getFinanceSummary,
 } = require('../services/financeLedger');
 const { parseInvoiceListQuery } = require('../utils/invoiceQuery');
+const {
+  verifyMiniPhase1FinanceSchema,
+} = require('../scripts/mini-phase1-finance-schema-verifier');
 
 const prices = [
   { service_key: 'tuition', label: 'Tuition', amount: 2350, billing_mode: 'bundle_component' },
@@ -192,6 +196,82 @@ test('migration is additive and does not rewrite invoices or payments', () => {
   assert.doesNotMatch(migration, /\bBACKFILL\b/i);
   assert.match(migration, /invoice_line_items_immutable/);
   assert.match(migration, /learner_discount_assignments/);
+});
+
+test('finance schema audit supplies exactly one value per SQL placeholder', async () => {
+  const calls = [];
+  const pgCompatibleClient = {
+    async query(sql, values = []) {
+      const placeholders = [...sql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]));
+      const requiredValueCount = placeholders.length ? Math.max(...placeholders) : 0;
+      assert.equal(
+        values.length,
+        requiredValueCount,
+        `placeholder/value mismatch in query: ${sql.trim().split(/\s+/).slice(0, 8).join(' ')}`,
+      );
+      calls.push({ sql, values });
+      return { rows: [] };
+    },
+  };
+
+  const result = await verifyMiniPhase1FinanceSchema(pgCompatibleClient);
+  assert.equal(result.ok, false);
+  assert.equal(calls.length, 5);
+  const constraintCall = calls.find(({ sql }) => sql.includes('FROM pg_constraint'));
+  assert.equal(constraintCall.values.length, 1);
+  assert.deepEqual(constraintCall.values[0], [
+    'learner_discount_assignments',
+    'invoice_line_items',
+    'service_prices',
+  ]);
+});
+
+test('finance schema audit identifies the exact failing query section without values', async () => {
+  const sensitiveMarker = 'do-not-print-this-value';
+  let queryCount = 0;
+  const client = {
+    async query() {
+      queryCount += 1;
+      if (queryCount === 3) throw new Error('database unavailable');
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(
+    verifyMiniPhase1FinanceSchema(client),
+    (error) => {
+      assert.equal(error.auditSection, 'required_indexes');
+      assert.match(error.message, /required_indexes/);
+      assert.doesNotMatch(error.message, new RegExp(sensitiveMarker));
+      return true;
+    },
+  );
+});
+
+test('shared finance audit filters keep pg placeholders aligned with supplied values', async () => {
+  const calls = [];
+  const pgCompatibleClient = {
+    async query(sql, values = []) {
+      const placeholders = [...sql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]));
+      const requiredValueCount = placeholders.length ? Math.max(...placeholders) : 0;
+      assert.equal(values.length, requiredValueCount);
+      calls.push({ sql, values });
+      if (sql.includes('FROM invoices')) return { rows: [] };
+      if (sql.includes('FROM payment_transactions')) return { rows: [{ unallocated: 0 }] };
+      throw new Error(`Unexpected finance audit query: ${sql}`);
+    },
+  };
+
+  await getFinanceSummary({
+    status: 'Partial',
+    studentNumber: 'HAR049',
+    year: 2026,
+    month: 3,
+  }, pgCompatibleClient);
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].values.length, 4);
+  assert.equal(calls[1].values.length, 3);
 });
 
 test('history, export, Parent and Admin remain ledger-aligned and preserve year-only/unavailable behavior', () => {
