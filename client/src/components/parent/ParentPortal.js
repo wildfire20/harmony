@@ -292,7 +292,11 @@ const ParentPortal = () => {
     if (!isAuthenticated) {
       refreshParentAccess().catch(() => {}).finally(() => {
         setBootstrapping(false);
-        if (sessionStorage.getItem('parentToken')) setAuthVersion(version => version + 1);
+        if (sessionStorage.getItem('parentToken')) {
+          try { setSelectedChild(JSON.parse(sessionStorage.getItem('parentChild') || 'null')); }
+          catch (_) { setSelectedChild(null); }
+          setAuthVersion(version => version + 1);
+        }
         else navigate(parentLoginPath(getSafeParentDestination(`${location.pathname}${location.search}`)), { replace: true });
       });
     } else setBootstrapping(false);

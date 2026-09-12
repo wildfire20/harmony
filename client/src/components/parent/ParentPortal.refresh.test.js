@@ -26,4 +26,6 @@ test('refresh bootstrap hydrates parent identity and authorized child', async ()
   expect(JSON.parse(sessionStorage.getItem('parentChild')).id).toBe(1);
   expect(sessionStorage.getItem('parentToken')).toBe('short-lived');
   expect(localStorage.getItem('parentToken')).toBeNull();
+  expect(sessionStorage.getItem('parentPhone')).toBeNull();
+  expect(sessionStorage.getItem('parentPassword')).toBeNull();
 });

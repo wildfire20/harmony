@@ -259,7 +259,9 @@ router.put('/change-password', [
 // ─── Parent login (phone number based) ───────────────────────────────────────
 router.post('/login/parent', loginLimiter, [
   body('phone_number').notEmpty().withMessage('Phone number is required'),
-  body('password').notEmpty().withMessage('Password is required')
+  body('password').notEmpty().withMessage('Password is required'),
+  body('rememberMe').optional().isBoolean().withMessage('rememberMe must be a boolean'),
+  body('remember').optional().isBoolean().withMessage('remember must be a boolean')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -306,7 +308,10 @@ router.post('/login/parent', loginLimiter, [
       ORDER BY g.name, u.last_name
     `, [user.id]);
 
-    const session = await authenticateSession(req, res, user, req.body.remember === true);
+    // `remember` remains accepted during rollout so an older cached frontend
+    // cannot silently downgrade a requested persistent session.
+    const session = await authenticateSession(req, res, user,
+      req.body.rememberMe === true || req.body.remember === true);
     await db.query('UPDATE users SET last_login_at=NOW() WHERE id=$1 AND role=$2', [user.id, 'parent']);
     const token = session.token;
     const { password: _, ...userWithoutPassword } = user;

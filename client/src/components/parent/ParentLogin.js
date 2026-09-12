@@ -18,7 +18,7 @@ const ParentLogin = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      const response = await api.post('/auth/login/parent', { ...form, remember });
+      const response = await api.post('/auth/login/parent', { ...form, rememberMe: remember });
       const { token, user, children, child, must_change_password } = response.data;
 
       // Keep the bearer token in session storage by default. A remembered session

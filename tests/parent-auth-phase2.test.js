@@ -202,7 +202,7 @@ test('parent login accepts legacy phone forms, rejects invalid/inactive users, a
   state.user.is_active = true;
 });
 
-test('refresh cookies have secure flags and remembered/normal TTLs are distinct', async () => {
+test('rememberMe reaches the server and refresh cookies have secure flags with distinct TTLs', async () => {
   state.sessions = []; state.children = [{ id: 101, first_name: 'Kid' }];
   const normal = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1' }) });
   const normalCookie = normal.response.headers.get('set-cookie').split(';')[0];
@@ -213,11 +213,20 @@ test('refresh cookies have secure flags and remembered/normal TTLs are distinct'
   assert.equal(rotatedNormal.response.status, 200);
   assert.doesNotMatch(rotatedNormal.response.headers.get('set-cookie'), /Max-Age=/,
     'rotating a normal session must not make it persistent');
-  const remembered = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1', remember: true }) });
+  const remembered = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1', rememberMe: true }) });
   assert.match(remembered.response.headers.get('set-cookie'), /Max-Age=2592000/);
+  assert.match(remembered.response.headers.get('set-cookie'), /SameSite=Lax/);
+  assert.match(remembered.response.headers.get('set-cookie'), /Path=\/api\/auth/);
   assert.ok(state.sessions.every(s => s.family_expires_at instanceof Date));
   const family = state.sessions[0].family_expires_at.getTime();
   assert.equal(state.sessions[0].family_expires_at.getTime(), family);
+});
+
+test('frontend sends rememberMe and does not persist parent login credentials', () => {
+  const loginSource = fs.readFileSync('client/src/components/parent/ParentLogin.js', 'utf8');
+  assert.match(loginSource, /rememberMe:\s*remember/);
+  assert.doesNotMatch(loginSource, /setItem\(['"](?:parentPhone|parentPassword)/);
+  assert.match(loginSource, /const storage = sessionStorage/);
 });
 
 test('parent access tokens carry session identity and auth-token issuance locks the parent row', async () => {
@@ -240,7 +249,7 @@ test('parent access tokens carry session identity and auth-token issuance locks 
 test('remembered mode survives late-family rotations while normal families stay session cookies', async () => {
   const login = await json('/api/auth/login/parent', {
     method: 'POST',
-    body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1', remember: true }),
+    body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1', rememberMe: true }),
   });
   assert.equal(login.response.status, 200);
   const originalNow = Date.now;
@@ -339,7 +348,7 @@ test('auth email escapes recipient data and migration remains manual/idempotent'
 });
 
 test('logout, refresh replay, password change, and admin disable revoke sessions', async () => {
-  const login = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1', remember: true }) });
+  const login = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1', rememberMe: true }) });
   const cookie = login.response.headers.get('set-cookie').split(';')[0];
   state.queries = [];
   const first = await json('/api/auth/refresh', { method: 'POST', headers: { cookie } });
