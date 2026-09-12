@@ -85,7 +85,9 @@ function completeMetadataRows() {
     ['payment_transactions', 'payment_transactions_one_reversal_idx', true, ['reverses_transaction_id']],
     ['payment_transactions', 'payment_transactions_invoice_id_idx', false, ['invoice_id']],
   ].map(([table_name, indexname, is_unique, columns]) => ({
-    table_name, indexname, is_unique, columns, directions: columns.map(() => 'ASC'), predicate: null,
+    table_name, indexname, is_unique, is_valid: true, is_ready: true,
+    method: indexname.includes('target_parent_ids') ? 'gin' : 'btree',
+    columns, directions: columns.map(() => 'ASC'), predicate: null,
     indexdef: `CREATE ${is_unique ? 'UNIQUE ' : ''}INDEX ${indexname} ON ${table_name} (${columns.join(', ')})`,
   }));
   indexes[12].predicate = 'carried_forward_to_invoice_id IS NOT NULL';
@@ -108,7 +110,7 @@ function completeMetadataRows() {
     { table_name: 'documents', contype: 'c', columns: [], conname: 'check_target_audience', definition: "CHECK (target_audience IN ('everyone', 'student', 'staff', 'parents', 'all_parents', 'grade', 'class', 'specific_parents'))" },
   ];
   const fk = (table_name, columns, referenced_table, referenced_columns, on_delete) =>
-    ({ table_name, contype: 'f', columns, referenced_table, referenced_columns, on_delete });
+    ({ table_name, contype: 'f', columns, referenced_schema: 'public', referenced_table, referenced_columns, on_delete });
   constraints.push(fk('parent_auth_tokens', ['user_id'], 'users', ['id'], 'CASCADE'),
     fk('parent_auth_tokens', ['created_by'], 'users', ['id'], 'SET NULL'),
     fk('parent_sessions', ['user_id'], 'users', ['id'], 'CASCADE'),
@@ -228,11 +230,11 @@ test('GIN readiness ignores non-B-tree direction metadata but enforces method/na
   assert.equal(readiness.parent_targeting_phase4.status, 'APPLIED');
 
   const malformedMethod = metadata.indexes.find((row) => row.indexname === 'idx_documents_target_parent_ids');
-  malformedMethod.indexdef = malformedMethod.indexdef.replace(/USING gin/i, 'USING btree');
+  malformedMethod.method = 'btree';
   ({ readiness } = await checkSchemaReadiness({ query }));
   assert.equal(readiness.parent_targeting_phase4.status, 'INCOMPLETE');
 
-  malformedMethod.indexdef = malformedMethod.indexdef.replace(/USING btree/i, 'USING gin');
+  malformedMethod.method = 'gin';
   malformedMethod.indexname = 'wrong_documents_target_parent_ids';
   ({ readiness } = await checkSchemaReadiness({ query }));
   assert.equal(readiness.parent_targeting_phase4.status, 'INCOMPLETE');
@@ -241,6 +243,54 @@ test('GIN readiness ignores non-B-tree direction metadata but enforces method/na
   malformedMethod.columns = ['wrong_column'];
   ({ readiness } = await checkSchemaReadiness({ query }));
   assert.equal(readiness.parent_targeting_phase4.status, 'INCOMPLETE');
+});
+
+test('production-style name arrays recognize Phase 2 and 4 and isolate Phase 3 legacy nullability', async () => {
+  const metadata = completeMetadataRows();
+  for (const row of metadata.indexes) {
+    row.columns = `{${row.columns.join(',')}}`;
+    row.directions = `{${row.directions.join(',')}}`;
+  }
+  for (const row of metadata.constraints) {
+    row.columns = `{${row.columns.join(',')}}`;
+    row.referenced_columns = `{${(row.referenced_columns || []).join(',')}}`;
+  }
+  for (const columnName of ['is_active', 'created_at', 'updated_at']) {
+    metadata.columns.find((row) =>
+      row.table_name === 'parent_push_subscriptions' && row.column_name === columnName
+    ).is_nullable = 'YES';
+  }
+  const query = async (sql) => {
+    if (/information_schema\.tables/.test(sql)) return { rows: metadata.tables };
+    if (/information_schema\.columns/.test(sql)) return { rows: metadata.columns };
+    if (/FROM pg_constraint/.test(sql)) return { rows: metadata.constraints };
+    return { rows: metadata.indexes };
+  };
+
+  let { readiness } = await checkSchemaReadiness({ query });
+  assert.equal(readiness.parent_activation_phase2.status, 'APPLIED');
+  assert.equal(readiness.parent_targeting_phase4.status, 'APPLIED');
+  assert.equal(readiness.parent_notifications_phase3.status, 'INCOMPLETE');
+  assert.deepEqual(readiness.parent_notifications_phase3.missing.sort(), [
+    'column definition parent_push_subscriptions.created_at',
+    'column definition parent_push_subscriptions.is_active',
+    'column definition parent_push_subscriptions.updated_at',
+  ]);
+
+  for (const columnName of ['is_active', 'created_at', 'updated_at']) {
+    metadata.columns.find((row) =>
+      row.table_name === 'parent_push_subscriptions' && row.column_name === columnName
+    ).is_nullable = 'NO';
+  }
+  metadata.indexes = metadata.indexes.filter((row) =>
+    row.indexname !== 'uq_parent_push_subscriptions_endpoint');
+  metadata.constraints.push({
+    table_name: 'parent_push_subscriptions',
+    contype: 'u',
+    columns: '{endpoint}',
+  });
+  ({ readiness } = await checkSchemaReadiness({ query }));
+  assert.equal(readiness.parent_notifications_phase3.status, 'APPLIED');
 });
 
 test('configuration audit reports presence only, never values', () => {

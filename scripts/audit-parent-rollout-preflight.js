@@ -8,6 +8,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const sharedSchemaVerifier = require('./parent-schema-verifier');
+const {
+  normalizeIndexMetadata,
+  normalizeConstraintMetadata,
+} = require('./parent-schema-catalog');
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_SAMPLE_SIZE = 25;
@@ -72,7 +76,6 @@ const PHASE_SPECS = {
       ['parent_notifications', 'idx_parent_notifications_parent_created'],
       ['parent_notifications', 'idx_parent_notifications_learner'],
       ['parent_notification_reads', 'idx_parent_notification_reads_parent'],
-      ['parent_push_subscriptions', 'uq_parent_push_subscriptions_endpoint'],
       ['parent_push_subscriptions', 'idx_parent_push_subscriptions_parent_active'],
     ],
     constraints: [
@@ -221,7 +224,6 @@ const INDEX_SPECS = {
     ['parent_notifications', 'idx_parent_notifications_parent_created', false, ['parent_id', 'created_at'], null, undefined, ['ASC', 'DESC']],
     ['parent_notifications', 'idx_parent_notifications_learner', false, ['learner_id', 'created_at'], null, undefined, ['ASC', 'DESC']],
     ['parent_notification_reads', 'idx_parent_notification_reads_parent', false, ['parent_id', 'read_at'], null, undefined, ['ASC', 'ASC']],
-    ['parent_push_subscriptions', 'uq_parent_push_subscriptions_endpoint', true, ['endpoint'], null, undefined, ['ASC']],
     ['parent_push_subscriptions', 'idx_parent_push_subscriptions_parent_active', false, ['parent_id', 'is_active'], null, undefined, ['ASC', 'ASC']],
   ],
   parent_targeting_phase4: [
@@ -273,11 +275,20 @@ const FK_SPECS = {
   ],
 };
 
+const UNIQUE_SPECS = {
+  parent_activation_phase2: [],
+  parent_notifications_phase3: [
+    ['parent_push_subscriptions', ['endpoint']],
+  ],
+  parent_targeting_phase4: [],
+  manual_finance_reconciliation: [],
+};
+
 const READ_QUERIES = Object.freeze({
   tables: `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1::text[])`,
   columns: `SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default, character_maximum_length, numeric_precision, numeric_scale FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ANY($1::text[])`,
-  constraints: `SELECT c.conname, c.contype, cls.relname AS table_name, pg_get_constraintdef(c.oid) AS definition, COALESCE((SELECT array_agg(a.attname ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum), ARRAY[]::text[]) AS columns, COALESCE((SELECT array_agg(a.attname ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.attnum), ARRAY[]::text[]) AS referenced_columns, ref.relname AS referenced_table, CASE c.confdeltype WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' END AS on_delete FROM pg_constraint c JOIN pg_class cls ON cls.oid = c.conrelid JOIN pg_namespace ns ON ns.oid = cls.relnamespace LEFT JOIN pg_class ref ON ref.oid = c.confrelid WHERE ns.nspname = 'public'`,
-  indexes: `SELECT tbl.relname AS table_name, idx.relname AS indexname, ix.indisunique AS is_unique, ix.indisprimary AS is_primary, am.amname AS method, pg_get_indexdef(ix.indexrelid) AS indexdef, pg_get_expr(ix.indpred, ix.indrelid) AS predicate, ARRAY(SELECT a.attname FROM unnest(ix.indkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = k.attnum ORDER BY k.ord) AS columns, ARRAY(SELECT CASE WHEN (ix.indoption[k.ord - 1] & 1) = 1 THEN 'DESC' ELSE 'ASC' END FROM unnest(ix.indkey) WITH ORDINALITY k(attnum, ord) ORDER BY k.ord) AS directions FROM pg_index ix JOIN pg_class idx ON idx.oid = ix.indexrelid JOIN pg_class tbl ON tbl.oid = ix.indrelid JOIN pg_am am ON am.oid = idx.relam JOIN pg_namespace ns ON ns.oid = tbl.relnamespace WHERE ns.nspname = 'public'`,
+  constraints: `SELECT c.conname, c.contype, cls.relname AS table_name, pg_get_constraintdef(c.oid) AS definition, COALESCE((SELECT array_agg(a.attname::text ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum), ARRAY[]::text[]) AS columns, COALESCE((SELECT array_agg(a.attname::text ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.attnum), ARRAY[]::text[]) AS referenced_columns, ref_ns.nspname AS referenced_schema, ref.relname AS referenced_table, CASE c.confdeltype WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' END AS on_delete FROM pg_constraint c JOIN pg_class cls ON cls.oid = c.conrelid JOIN pg_namespace ns ON ns.oid = cls.relnamespace LEFT JOIN pg_class ref ON ref.oid = c.confrelid LEFT JOIN pg_namespace ref_ns ON ref_ns.oid = ref.relnamespace WHERE ns.nspname = 'public'`,
+  indexes: `SELECT tbl.relname AS table_name, idx.relname AS indexname, ix.indisunique AS is_unique, ix.indisprimary AS is_primary, ix.indisvalid AS is_valid, ix.indisready AS is_ready, am.amname AS method, pg_get_indexdef(ix.indexrelid) AS indexdef, pg_get_expr(ix.indpred, ix.indrelid) AS predicate, ARRAY(SELECT CASE WHEN k.attnum > 0 THEN a.attname::text ELSE pg_get_indexdef(ix.indexrelid, k.ord::integer, true) END FROM unnest(ix.indkey) WITH ORDINALITY k(attnum, ord) LEFT JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = k.attnum WHERE k.ord <= ix.indnkeyatts ORDER BY k.ord) AS columns, ARRAY(SELECT CASE WHEN am.amname = 'btree' THEN CASE WHEN (ix.indoption[k.ord - 1] & 1) = 1 THEN 'DESC' ELSE 'ASC' END ELSE NULL END FROM unnest(ix.indkey) WITH ORDINALITY k(attnum, ord) WHERE k.ord <= ix.indnkeyatts ORDER BY k.ord) AS directions FROM pg_index ix JOIN pg_class idx ON idx.oid = ix.indexrelid JOIN pg_class tbl ON tbl.oid = ix.indrelid JOIN pg_am am ON am.oid = idx.relam JOIN pg_namespace ns ON ns.oid = tbl.relnamespace WHERE ns.nspname = 'public'`,
   parentSample: `WITH linked AS (SELECT s.id, s.student_number, MAX(CASE WHEN i.status = 'Carried Forward' THEN 1 ELSE 0 END) AS has_carry_forward, MAX(CASE WHEN pt.invoice_id IS NULL AND pt.id IS NOT NULL THEN 1 ELSE 0 END) AS has_unallocated, MAX(CASE WHEN pt.reverses_transaction_id IS NOT NULL THEN 1 ELSE 0 END) AS has_reversal, MAX(CASE WHEN i.amount_paid > i.amount_due THEN 1 ELSE 0 END) AS has_overpayment FROM users p JOIN parent_students ps ON ps.parent_id = p.id JOIN users s ON s.id = ps.student_id AND s.role = 'student' LEFT JOIN invoices i ON i.student_id = s.id LEFT JOIN payment_transactions pt ON pt.student_id = s.id WHERE p.role = 'parent' GROUP BY s.id, s.student_number) SELECT id, student_number FROM linked ORDER BY has_carry_forward DESC, has_unallocated DESC, has_reversal DESC, has_overpayment DESC, id LIMIT $1`,
   parentSampleLegacy: `WITH linked AS (SELECT s.id, s.student_number, MAX(CASE WHEN i.status = 'Carried Forward' THEN 1 ELSE 0 END) AS has_carry_forward, MAX(CASE WHEN pt.invoice_id IS NULL AND pt.id IS NOT NULL THEN 1 ELSE 0 END) AS has_unallocated, 0 AS has_reversal, MAX(CASE WHEN i.amount_paid > i.amount_due THEN 1 ELSE 0 END) AS has_overpayment FROM users p JOIN parent_students ps ON ps.parent_id = p.id JOIN users s ON s.id = ps.student_id AND s.role = 'student' LEFT JOIN invoices i ON i.student_id = s.id LEFT JOIN payment_transactions pt ON pt.student_id = s.id WHERE p.role = 'parent' GROUP BY s.id, s.student_number) SELECT id, student_number FROM linked ORDER BY has_carry_forward DESC, has_unallocated DESC, has_reversal DESC, has_overpayment DESC, id LIMIT $1`,
   adminTotals: `SELECT COALESCE(SUM(i.amount_due), 0) AS billed, COALESCE(SUM(i.amount_paid), 0) AS paid, COALESCE(SUM(GREATEST(i.amount_due - i.amount_paid, 0)), 0) AS outstanding, COALESCE(SUM(GREATEST(i.amount_paid - i.amount_due, 0)), 0) + COALESCE((SELECT SUM(pt.amount) FROM payment_transactions pt WHERE pt.student_number = $1 AND pt.invoice_id IS NULL), 0) AS credit FROM invoices i WHERE i.student_number = $1 AND i.status <> 'Carried Forward'`,
@@ -318,8 +329,8 @@ async function readMetadata(client) {
     tables: asSet(tableResult.rows, 'table_name'),
     columns: new Set((columnResult.rows || []).map((row) => `${row.table_name}.${row.column_name}`)),
     columnDetails: new Map((columnResult.rows || []).map((row) => [`${row.table_name}.${row.column_name}`, row])),
-    constraints: constraintResult.rows || [],
-    indexes: indexResult.rows || [],
+    constraints: (constraintResult.rows || []).map(normalizeConstraintMetadata),
+    indexes: (indexResult.rows || []).map(normalizeIndexMetadata),
   };
 }
 
@@ -383,19 +394,34 @@ function missingForSpec(spec, metadata) {
   for (const [table, index, unique, columns, predicate, method, directions] of INDEX_SPECS[Object.entries(PHASE_SPECS).find(([, value]) => value === spec)?.[0]] || []) {
     const found = metadata.indexes.some((row) => row.table_name === table && row.indexname === index &&
       boolValue(row.is_unique) === unique &&
+      boolValue(row.is_valid) &&
+      boolValue(row.is_ready) &&
       JSON.stringify(row.columns || []) === JSON.stringify(columns) &&
       // GIN has no meaningful B-tree ASC/DESC ordering.  PostgreSQL still
       // exposes indoption bits for every index, so do not reject a valid GIN
       // index merely because those bits differ.
       (method === 'gin' || JSON.stringify(row.directions || []) === JSON.stringify(directions)) &&
       (predicate == null ? !row.predicate : String(row.predicate || '').toLowerCase().includes(predicate.toLowerCase())) &&
-       (!method || String(row.method || '').toLowerCase() === method ||
-         String(row.indexdef || '').toLowerCase().includes(` using ${method}`)));
+       (!method || (row.method
+         ? String(row.method).toLowerCase() === method
+         : String(row.indexdef || '').toLowerCase().includes(` using ${method}`))));
     if (!found) {
       missing.push(`index ${table}.${index}`);
     }
   }
   const phase = Object.entries(PHASE_SPECS).find(([, value]) => value === spec)?.[0];
+  for (const [table, columns] of UNIQUE_SPECS[phase] || []) {
+    const uniqueConstraint = metadata.constraints.some((row) =>
+      row.table_name === table && row.contype === 'u' &&
+      JSON.stringify(row.columns || []) === JSON.stringify(columns));
+    const uniqueIndex = metadata.indexes.some((row) =>
+      row.table_name === table && boolValue(row.is_unique) &&
+      boolValue(row.is_valid) && boolValue(row.is_ready) && !row.predicate &&
+      JSON.stringify(row.columns || []) === JSON.stringify(columns));
+    if (!uniqueConstraint && !uniqueIndex) {
+      missing.push(`unique ${table}(${columns.join(',')})`);
+    }
+  }
   for (const [table, kind, columns, checkValues, name] of CONSTRAINT_SPECS[phase] || []) {
     const found = metadata.constraints.some((row) => row.table_name === table &&
       row.contype === kind &&
@@ -408,6 +434,7 @@ function missingForSpec(spec, metadata) {
     const found = metadata.constraints.some((row) => row.table_name === table && row.contype === 'f' &&
       JSON.stringify(row.columns || []) === JSON.stringify(columns) &&
       row.referenced_table === referencedTable &&
+      row.referenced_schema === 'public' &&
       JSON.stringify(row.referenced_columns || []) === JSON.stringify(referencedColumns) &&
       String(row.on_delete || '').toUpperCase() === onDelete);
     if (!found) missing.push(`foreign key ${table}.${columns.join(',')}->${referencedTable}`);

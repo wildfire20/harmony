@@ -7,6 +7,10 @@
  * queries. It never reads application rows.
  */
 require('dotenv').config();
+const {
+  normalizeIndexMetadata,
+  normalizeConstraintMetadata,
+} = require('./parent-schema-catalog');
 
 const TABLE_ALLOWLIST = Object.freeze([
   'parent_auth_tokens',
@@ -275,8 +279,8 @@ async function runDiagnostic({ database, outputStream = process.stdout } = {}) {
       other_schema_names: stableRows(otherSchemaNames),
       columns: stableRows(columns),
       sequences: stableRows(sequences),
-      indexes: stableRows(indexes),
-      constraints: stableRows(constraints),
+      indexes: stableRows(indexes).map(normalizeIndexMetadata),
+      constraints: stableRows(constraints).map(normalizeConstraintMetadata),
     };
   } catch (error) {
     rememberError(error);

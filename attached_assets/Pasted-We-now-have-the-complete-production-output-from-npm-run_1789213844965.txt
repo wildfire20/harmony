@@ -1,0 +1,129 @@
+We now have the complete production output from npm run audit:parent-schema-debug.
+
+The production catalog proves that most objects the shared verifier reports as missing actually exist.
+
+Do not create another migration.
+Do not change application functionality.
+Do not run production commands.
+Do not touch finance.
+
+Production findings
+Phase 2
+
+The diagnostic confirms these indexes actually exist and are valid/ready:
+
+idx_parent_auth_tokens_user
+idx_parent_auth_tokens_expiry
+idx_parent_sessions_user
+idx_parent_sessions_family
+idx_parent_sessions_expiry
+
+It also confirms:
+
+parent_auth_tokens primary key
+parent_sessions primary key
+unique parent_auth_tokens.token_hash
+unique parent_sessions.refresh_token_hash
+parent_auth_tokens.token_type CHECK
+parent auth/session foreign keys to users
+
+Therefore the Phase 2 INCOMPLETE result is a verifier false negative.
+
+Phase 3
+
+The diagnostic confirms these objects actually exist:
+
+idx_parent_notifications_parent_created
+idx_parent_notifications_learner
+idx_parent_notification_reads_parent
+idx_parent_push_subscriptions_parent_active
+notification PK
+notification-read composite PK
+push-subscription PK
+(parent_id, dedupe_key) unique constraint
+deep-link CHECK
+all expected notification/read/push foreign keys
+endpoint uniqueness
+
+The diagnostic currently shows both the legacy endpoint unique structure and uq_parent_push_subscriptions_endpoint. Do not drop either as part of this fix.
+
+There is one real legacy Phase 3 difference:
+
+parent_push_subscriptions.is_active is still nullable
+created_at is still nullable
+updated_at is still nullable
+
+The existing Phase 3 legacy repair migration is intended to normalize these fields, but its transaction rolled back because verification falsely failed afterward.
+
+Phase 4
+
+The diagnostic definitively confirms both expected GIN indexes exist and are valid/ready:
+
+idx_announcements_target_parent_ids
+idx_documents_target_parent_ids
+
+Both use GIN on target_parent_ids.
+
+Therefore the current Phase 4 failure is also a verifier false negative.
+
+Required task
+
+Fix the shared schema verifier so it evaluates the actual PostgreSQL catalog representation semantically.
+
+Prefer making the verifier and the diagnostic share the same catalog-introspection/parsing implementation instead of maintaining two independent interpretations of PostgreSQL metadata.
+
+Specifically inspect and fix:
+
+Index recognition
+exact index name
+table
+access method
+uniqueness
+key columns
+GIN indexes must not require ASC/DESC
+Constraint recognition
+PostgreSQL catalog constraint columns are being returned in forms such as {id}, {user_id}, and {parent_id,dedupe_key}
+normalize these correctly before comparison
+correctly recognize p, u, c, and f
+support composite constraints
+Foreign-key recognition
+normalize source and referenced column arrays
+referenced schema/table
+delete behavior
+Unique indexes versus unique constraints
+semantically recognize constraint-backed indexes
+do not require unnecessary duplicate structures
+GIN index verification
+use catalog access method gin
+do not use B-tree direction/null-order requirements
+Eliminate metadata divergence
+where practical, extract shared PostgreSQL catalog introspection into one module used by:
+audit-parent-schema-debug
+audit-parent-rollout-preflight
+transactional migration verification
+
+The production debug output should be usable as a fixture/test case.
+
+Add regression tests proving the exact production-style metadata is recognized as:
+
+Phase 2 COMPLETE
+Phase 4 COMPLETE
+Phase 3 incomplete only because the three legacy push columns still need normalization
+
+Then simulate the Phase 3 legacy repair and prove Phase 3 becomes COMPLETE.
+
+Do not weaken legitimate schema requirements merely to make tests pass.
+
+Do not remove the existing Phase 3 compatibility repair.
+
+Return
+Exact verifier root cause
+Files changed
+What metadata normalization was fixed
+Phase 2 expected result after fix
+Phase 3 expected result before and after existing repair
+Phase 4 expected result after fix
+Tests passed
+Exact production commands to run afterward
+
+Do not deploy or execute anything automatically.
