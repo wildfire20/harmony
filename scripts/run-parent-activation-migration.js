@@ -1,14 +1,13 @@
 require('dotenv').config();
-const fs = require('fs');
-const path = require('path');
 const db = require('../config/database');
+const { runParentPhaseMigration } = require('./run-parent-phase-migration');
 
-(async () => {
-  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'parent_activation_phase2.sql'), 'utf8');
-  await db.query(sql);
-  console.log('Parent activation Phase 2 migration applied');
-  await db.pool.end();
-})().catch((error) => {
+(async () => runParentPhaseMigration({
+  database: db,
+  phase: 'parent_activation_phase2',
+  migrationFiles: ['parent_activation_phase2.sql'],
+  successMessage: 'Parent activation Phase 2 migration applied',
+}))().catch((error) => {
   console.error('Parent activation migration failed:', error.message);
   process.exitCode = 1;
 });

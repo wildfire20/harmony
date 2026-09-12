@@ -211,6 +211,38 @@ test('same-name malformed index and constraint are incomplete', async () => {
   assert.equal(readiness.parent_targeting_phase4.status, 'INCOMPLETE');
 });
 
+test('GIN readiness ignores non-B-tree direction metadata but enforces method/name/column', async () => {
+  const metadata = completeMetadataRows();
+  const query = async (sql) => {
+    if (/information_schema\.tables/.test(sql)) return { rows: metadata.tables };
+    if (/information_schema\.columns/.test(sql)) return { rows: metadata.columns };
+    if (/FROM pg_constraint/.test(sql)) return { rows: metadata.constraints };
+    return { rows: metadata.indexes };
+  };
+
+  // GIN does not have B-tree sort direction semantics. Null/non-B-tree
+  // direction metadata must not make an otherwise valid index incomplete.
+  metadata.indexes.find((row) => row.indexname === 'idx_announcements_target_parent_ids').directions = [null];
+  metadata.indexes.find((row) => row.indexname === 'idx_documents_target_parent_ids').directions = ['DESC'];
+  let { readiness } = await checkSchemaReadiness({ query });
+  assert.equal(readiness.parent_targeting_phase4.status, 'APPLIED');
+
+  const malformedMethod = metadata.indexes.find((row) => row.indexname === 'idx_documents_target_parent_ids');
+  malformedMethod.indexdef = malformedMethod.indexdef.replace(/USING gin/i, 'USING btree');
+  ({ readiness } = await checkSchemaReadiness({ query }));
+  assert.equal(readiness.parent_targeting_phase4.status, 'INCOMPLETE');
+
+  malformedMethod.indexdef = malformedMethod.indexdef.replace(/USING btree/i, 'USING gin');
+  malformedMethod.indexname = 'wrong_documents_target_parent_ids';
+  ({ readiness } = await checkSchemaReadiness({ query }));
+  assert.equal(readiness.parent_targeting_phase4.status, 'INCOMPLETE');
+
+  malformedMethod.indexname = 'idx_documents_target_parent_ids';
+  malformedMethod.columns = ['wrong_column'];
+  ({ readiness } = await checkSchemaReadiness({ query }));
+  assert.equal(readiness.parent_targeting_phase4.status, 'INCOMPLETE');
+});
+
 test('configuration audit reports presence only, never values', () => {
   const env = {
     NODE_ENV: 'production', FRONTEND_URL: 'https://portal.example',

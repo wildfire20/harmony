@@ -7,6 +7,7 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
+const sharedSchemaVerifier = require('./parent-schema-verifier');
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_SAMPLE_SIZE = 25;
@@ -186,13 +187,18 @@ const COLUMN_SPECS = [
   ['parent_notification_reads', 'parent_id', ['integer'], false, null],
   ['parent_notification_reads', 'read_at', ['timestamp with time zone'], false, 'now()'],
   ['parent_notification_reads', 'dismissed_at', ['timestamp with time zone'], true, null],
-  ['parent_push_subscriptions', 'id', ['bigint'], false, 'any'],
+  // Legacy server.js created this as SERIAL (integer) and TIMESTAMP WITHOUT
+  // TIME ZONE.  Those are semantically compatible with the application
+  // contract and are intentionally accepted: rewriting existing push rows or
+  // their timestamp meaning during a repair is riskier than normalizing the
+  // nullability/default metadata below.
+  ['parent_push_subscriptions', 'id', ['bigint', 'integer'], false, 'any'],
   ['parent_push_subscriptions', 'parent_id', ['integer'], false, null],
   ['parent_push_subscriptions', 'endpoint', ['text'], false, null],
   ['parent_push_subscriptions', 'subscription', ['jsonb'], false, null],
   ['parent_push_subscriptions', 'is_active', ['boolean'], false, 'true'],
-  ['parent_push_subscriptions', 'created_at', ['timestamp with time zone'], false, 'now()'],
-  ['parent_push_subscriptions', 'updated_at', ['timestamp with time zone'], false, 'now()'],
+  ['parent_push_subscriptions', 'created_at', ['timestamp with time zone', 'timestamp without time zone'], false, 'now()'],
+  ['parent_push_subscriptions', 'updated_at', ['timestamp with time zone', 'timestamp without time zone'], false, 'now()'],
   ['announcements', 'target_parent_ids', ['jsonb'], false, '[]'],
   ['documents', 'target_parent_ids', ['jsonb'], false, '[]'],
   ['documents', 'important', ['boolean'], false, 'false'],
@@ -271,7 +277,7 @@ const READ_QUERIES = Object.freeze({
   tables: `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1::text[])`,
   columns: `SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default, character_maximum_length, numeric_precision, numeric_scale FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ANY($1::text[])`,
   constraints: `SELECT c.conname, c.contype, cls.relname AS table_name, pg_get_constraintdef(c.oid) AS definition, COALESCE((SELECT array_agg(a.attname ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum), ARRAY[]::text[]) AS columns, COALESCE((SELECT array_agg(a.attname ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.attnum), ARRAY[]::text[]) AS referenced_columns, ref.relname AS referenced_table, CASE c.confdeltype WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' END AS on_delete FROM pg_constraint c JOIN pg_class cls ON cls.oid = c.conrelid JOIN pg_namespace ns ON ns.oid = cls.relnamespace LEFT JOIN pg_class ref ON ref.oid = c.confrelid WHERE ns.nspname = 'public'`,
-  indexes: `SELECT tbl.relname AS table_name, idx.relname AS indexname, ix.indisunique AS is_unique, ix.indisprimary AS is_primary, pg_get_indexdef(ix.indexrelid) AS indexdef, pg_get_expr(ix.indpred, ix.indrelid) AS predicate, ARRAY(SELECT a.attname FROM unnest(ix.indkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = k.attnum ORDER BY k.ord) AS columns, ARRAY(SELECT CASE WHEN (ix.indoption[k.ord - 1] & 1) = 1 THEN 'DESC' ELSE 'ASC' END FROM unnest(ix.indkey) WITH ORDINALITY k(attnum, ord) ORDER BY k.ord) AS directions FROM pg_index ix JOIN pg_class idx ON idx.oid = ix.indexrelid JOIN pg_class tbl ON tbl.oid = ix.indrelid JOIN pg_namespace ns ON ns.oid = tbl.relnamespace WHERE ns.nspname = 'public'`,
+  indexes: `SELECT tbl.relname AS table_name, idx.relname AS indexname, ix.indisunique AS is_unique, ix.indisprimary AS is_primary, am.amname AS method, pg_get_indexdef(ix.indexrelid) AS indexdef, pg_get_expr(ix.indpred, ix.indrelid) AS predicate, ARRAY(SELECT a.attname FROM unnest(ix.indkey) WITH ORDINALITY k(attnum, ord) JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = k.attnum ORDER BY k.ord) AS columns, ARRAY(SELECT CASE WHEN (ix.indoption[k.ord - 1] & 1) = 1 THEN 'DESC' ELSE 'ASC' END FROM unnest(ix.indkey) WITH ORDINALITY k(attnum, ord) ORDER BY k.ord) AS directions FROM pg_index ix JOIN pg_class idx ON idx.oid = ix.indexrelid JOIN pg_class tbl ON tbl.oid = ix.indrelid JOIN pg_am am ON am.oid = idx.relam JOIN pg_namespace ns ON ns.oid = tbl.relnamespace WHERE ns.nspname = 'public'`,
   parentSample: `WITH linked AS (SELECT s.id, s.student_number, MAX(CASE WHEN i.status = 'Carried Forward' THEN 1 ELSE 0 END) AS has_carry_forward, MAX(CASE WHEN pt.invoice_id IS NULL AND pt.id IS NOT NULL THEN 1 ELSE 0 END) AS has_unallocated, MAX(CASE WHEN pt.reverses_transaction_id IS NOT NULL THEN 1 ELSE 0 END) AS has_reversal, MAX(CASE WHEN i.amount_paid > i.amount_due THEN 1 ELSE 0 END) AS has_overpayment FROM users p JOIN parent_students ps ON ps.parent_id = p.id JOIN users s ON s.id = ps.student_id AND s.role = 'student' LEFT JOIN invoices i ON i.student_id = s.id LEFT JOIN payment_transactions pt ON pt.student_id = s.id WHERE p.role = 'parent' GROUP BY s.id, s.student_number) SELECT id, student_number FROM linked ORDER BY has_carry_forward DESC, has_unallocated DESC, has_reversal DESC, has_overpayment DESC, id LIMIT $1`,
   parentSampleLegacy: `WITH linked AS (SELECT s.id, s.student_number, MAX(CASE WHEN i.status = 'Carried Forward' THEN 1 ELSE 0 END) AS has_carry_forward, MAX(CASE WHEN pt.invoice_id IS NULL AND pt.id IS NOT NULL THEN 1 ELSE 0 END) AS has_unallocated, 0 AS has_reversal, MAX(CASE WHEN i.amount_paid > i.amount_due THEN 1 ELSE 0 END) AS has_overpayment FROM users p JOIN parent_students ps ON ps.parent_id = p.id JOIN users s ON s.id = ps.student_id AND s.role = 'student' LEFT JOIN invoices i ON i.student_id = s.id LEFT JOIN payment_transactions pt ON pt.student_id = s.id WHERE p.role = 'parent' GROUP BY s.id, s.student_number) SELECT id, student_number FROM linked ORDER BY has_carry_forward DESC, has_unallocated DESC, has_reversal DESC, has_overpayment DESC, id LIMIT $1`,
   adminTotals: `SELECT COALESCE(SUM(i.amount_due), 0) AS billed, COALESCE(SUM(i.amount_paid), 0) AS paid, COALESCE(SUM(GREATEST(i.amount_due - i.amount_paid, 0)), 0) AS outstanding, COALESCE(SUM(GREATEST(i.amount_paid - i.amount_due, 0)), 0) + COALESCE((SELECT SUM(pt.amount) FROM payment_transactions pt WHERE pt.student_number = $1 AND pt.invoice_id IS NULL), 0) AS credit FROM invoices i WHERE i.student_number = $1 AND i.status <> 'Carried Forward'`,
@@ -378,9 +384,13 @@ function missingForSpec(spec, metadata) {
     const found = metadata.indexes.some((row) => row.table_name === table && row.indexname === index &&
       boolValue(row.is_unique) === unique &&
       JSON.stringify(row.columns || []) === JSON.stringify(columns) &&
-      JSON.stringify(row.directions || []) === JSON.stringify(directions) &&
+      // GIN has no meaningful B-tree ASC/DESC ordering.  PostgreSQL still
+      // exposes indoption bits for every index, so do not reject a valid GIN
+      // index merely because those bits differ.
+      (method === 'gin' || JSON.stringify(row.directions || []) === JSON.stringify(directions)) &&
       (predicate == null ? !row.predicate : String(row.predicate || '').toLowerCase().includes(predicate.toLowerCase())) &&
-      (!method || String(row.indexdef || '').toLowerCase().includes(` using ${method}`)));
+       (!method || String(row.method || '').toLowerCase() === method ||
+         String(row.indexdef || '').toLowerCase().includes(` using ${method}`)));
     if (!found) {
       missing.push(`index ${table}.${index}`);
     }
@@ -405,7 +415,7 @@ function missingForSpec(spec, metadata) {
   return missing;
 }
 
-async function checkSchemaReadiness(client) {
+async function checkSchemaReadinessInternal(client) {
   const metadata = await readMetadata(client);
   const readiness = {};
   for (const [phase, spec] of Object.entries(PHASE_SPECS)) {
@@ -413,6 +423,12 @@ async function checkSchemaReadiness(client) {
     readiness[phase] = { status: missing.length ? 'INCOMPLETE' : 'APPLIED', missing };
   }
   return { readiness, metadata };
+}
+
+// Keep the historical preflight export while making this the same verifier
+// used by all manual migration runners.
+async function checkSchemaReadiness(client) {
+  return sharedSchemaVerifier.checkSchemaReadiness(client);
 }
 
 function baseReady(metadata, table, columns) {
@@ -720,4 +736,5 @@ module.exports = {
   PHASE_SPECS, READ_QUERIES, readQuery, checkSchemaReadiness, checkEnvironment, categorizeParentAccount,
   summarizeParentAccounts, compareTotals, auditFinance, auditTotals, auditParentRollout,
   formatAuditReport, runAudit, normalizeDefault, quotedLiterals, exactSet,
+  _checkSchemaReadinessInternal: checkSchemaReadinessInternal,
 };

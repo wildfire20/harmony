@@ -1,0 +1,71 @@
+We have a production migration verification discrepancy. Do not change application behavior and do not run anything automatically.
+
+I ran:
+
+npm run migrate:parent-notifications
+
+and it reported:
+
+Parent notification centre Phase 3 migration applied
+
+I then ran:
+
+npm run migrate:parent-targeting
+
+and it reported:
+
+Parent communication targeting migration applied
+
+However, immediately afterward:
+
+npm run audit:parent-rollout-preflight
+
+still reports both schemas as INCOMPLETE.
+
+The Parent Notifications audit still reports missing:
+
+column definitions on parent_push_subscriptions
+notification indexes
+push subscription indexes
+primary/unique/check constraints
+foreign keys
+
+Parent Targeting still reports missing:
+
+announcements.idx_announcements_target_parent_ids
+documents.idx_documents_target_parent_ids
+
+Parent Activation is also still incomplete in production.
+
+Do not tell me simply to rerun the migrations.
+
+Audit the migration SQL, migration runners, schema-readiness checks and production-preflight expectations against each other.
+
+Determine:
+
+Why the migration runners returned success while the preflight still considers the schema incomplete.
+Whether the migrations failed to create these objects, skipped them because existing legacy tables/columns already existed, or whether the preflight expects different object names/definitions.
+Whether parent_push_subscriptions, which previously existed from server-startup schema creation, is causing compatibility problems with the Phase 3 migration.
+Whether the two Phase 4 targeting indexes were omitted from the actual migration.
+
+Prepare the safest additive, idempotent production repair needed so the final schema exactly satisfies the intended contracts.
+
+Do not drop tables.
+Do not delete data.
+Do not recreate parent relationships.
+Do not alter parent/learner records.
+Do not run the finance reconciliation migration.
+
+Also update each migration runner so it performs the same post-migration verification used by the preflight and exits non-zero if required schema objects are still missing. It must never print “migration applied” when schema verification fails.
+
+If Parent Activation simply has not been executed, state that separately rather than treating it as a migration defect.
+
+Return:
+
+exact root cause for Phase 2, Phase 3 and Phase 4 separately
+exact SQL/runner changes required
+whether a new repair migration is required
+exact manual command(s) to run
+tests performed
+
+Do not execute anything and do not deploy automatically.

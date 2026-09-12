@@ -57,7 +57,76 @@ ALTER TABLE parent_push_subscriptions
 -- Existing deployments used endpoint as the subscription identity.  Keep that
 -- invariant: application code rejects an ownership change rather than taking
 -- ownership of an existing endpoint.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_parent_push_subscriptions_endpoint
-  ON parent_push_subscriptions (endpoint);
+-- Reconcile by semantics rather than by index name.  In particular, the
+-- legacy server-created UNIQUE(endpoint) is commonly backed by an
+-- implementation-generated constraint/index name.  Reuse that exact
+-- structure when possible so repeated runs never create an equivalent
+-- duplicate index.
+DO $$
+DECLARE
+  existing_index text;
+  existing_constraint text;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_class i
+    JOIN pg_index x ON x.indexrelid = i.oid
+    WHERE i.relname = 'uq_parent_push_subscriptions_endpoint'
+      AND i.relnamespace = 'public'::regnamespace
+      AND x.indrelid = 'parent_push_subscriptions'::regclass
+      AND x.indisunique
+      AND x.indnkeyatts = 1
+      AND x.indnatts = 1
+      AND x.indpred IS NULL
+      AND (SELECT a.attname
+           FROM pg_attribute a
+           WHERE a.attrelid = x.indrelid
+             AND a.attnum = x.indkey[0]
+             AND NOT a.attisdropped) = 'endpoint'
+  ) THEN
+    SELECT i.relname
+    INTO existing_index
+    FROM pg_class i
+    JOIN pg_index x ON x.indexrelid = i.oid
+    WHERE i.relnamespace = 'public'::regnamespace
+      AND x.indrelid = 'parent_push_subscriptions'::regclass
+      AND x.indisunique
+      AND x.indnkeyatts = 1
+      AND x.indnatts = 1
+      AND x.indpred IS NULL
+      AND (SELECT a.attname
+           FROM pg_attribute a
+           WHERE a.attrelid = x.indrelid
+             AND a.attnum = x.indkey[0]
+             AND NOT a.attisdropped) = 'endpoint'
+    LIMIT 1;
+
+    IF existing_index IS NOT NULL THEN
+      SELECT c.conname
+      INTO existing_constraint
+      FROM pg_constraint c
+      JOIN pg_class i ON i.oid = c.conindid
+      WHERE i.relname = existing_index
+        AND c.contype = 'u'
+        AND c.conrelid = 'parent_push_subscriptions'::regclass
+      LIMIT 1;
+
+      IF existing_constraint IS NOT NULL THEN
+        EXECUTE format(
+          'ALTER TABLE parent_push_subscriptions RENAME CONSTRAINT %I TO uq_parent_push_subscriptions_endpoint',
+          existing_constraint
+        );
+      ELSE
+        EXECUTE format(
+          'ALTER INDEX %I RENAME TO uq_parent_push_subscriptions_endpoint',
+          existing_index
+        );
+      END IF;
+    ELSE
+      CREATE UNIQUE INDEX uq_parent_push_subscriptions_endpoint
+        ON parent_push_subscriptions (endpoint);
+    END IF;
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_parent_push_subscriptions_parent_active
   ON parent_push_subscriptions (parent_id, is_active);
