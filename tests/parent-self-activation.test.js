@@ -111,11 +111,6 @@ async function execute(tx, sql, params = []) {
   if (/SELECT u\.id, u\.phone_number/.test(sql)) {
     return { rows: tx.parents.map(userFields) };
   }
-  if (/UPDATE users SET parent_account_status='needs_review'/.test(sql)) {
-    const ids = params[0].map(Number);
-    tx.parents.filter(user => ids.includes(user.id)).forEach(user => { user.parent_account_status = 'needs_review'; });
-    return { rows: [] };
-  }
   if (/SELECT id,is_active,activated_at,parent_account_status FROM users/.test(sql)) {
     const user = tx.parents.find(item => item.id === Number(params[0]));
     return { rows: user ? [{ id: user.id, is_active: user.is_active,
@@ -379,16 +374,51 @@ test('accepts common South African mobile formats without creating accounts or l
   }
 });
 
-test('duplicate phones fail safely and mark every matching Parent needs_review', async () => {
+test('duplicate phones fail generically without changing either Parent account', async () => {
   reset(parent(10, '0731234567'));
   state.parents.push(parent(11, '+27731234567'));
+  const parentsBefore = clone(state.parents);
   const result = await json('/api/parent/activation/request', {
     method: 'POST', body: JSON.stringify(activationInput('073 123 4567')),
   });
   assert.equal(result.response.status, 400);
-  assert.equal(state.parents[0].parent_account_status, 'needs_review');
-  assert.equal(state.parents[1].parent_account_status, 'needs_review');
+  assert.equal(result.body.message, 'We could not verify those details. Please contact your school.');
+  assert.deepEqual(state.parents, parentsBefore);
   assert.equal(state.challenges.length, 0);
+});
+
+test('missing and ambiguous mobiles return the same public failure without sending email', async () => {
+  reset(parent(10, '0731234567'));
+  state.parents = [];
+  state.links = [];
+  state.tokens = [];
+  const missing = await json('/api/parent/activation/request', {
+    method: 'POST', body: JSON.stringify(activationInput('073 123 4567')),
+  });
+
+  reset(parent(10, '0731234567'));
+  state.parents.push(parent(11, '+27731234567'));
+  const ambiguous = await json('/api/parent/activation/request', {
+    method: 'POST', body: JSON.stringify(activationInput('073 123 4567')),
+  });
+  assert.equal(missing.response.status, ambiguous.response.status);
+  assert.deepEqual(missing.body, ambiguous.body);
+  assert.equal(state.mail.length, 0);
+});
+
+test('an already activated account cannot self-activate and is directed to password recovery', async () => {
+  const activated = parent();
+  activated.activated_at = new Date().toISOString();
+  activated.parent_account_status = 'active';
+  reset(activated);
+  const result = await json('/api/parent/activation/request', {
+    method: 'POST', body: JSON.stringify(activationInput('073 123 4567')),
+  });
+  assert.equal(result.response.status, 200);
+  assert.match(result.body.message, /already activated/i);
+  assert.equal(result.body.forgotPassword, '/api/auth/forgot-password');
+  assert.equal(state.challenges.length, 0);
+  assert.equal(state.mail.length, 0);
 });
 
 test('OTP is six digits, response-free, HMAC stored, and mail failure invalidates it', async () => {
@@ -534,6 +564,7 @@ test('completion requires its own verified challenge token, not only an ID or an
 });
 
 test('completion is atomic, activates the existing Parent, preserves links, and issues identity session', async () => {
+  state.links.push({ id: 502, first_name: 'Learner', last_name: 'Two', student_number: 'L-2' });
   const beforeLinks = clone(state.links);
   const flow = await requestCode('0731234567');
   await verifyCode(flow);

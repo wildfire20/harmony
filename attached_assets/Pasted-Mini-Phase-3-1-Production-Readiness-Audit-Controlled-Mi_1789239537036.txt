@@ -1,0 +1,142 @@
+Mini Phase 3.1 — Production Readiness Audit & Controlled Migration
+
+Mini Phase 3 Parent self-activation is implemented but has NOT been deployed and the migration has NOT been run.
+
+Before production changes, complete the rollout-readiness and migration safety work.
+
+Do not deploy.
+Do not run the migration.
+Do not send OTPs.
+Do not modify Parent production records.
+
+1. Run a READ-ONLY Parent activation readiness audit
+
+Against the production database, report:
+
+total Parent accounts
+active / inactive
+activated / unactivated
+mobile present / missing
+valid normalized South African mobile
+invalid mobile
+duplicate normalized mobile
+one Parent account linked to multiple learners
+multiple distinct Parent accounts sharing one normalized mobile
+email present / missing
+
+Categorize every account into one mutually understandable rollout category:
+
+READY_FOR_SELF_ACTIVATION
+ALREADY_ACTIVATED
+MISSING_MOBILE
+INVALID_MOBILE
+DUPLICATE_OR_SHARED_MOBILE
+DISABLED
+NEEDS_REVIEW
+
+Return aggregate counts plus only limited representative Parent IDs.
+
+Do not expose unnecessary phone numbers, emails, learner names or other personal information.
+
+The audit must not mutate production data.
+
+2. Do not mutate accounts from public activation lookup
+
+Review the current behavior described as:
+
+Duplicate/shared phone matches fail safely and mark affected accounts needs_review.
+
+The public self-activation endpoint must NOT change an account's database state merely because somebody attempted activation with a phone number.
+
+For ambiguous phone matches:
+
+return a generic failure response
+do not reveal that duplicates exist
+do not modify the Parent account
+record only an appropriate security/audit event if necessary
+
+NEEDS_REVIEW should be an Admin/readiness-audit classification, not a state an anonymous caller can force onto an account.
+
+3. Controlled migration tooling
+
+Existing migration:
+
+migrations/parent_self_activation.sql
+
+Add/confirm an idempotent migration runner such as:
+
+npm run migrate:parent-self-activation
+
+Add a READ-ONLY verifier/audit such as:
+
+npm run audit:parent-self-activation
+
+The audit must verify every schema object Mini Phase 3 requires and return an obvious result such as:
+
+{
+  "audit": true,
+  "ok": true,
+  "missing": []
+}
+
+when fully installed.
+
+Before installation, it should safely report the missing schema rather than failing unpredictably.
+
+4. Migration safety
+
+Migration must:
+
+be additive
+be transaction-safe
+be idempotent where practical
+preserve existing Parent accounts
+preserve activation-link functionality
+preserve Parent passwords
+preserve parent_students links
+preserve sessions
+preserve finance and notifications
+
+Do not backfill or invent email addresses.
+
+Do not mark existing emails verified unless they were previously verified by a trusted workflow.
+
+5. Activation edge cases
+
+Verify:
+
+an account already ACTIVATED cannot self-activate again
+an unactivated unique-mobile account can proceed
+ambiguous normalized mobile fails safely
+missing account returns the same generic public response
+failed Gmail delivery cannot leave a usable OTP
+OTP verification alone cannot activate without the completion capability
+completion capability is one-time
+activation preserves every existing learner link
+multi-child Parent activates once and receives all authorized learners
+6. Final report
+
+Return:
+
+Exact production readiness counts
+Number of Parents ready for immediate self-activation
+Number requiring Admin cleanup
+Duplicate/shared-mobile findings
+Whether the public endpoint previously mutated needs_review
+Any correction made
+Exact migration command
+Exact audit command
+Expected audit output before migration
+Expected audit output after migration
+Tests passed
+
+Do not deploy.
+Do not run the migration.
+
+Once we have that result, we'll know something very important. For example, if it comes back:
+
+282 READY_FOR_SELF_ACTIVATION
+8 duplicate numbers
+4 invalid numbers
+2 missing numbers
+1 already activated

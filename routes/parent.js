@@ -907,15 +907,8 @@ router.post('/activation/request', activationRequestLimiter, async (req, res) =>
   try {
     const matches = await matchingParentAccounts(phone);
     if (matches.length !== 1) {
-      // Shared numbers are unsafe: do not guess which account the caller
-      // means, and make the school resolve every affected account.
-      if (matches.length > 1) {
-        await db.query(
-          `UPDATE users SET parent_account_status='needs_review', updated_at=NOW()
-           WHERE id = ANY($1::int[]) AND role='parent'`,
-          [matches.map(parent => parent.id)],
-        );
-      }
+      // Shared numbers are unsafe, but an anonymous lookup must never change
+      // account state or reveal whether zero or multiple records matched.
       return res.status(400).json({ message: genericActivationMessage });
     }
 
