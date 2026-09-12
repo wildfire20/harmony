@@ -194,20 +194,26 @@ test('package command and parent wrappers retain the exact migration file lists 
   }
 });
 
-test('diagnostic is independent of application database initialization', () => {
+test('diagnostic reuses shared database configuration without initializing it or defining TLS', () => {
   const source = fs.readFileSync(
     require.resolve('../scripts/audit-parent-schema-debug.js'),
     'utf8',
   );
-  assert.doesNotMatch(source, /config\/database/);
+  assert.match(source, /require\('\.\.\/config\/database'\)/);
+  assert.doesNotMatch(source, /require\('pg'\)/);
+  assert.doesNotMatch(source, /new Pool/);
+  assert.doesNotMatch(source, /\bssl\s*:/);
+  assert.doesNotMatch(source, /rejectUnauthorized/);
+  assert.doesNotMatch(source, /PGSSLMODE|DATABASE_URL|PGSSLROOTCERT/);
   assert.doesNotMatch(source, /\.initialize\s*\(/);
+  assert.match(source, /const databaseHandle = database \|\| sharedDatabase\(\)/);
+  assert.match(source, /const pool = databaseHandle\.pool \|\| databaseHandle/);
   assert.match(source, /c\.is_identity/);
   assert.doesNotMatch(source, /c\.identity_column/);
   assert.match(source, /WHEN 'n' THEN 'NOT NULL'/);
   assert.match(source, /unnest\(ix\.indkey\) WITH ORDINALITY/);
   assert.match(source, /pg_get_indexdef\(ix\.indexrelid, k\.ord::integer, true\)/);
   assert.match(source, /ix\.indoption\[k\.ord - 1\]/);
-  assert.match(source, /rejectUnauthorized: process\.env\.PGSSL_REJECT_UNAUTHORIZED !== 'false'/);
 });
 
 test('shared runner awaits each migration on the transaction client before verification', () => {

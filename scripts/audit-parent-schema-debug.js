@@ -1,12 +1,12 @@
 /*
  * Diagnostic-only parent schema catalog dump.
  *
- * This deliberately does not use the application database module: loading it is
- * enough to couple a diagnostic to application startup/database setup.  The
- * command uses one client, one read-only transaction, and a closed registry of
- * catalog queries.  It never reads application rows.
+ * This uses the same shared database configuration as the application and
+ * migration runners, but never calls database initialization. The command uses
+ * one client, one read-only transaction, and a closed registry of catalog
+ * queries. It never reads application rows.
  */
-const { Pool } = require('pg');
+require('dotenv').config();
 
 const TABLE_ALLOWLIST = Object.freeze([
   'parent_auth_tokens',
@@ -219,38 +219,8 @@ const QUERIES = Object.freeze({
   `,
 });
 
-function databasePoolFromEnv() {
-  const host = process.env.PGHOST || process.env.DB_HOST;
-  const database = process.env.PGDATABASE || process.env.DB_NAME;
-  const user = process.env.PGUSER || process.env.DB_USER;
-  const password = process.env.PGPASSWORD || process.env.DB_PASSWORD;
-  const isProduction = process.env.NODE_ENV === 'production';
-  if (isProduction) {
-    const missing = [
-      ['PGHOST/DB_HOST', host],
-      ['PGDATABASE/DB_NAME', database],
-      ['PGUSER/DB_USER', user],
-      ['PGPASSWORD/DB_PASSWORD', password],
-    ].filter(([, value]) => !value).map(([name]) => name);
-    if (missing.length) {
-      throw new Error(`Production database configuration is incomplete: ${missing.join(', ')}`);
-    }
-  }
-  const ssl = process.env.REPL_ID || process.env.REPLIT_DB_URL
-    ? false
-    : (isProduction ? {
-      rejectUnauthorized: process.env.PGSSL_REJECT_UNAUTHORIZED !== 'false',
-      ...(process.env.PGSSLROOTCERT ? { ca: process.env.PGSSLROOTCERT } : {}),
-    } : false);
-  return new Pool({
-    host: host || 'localhost',
-    port: process.env.PGPORT || process.env.DB_PORT || 5432,
-    database: database || 'harmony_learning_db',
-    user: user || 'postgres',
-    password: password || 'password',
-    ssl,
-    max: 1,
-  });
+function sharedDatabase() {
+  return require('../config/database');
 }
 
 async function fixedQuery(client, queryId, params) {
@@ -265,7 +235,8 @@ function stableRows(result) {
 }
 
 async function runDiagnostic({ database, outputStream = process.stdout } = {}) {
-  const pool = database ? (database.pool || database) : databasePoolFromEnv();
+  const databaseHandle = database || sharedDatabase();
+  const pool = databaseHandle.pool || databaseHandle;
   if (!pool || typeof pool.connect !== 'function') {
     throw new Error('A database pool is required');
   }
@@ -347,4 +318,5 @@ module.exports = {
   QUERIES,
   fixedQuery,
   runDiagnostic,
+  sharedDatabase,
 };
