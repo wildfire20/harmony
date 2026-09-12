@@ -301,6 +301,21 @@ const CalendarComponent = () => {
 
   const isAdmin = user.role === 'admin' || user.role === 'super_admin';
   const isSchoolEvent = (event) => event?.resource?.event_type === 'school_event';
+  const internalAudienceLabel = {
+    all: 'All Staff',
+    teachers: 'Teachers Only',
+    staff: 'Staff/Admin Only',
+    students: 'Legacy Students Only'
+  }[eventForm.target_audience] || 'All Staff';
+  const selectedGrade = grades.find(grade => String(grade.id) === String(eventForm.grade_id));
+  const selectedClass = classes.find(schoolClass => String(schoolClass.id) === String(eventForm.class_id));
+  const parentAudienceLabel = !eventForm.parent_visible
+    ? 'Not published'
+    : !selectedGrade
+      ? 'All Parents'
+      : selectedClass
+        ? `${selectedGrade.name} · ${selectedClass.name} Parents`
+        : `${selectedGrade.name} Parents (all classes)`;
 
   const formatEventDetails = (event) => {
     const resource = event.resource;
@@ -537,6 +552,7 @@ const CalendarComponent = () => {
               </button>
             </div>
             <form onSubmit={handleCreateEvent} className="p-6 space-y-5">
+              <h4 className={`text-xs font-bold uppercase tracking-[0.14em] ${textSecondary}`}>Event details</h4>
               <div>
                 <label className={`block text-sm font-medium ${textSecondary} mb-2`}>Event Title *</label>
                 <input
@@ -560,6 +576,7 @@ const CalendarComponent = () => {
                 />
               </div>
 
+              <h4 className={`pt-1 text-xs font-bold uppercase tracking-[0.14em] ${textSecondary}`}>Date &amp; time</h4>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={`block text-sm font-medium ${textSecondary} mb-2`}>
@@ -609,8 +626,7 @@ const CalendarComponent = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
+              <div>
                   <label className={`block text-sm font-medium ${textSecondary} mb-2`}>Event Type</label>
                   <select
                     value={eventForm.event_type}
@@ -623,24 +639,58 @@ const CalendarComponent = () => {
                     <option value="deadline">Deadline</option>
                     <option value="other">Other</option>
                   </select>
-                </div>
+              </div>
 
+              <section className={`space-y-3 rounded-xl border p-4 ${cardBorder}`}>
                 <div>
-                  <label className={`block text-sm font-medium ${textSecondary} mb-2`}>Target Audience</label>
+                  <h4 className={`text-xs font-bold uppercase tracking-[0.14em] ${textSecondary}`}>Internal audience</h4>
+                  <p className={`mt-1 text-xs ${textSecondary}`}>Controls which staff members see this event internally.</p>
+                </div>
+                <div>
+                  <label className={`block text-sm font-medium ${textSecondary} mb-2`}>Internal Audience</label>
                   <select
                     value={eventForm.target_audience}
                     onChange={(e) => setEventForm({ ...eventForm, target_audience: e.target.value })}
                     className={`w-full ${inputBg} border rounded-xl px-4 py-3 ${textPrimary} focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all`}
                   >
-                    <option value="all">Everyone</option>
-                    <option value="students">Students Only</option>
+                    {eventForm.target_audience === 'students' && <option value="students">Legacy Students Only</option>}
+                    <option value="all">All Staff</option>
                     <option value="teachers">Teachers Only</option>
-                    <option value="staff">Staff Only</option>
+                    <option value="staff">Staff/Admin Only</option>
                   </select>
                 </div>
-              </div>
+              </section>
 
-              <div>
+              <section className={`space-y-4 rounded-xl border p-4 ${cardBorder}`}>
+                <div>
+                  <h4 className={`text-xs font-bold uppercase tracking-[0.14em] ${textSecondary}`}>Parent Portal visibility</h4>
+                  <p className={`mt-1 text-xs ${textSecondary}`}>A separate publishing decision from internal visibility.</p>
+                </div>
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={eventForm.parent_visible}
+                    onChange={(e) => setEventForm({ ...eventForm, parent_visible: e.target.checked })}
+                    className="mt-0.5 h-4 w-4 accent-teal-600"
+                  />
+                  <span>
+                    <span className={`block text-sm font-semibold ${textPrimary}`}>Show this event to Parents</span>
+                    <span className={`block text-xs ${textSecondary}`}>Parents only see it when it applies to their learner’s selected grade/class, or when no grade is selected.</span>
+                  </span>
+                </label>
+                {eventForm.parent_visible && eventForm.target_audience === 'staff' && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                    Internal visibility and Parent publication are separate: Staff/Admin and the targeted Parents will see this event.
+                  </div>
+                )}
+              </section>
+
+              <section className={`space-y-4 rounded-xl border p-4 ${cardBorder}`}>
+                <div>
+                  <h4 className={`text-xs font-bold uppercase tracking-[0.14em] ${textSecondary}`}>Grade/Class targeting</h4>
+                  <p className={`mt-1 text-xs ${textSecondary}`}>{eventForm.parent_visible ? 'All grades publishes to all Parents. A grade limits it to that grade; a class narrows it further.' : 'Used for internal organization. Parents cannot see this event while Parent publication is off.'}</p>
+                </div>
+                <div>
                 <label className={`block text-sm font-medium ${textSecondary} mb-2`}>Target Grade</label>
                 <select
                   value={eventForm.grade_id}
@@ -650,9 +700,9 @@ const CalendarComponent = () => {
                   <option value="">All grades</option>
                   {grades.map(grade => <option key={grade.id} value={grade.id}>{grade.name}</option>)}
                 </select>
-              </div>
+                </div>
 
-              <div>
+                <div>
                 <label className={`block text-sm font-medium ${textSecondary} mb-2`}>Target Class</label>
                 <select
                   value={eventForm.class_id}
@@ -663,20 +713,16 @@ const CalendarComponent = () => {
                   <option value="">All classes in grade</option>
                   {classes.map(schoolClass => <option key={schoolClass.id} value={schoolClass.id}>{schoolClass.name}</option>)}
                 </select>
-              </div>
+                </div>
+              </section>
 
-              <label className={`flex items-start gap-3 rounded-xl border p-4 ${inputBg}`}>
-                <input
-                  type="checkbox"
-                  checked={eventForm.parent_visible}
-                  onChange={(e) => setEventForm({ ...eventForm, parent_visible: e.target.checked })}
-                  className="mt-0.5 h-4 w-4 accent-teal-600"
-                />
-                <span>
-                  <span className={`block text-sm font-semibold ${textPrimary}`}>Visible in Parent Portal</span>
-                  <span className={`block text-xs ${textSecondary}`}>School-wide when no grade is selected, or limited to Parents of learners in the selected grade.</span>
-                </span>
-              </label>
+              <section className={`rounded-xl border p-4 ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-[#cfe0e0] bg-[#f4f8f7]'}`}>
+                <h4 className={`text-sm font-bold ${textPrimary}`}>Who will see this?</h4>
+                <dl className="mt-2 grid grid-cols-[72px_1fr] gap-x-3 gap-y-1 text-sm">
+                  <dt className={textSecondary}>Internal:</dt><dd className={`font-medium ${textPrimary}`}>{internalAudienceLabel}</dd>
+                  <dt className={textSecondary}>Parents:</dt><dd className={`font-medium ${eventForm.parent_visible ? 'text-teal-700 dark:text-teal-300' : textPrimary}`}>{parentAudienceLabel}</dd>
+                </dl>
+              </section>
 
               <div className={`flex gap-3 pt-4 border-t ${cardBorder}`}>
                 <button 

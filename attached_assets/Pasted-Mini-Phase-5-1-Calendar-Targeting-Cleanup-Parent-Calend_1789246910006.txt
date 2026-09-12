@@ -1,0 +1,261 @@
+Mini Phase 5.1 — Calendar Targeting Cleanup + Parent Calendar UI Polish
+
+Mini Phase 5 is live and functional, but production testing revealed two issues:
+
+The Create Event targeting controls are confusing.
+The Parent Calendar still uses large saturated teal/green surfaces that do not match the approved Parent Portal design.
+
+Do not change unrelated modules.
+Do not change finance, Parent authentication, admissions, learner links, or rollout logic.
+Do not run migrations automatically.
+Do not deploy automatically.
+
+1. Simplify calendar audience logic
+
+The current form contains:
+
+Target Audience:
+Everyone
+Students Only
+Teachers Only
+Staff Only
+
+Target Grade
+Target Class
+
+Visible in Parent Portal
+
+This is confusing because Parent visibility is separate from Target Audience, and the Student Portal is retired.
+
+Redesign the form so the meaning is obvious.
+
+Internal audience
+
+Rename Target Audience to something like:
+
+Internal Audience
+
+Use clear options appropriate to the active system:
+
+All Staff
+Teachers Only
+Staff/Admin Only
+
+Do not offer Students Only for newly created events because the Student Portal is retired.
+
+Preserve compatibility with legacy student-targeted events in the database, but hide that choice from new event creation.
+
+2. Parent visibility is a separate publishing decision
+
+Keep:
+
+Show in Parent Portal
+
+but make the wording clearer.
+
+Suggested:
+
+Show this event to Parents
+
+Supporting text:
+
+Parents will only see this event if it applies to their learner's selected grade/class, or if no grade is selected.
+
+Parent visibility must remain OFF by default.
+
+3. Explain Grade/Class targeting
+
+When Parent visibility is OFF:
+
+Grade/Class targeting should continue serving any existing internal use, but the UI should not imply Parents will see it.
+
+When Parent visibility is ON:
+
+All grades
+→ all Parents can see the event
+
+Grade 2
+→ only Parents with a linked Grade 2 learner
+
+Grade 2 + Class A
+→ only Parents with a learner in that specific class
+
+Show this behavior clearly in helper text.
+
+If no class is selected, the selected grade applies to every class in that grade.
+
+4. Prevent confusing combinations
+
+Review combinations such as:
+
+Staff/Admin Only
++ Show this event to Parents
+
+If technically allowed, provide a clear warning explaining that the internal audience and Parent publication are separate.
+
+Prefer a UX where Admin understands:
+
+Internal visibility
+AND
+Parent publication
+
+rather than assuming one dropdown controls everybody.
+
+Do not silently expose internal events.
+
+5. Add a live visibility summary
+
+At the bottom of the Create/Edit Event form, add a small summary such as:
+
+Who will see this?
+
+Internal: All Staff
+Parents: Grade 2 parents
+
+or:
+
+Internal: Staff/Admin only
+Parents: Not published
+
+This should update live as Admin changes the controls.
+
+This is purely explanatory and must not introduce a second permission system.
+
+6. Parent Calendar UI — remove large teal surfaces
+
+Production screenshot shows:
+
+large teal Calendar / Upcoming events tabs
+large solid teal event card
+dark text on teal reducing readability
+
+This does not match the rest of the approved Parent Portal.
+
+Redesign Parent Calendar to use:
+
+Harmony navy
+white/light neutral surfaces
+restrained teal accents
+subtle borders/shadows
+normal dark text
+
+Do NOT use full-card teal backgrounds for normal events.
+
+7. Calendar/Upcoming toggle
+
+Replace the large filled teal buttons with a lighter segmented control.
+
+Preferred appearance:
+
+[ Calendar ] [ Upcoming events ]
+
+White/light background with:
+
+navy/grey inactive text
+restrained teal active indicator/background
+subtle border
+
+Keep accessibility and tap sizes.
+
+8. Parent event cards
+
+Redesign normal Parent event cards like:
+
+┌─────────────────────────────┐
+│  SEP 19   Test Event        │
+│           Meeting           │
+│           09:00 – 14:00     │
+│           Grade 2           │
+└─────────────────────────────┘
+
+Use:
+
+white/light card
+small date badge
+navy event title
+muted time/category metadata
+small restrained category badge
+subtle teal accent/icon
+
+Long titles must wrap or truncate cleanly.
+
+Never use a giant saturated background merely to indicate event category.
+
+9. Event details
+
+Parent event detail modal should also use the approved Parent Portal palette.
+
+Clearly show:
+
+title
+date
+time
+category
+description
+grade/class if relevant
+location if available
+
+No edit/delete controls for Parents.
+
+10. Admin Create Event UI polish
+
+The form itself is generally functional but make it more understandable:
+
+Organize into sections:
+
+Event details
+Date & time
+Internal audience
+Parent Portal visibility
+Grade/Class targeting
+
+Keep it compact.
+
+Avoid creating an overly long or complicated form.
+
+11. Preserve existing behavior
+
+Do not alter:
+
+parent_visible security default
+existing event records
+soft-delete behavior
+grade/class authorization
+Parent learner-link verification
+Month/Week/Day behavior
+
+Existing legacy events remain Parent-private unless explicitly published.
+
+12. Tests
+
+Add/update tests for:
+
+Parent visibility OFF by default
+All grades + Parent visible → school-wide Parent event
+Grade-specific Parent event
+Class-specific Parent event
+unrelated Parent cannot see targeted event
+multi-child learner switching
+Staff-only internal event remains Parent-private when not published
+legacy Students Only event compatibility
+Students Only unavailable for new event creation
+visibility summary text
+Parent event-card responsive layout
+
+Visually verify 320, 360, 390, 412, tablet and desktop.
+
+Final report
+
+Return:
+
+Previous audience behavior
+New simplified audience behavior
+Grade/Class targeting behavior
+Parent publishing behavior
+Parent Calendar visual changes
+Files changed
+Migration required or not
+Tests passed
+
+Do not deploy automatically.
+Do not run migrations automatically.

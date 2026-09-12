@@ -13,9 +13,13 @@ const dateKey = value => new Date(value).toISOString().slice(0, 10);
 
 const EventCard = ({ event, onOpen }) => {
   const start = new Date(event.start_date);
+  const end = event.end_date ? new Date(event.end_date) : null;
   const hasTime = !Number.isNaN(start.getTime()) && (start.getHours() !== 0 || start.getMinutes() !== 0);
+  const timeLabel = hasTime
+    ? `${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${end && !Number.isNaN(end.getTime()) ? ` – ${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`
+    : '';
   return (
-    <button type="button" onClick={() => onOpen(event)} className="w-full min-w-0 rounded-2xl border border-[#dce7eb] bg-white p-4 text-left shadow-sm">
+    <button type="button" onClick={() => onOpen(event)} className="parent-calendar-event w-full min-w-0 rounded-2xl border border-[#dce7eb] bg-white p-4 text-left shadow-sm">
       <div className="flex min-w-0 items-start gap-3">
         <div className="w-12 shrink-0 rounded-xl bg-[#e8f1ef] py-2 text-center">
           <p className="text-[10px] font-bold uppercase text-[#176b73]">{start.toLocaleDateString(undefined, { month: 'short' })}</p>
@@ -25,7 +29,7 @@ const EventCard = ({ event, onOpen }) => {
           <p className="break-words font-semibold leading-5 text-[#19324a]">{event.title}</p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
             <span className={`rounded-full border px-2 py-0.5 font-medium ${tones[event.event_type] || tones.other}`}>{event.event_type || 'other'}</span>
-            {hasTime && <span className="inline-flex items-center gap-1 text-[#617487]"><Clock className="h-3.5 w-3.5" />{start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+            {hasTime && <span className="inline-flex items-center gap-1 text-[#617487]"><Clock className="h-3.5 w-3.5" />{timeLabel}</span>}
             {event.grade_name && <span className="max-w-full break-words text-[#617487]">{event.grade_name}{event.class_name ? ` · ${event.class_name}` : ''}</span>}
           </div>
         </div>
@@ -67,8 +71,8 @@ const ParentCalendar = () => {
         <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#19324a]">Calendar</h1>
         <p className="mt-1 text-sm text-[#617487]">{child ? `Events for ${child.first_name} and school-wide Parent events` : 'Select a linked learner to view events'}</p>
       </header>
-      <div className="grid grid-cols-2 rounded-xl bg-[#e4eceb] p-1">
-        {['calendar', 'upcoming'].map(value => <button key={value} onClick={() => setMode(value)} className={`rounded-lg px-3 py-2.5 text-sm font-semibold ${mode === value ? 'bg-white text-[#176b73] shadow-sm' : 'text-[#617487]'}`}>{value === 'calendar' ? 'Calendar' : 'Upcoming events'}</button>)}
+      <div className="parent-calendar-tabs grid grid-cols-2 rounded-xl border border-[#dce7eb] bg-white p-1">
+        {['calendar', 'upcoming'].map(value => <button key={value} onClick={() => setMode(value)} className={`parent-calendar-tab rounded-lg px-3 py-2.5 text-sm font-semibold ${mode === value ? 'is-active' : ''}`}>{value === 'calendar' ? 'Calendar' : 'Upcoming events'}</button>)}
       </div>
       {mode === 'calendar' && (
         <section className="rounded-2xl border border-[#dce7eb] bg-white p-4 shadow-sm">

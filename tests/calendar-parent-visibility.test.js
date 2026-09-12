@@ -8,6 +8,8 @@ const migration = fs.readFileSync('migrations/calendar_parent_visibility.sql', '
 const parentCalendar = fs.readFileSync('client/src/components/parent/ParentCalendar.js', 'utf8');
 const parentPortal = fs.readFileSync('client/src/components/parent/ParentPortal.js', 'utf8');
 const dashboard = fs.readFileSync('client/src/components/parent/ParentDashboard.js', 'utf8');
+const calendarUi = fs.readFileSync('client/src/components/calendar/Calendar.js', 'utf8');
+const parentCss = fs.readFileSync('client/src/components/parent/ParentPortal.css', 'utf8');
 
 test('Parent calendar is read-only and resolves the selected linked learner', () => {
   assert.match(parentRoute, /router\.get\('\/calendar', requireParent/);
@@ -43,4 +45,28 @@ test('Admin retains CRUD and can explicitly publish Parent-visible events', () =
   assert.match(calendarRoute, /router\.put\('\/events\/:id'/);
   assert.match(calendarRoute, /router\.delete\('\/events\/:id'/);
   assert.match(calendarRoute, /parent_visible/);
+});
+
+test('new event UI simplifies internal audience while preserving legacy student events', () => {
+  assert.match(calendarUi, /Internal Audience/);
+  assert.match(calendarUi, />All Staff</);
+  assert.match(calendarUi, />Teachers Only</);
+  assert.match(calendarUi, />Staff\/Admin Only</);
+  assert.match(calendarUi, /eventForm\.target_audience === 'students'/);
+  assert.doesNotMatch(calendarUi, /<option value="students">Students Only<\/option>/);
+});
+
+test('Admin form explains Parent publishing and updates a live visibility summary', () => {
+  assert.match(calendarUi, /Show this event to Parents/);
+  assert.match(calendarUi, /Who will see this\?/);
+  assert.match(calendarUi, /All Parents/);
+  assert.match(calendarUi, /Parents \(all classes\)/);
+  assert.match(calendarUi, /Internal visibility and Parent publication are separate/);
+});
+
+test('Parent Calendar cards and tabs force approved light surfaces', () => {
+  assert.match(parentCalendar, /parent-calendar-event/);
+  assert.match(parentCalendar, /parent-calendar-tab/);
+  assert.match(parentCss, /button\.parent-calendar-event[\s\S]*background: #fff !important/);
+  assert.match(parentCss, /button\.parent-calendar-tab\.is-active[\s\S]*background: #e8f1ef !important/);
 });
