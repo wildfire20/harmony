@@ -6,6 +6,10 @@ const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { isStudentPortalEnabled } = require('../config/features');
+const {
+  hashToken, randomToken, accessToken, setRefreshCookie, authenticateSession, revokeUserSessions,
+  withTransaction,
+} = require('../services/parentAuth');
 
 const router = express.Router();
 
@@ -213,7 +217,7 @@ router.get('/profile', authenticate, async (req, res) => {
 router.put('/change-password', [
   authenticate,
   body('current_password').notEmpty().withMessage('Current password is required'),
-  body('new_password').isLength({ min: 6 }).withMessage('New password must be at least 6 characters')
+  body('new_password').isLength({ min: 8 }).withMessage('New password must be at least 8 characters')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -239,9 +243,10 @@ router.put('/change-password', [
 
     // Update password
     await db.query(
-      'UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      'UPDATE users SET password = $1, password_changed_at=NOW(), auth_revoked_at=NOW(), updated_at = CURRENT_TIMESTAMP WHERE id = $2',
       [hashedNewPassword, userId]
     );
+    await revokeUserSessions(userId);
 
     res.json({ message: 'Password changed successfully' });
 
@@ -301,7 +306,9 @@ router.post('/login/parent', loginLimiter, [
       ORDER BY g.name, u.last_name
     `, [user.id]);
 
-    const token = generateToken(user);
+    const session = await authenticateSession(req, res, user, req.body.remember === true);
+    await db.query('UPDATE users SET last_login_at=NOW() WHERE id=$1 AND role=$2', [user.id, 'parent']);
+    const token = session.token;
     const { password: _, ...userWithoutPassword } = user;
 
     res.json({
@@ -315,13 +322,121 @@ router.post('/login/parent', loginLimiter, [
 
   } catch (error) {
     console.error('Parent login error:', error);
+    if (error.code === '42P01' || error.code === '42703') {
+      return res.status(503).json({ message: 'Parent authentication is not yet available.' });
+    }
     res.status(500).json({ message: 'Server error during login' });
   }
 });
 
 // Logout (client-side token removal)
-router.post('/logout', authenticate, (req, res) => {
+router.post('/logout', async (req, res) => {
+  const raw = String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith('parent_refresh='));
+  if (raw) {
+    try {
+      await db.query('UPDATE parent_sessions SET revoked_at=NOW(),last_used_at=NOW() WHERE refresh_token_hash=$1 AND revoked_at IS NULL',
+        [hashToken(decodeURIComponent(raw.slice('parent_refresh='.length)))]);
+    } catch (error) {
+      if (error.code !== '42P01') console.error('Logout session revoke error:', error.message);
+    }
+  }
+  res.clearCookie('parent_refresh', { path: '/api/auth' });
   res.json({ message: 'Logout successful' });
+});
+
+// Rotate a parent refresh token. Reuse of a rotated token revokes its family.
+router.post('/refresh', async (req, res) => {
+  let client;
+  try {
+    const pair = String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith('parent_refresh='));
+    if (!pair) return res.status(401).json({ message: 'Session expired' });
+    const raw = decodeURIComponent(pair.slice('parent_refresh='.length));
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const found = await client.query(`SELECT s.id AS session_id, s.user_id AS session_user_id,
+      s.refresh_token_hash, s.family_id, s.family_expires_at, s.expires_at, s.revoked_at, s.replaced_by_hash, s.created_at,
+      u.id AS user_id, u.email, u.role, u.student_number, u.is_active, u.auth_revoked_at
+      FROM parent_sessions s JOIN users u ON u.id=s.user_id
+      WHERE s.refresh_token_hash=$1 AND u.role='parent' AND u.is_active=true
+        AND (u.auth_revoked_at IS NULL OR s.created_at > u.auth_revoked_at) FOR UPDATE`, [hashToken(raw)]);
+    if (!found.rows.length) { await client.query('ROLLBACK'); client.release(); return res.status(401).json({ message: 'Session expired' }); }
+    const old = found.rows[0];
+    if (old.revoked_at || old.replaced_by_hash || new Date(old.expires_at) <= new Date()) {
+      await client.query('UPDATE parent_sessions SET revoked_at=NOW() WHERE family_id=$1 AND revoked_at IS NULL', [old.family_id]);
+      await client.query('COMMIT'); client.release();
+      return res.status(401).json({ message: 'Session expired' });
+    }
+    const familyRemaining = new Date(old.family_expires_at).getTime() - Date.now();
+    if (familyRemaining <= 0) {
+      await client.query('UPDATE parent_sessions SET revoked_at=NOW() WHERE family_id=$1', [old.family_id]);
+      await client.query('COMMIT'); client.release();
+      return res.status(401).json({ message: 'Session expired' });
+    }
+    const remember = (new Date(old.expires_at) - Date.now()) > 3 * 86400000;
+    const successor = randomToken();
+    const inserted = await client.query(`INSERT INTO parent_sessions
+      (user_id,refresh_token_hash,family_id,family_expires_at,expires_at,user_agent,ip_address)
+      VALUES ($1,$2,$3,$4,LEAST($4,NOW()+($5 * INTERVAL '1 day')),$6,$7) RETURNING id`,
+      [old.user_id, hashToken(successor), old.family_id, old.family_expires_at, remember ? 30 : 1, req.get('user-agent') || null, req.ip || null]);
+    const consumed = await client.query(`UPDATE parent_sessions SET revoked_at=NOW(),last_used_at=NOW(),replaced_by_hash=$1
+      WHERE id=$2 AND revoked_at IS NULL AND replaced_by_hash IS NULL RETURNING id`,
+      [hashToken(successor), old.session_id]);
+    if (!consumed.rows.length) {
+      await client.query('UPDATE parent_sessions SET revoked_at=NOW() WHERE family_id=$1', [old.family_id]);
+      await client.query('COMMIT'); client.release();
+      return res.status(401).json({ message: 'Session expired' });
+    }
+    await client.query('COMMIT'); client.release(); client = null;
+    setRefreshCookie(req, res, successor, Math.max(1, Math.ceil(familyRemaining / 1000)));
+    res.json({ token: accessToken(old, inserted.rows[0].id) });
+  } catch (error) {
+    if (client) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); }
+    console.error('Parent refresh error:', error);
+    res.status(401).json({ message: 'Session expired' });
+  }
+});
+
+router.post('/forgot-password', loginLimiter, [body('email').optional().isEmail()], async (req, res) => {
+  const safe = { message: 'If an account matches, password recovery instructions will be sent.' };
+  try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    if (!email) return res.json(safe);
+    const result = await db.query(`SELECT id, first_name, email FROM users
+      WHERE lower(email)=lower($1) AND role='parent' AND is_active=true LIMIT 1`, [email]);
+    if (result.rows.length) {
+      const { issueAuthToken, sendParentAuthEmail } = require('../services/parentAuth');
+      const token = await issueAuthToken(result.rows[0].id, 'reset');
+      await sendParentAuthEmail(email, token, 'reset', result.rows[0].first_name);
+    }
+    return res.json(safe);
+  } catch (error) { console.error('Forgot password error:', error); return res.json(safe); }
+});
+
+router.post('/reset-password', [
+  body('token').isString().isLength({ min: 20 }),
+  body('new_password').isString().isLength({ min: 8 }),
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const found = await db.query(`SELECT t.id, t.user_id FROM parent_auth_tokens t JOIN users u ON u.id=t.user_id
+      WHERE t.token_hash=$1 AND t.token_type='reset' AND t.used_at IS NULL AND t.revoked_at IS NULL
+      AND t.expires_at>NOW() AND u.role='parent' AND u.is_active=true`, [hashToken(req.body.token)]);
+    if (!found.rows.length) return res.status(400).json({ message: 'Invalid or expired reset link' });
+    const hashed = await bcrypt.hash(req.body.new_password, parseInt(process.env.BCRYPT_ROUNDS, 10) || 12);
+    await withTransaction(async (client) => {
+      const consumed = await client.query(`UPDATE parent_auth_tokens SET used_at=NOW()
+        WHERE id=$1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at>NOW() RETURNING user_id`, [found.rows[0].id]);
+      if (!consumed.rows.length) throw Object.assign(new Error('used'), { status: 400 });
+      await client.query('UPDATE users SET password=$1, must_change_password=false, password_changed_at=NOW(), auth_revoked_at=NOW() WHERE id=$2',
+        [hashed, found.rows[0].user_id]);
+      await client.query('UPDATE parent_sessions SET revoked_at=NOW() WHERE user_id=$1 AND revoked_at IS NULL', [found.rows[0].user_id]);
+    });
+    res.json({ message: 'Password reset successfully' });
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ message: 'Invalid or expired reset link' });
+    console.error('Reset password error:', error); res.status(500).json({ message: 'Server error' });
+  }
 });
 
 // Verify token

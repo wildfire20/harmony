@@ -5,3 +5,4 @@
 - [Secure-link resend semantics](secure-link-resend.md) — hash-only tokens cannot be recovered; resend explicitly reissues and invalidates the prior link.
 - [Admin theme cascade](admin-theme-cascade.md) — page-specific Admin contrast rules must follow legacy global theme overrides.
 - [Parent learner isolation](parent-learner-isolation.md) — require explicit verified learner IDs; never infer, silently fall back, or relink parent relationships by name.
+- [Parent authentication lifecycle](parent-auth-lifecycle.md) — one-time hash-only links and fixed-lifetime revocable sessions must never alter learner relationships.

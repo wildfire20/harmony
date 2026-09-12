@@ -99,7 +99,7 @@ test('disabled student login returns 403 without querying the database', async (
   }
 });
 
-test('central authentication rejects student JWTs but accepts adult JWTs', async () => {
+test('central authentication rejects student JWTs, accepts staff JWTs, and requires parent sessions', async () => {
   const authMiddleware = read('middleware/auth.js');
   const roleGuard = /req\.user\.role === 'student' && !isStudentPortalEnabled\(\)/;
   assert.match(authMiddleware, roleGuard);
@@ -121,7 +121,7 @@ test('central authentication rejects student JWTs but accepts adult JWTs', async
       ['student', 403, false],
       ['teacher', 200, true],
       ['admin', 200, true],
-      ['parent', 200, true],
+      ['parent', 401, false],
     ]) {
       db.query = async () => ({ rows: [{ id: 42, role, is_active: true }] });
       const req = {

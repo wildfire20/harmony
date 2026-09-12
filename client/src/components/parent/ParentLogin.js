@@ -11,18 +11,25 @@ const ParentLogin = () => {
   const [form, setForm] = useState({ phone_number: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [remember, setRemember] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const response = await api.post('/auth/login/parent', form);
+      const response = await api.post('/auth/login/parent', { ...form, remember });
       const { token, user, children, child, must_change_password } = response.data;
 
-      localStorage.setItem('parentToken',    token);
-      localStorage.setItem('parentUser',     JSON.stringify(user));
-      localStorage.setItem('parentChildren', JSON.stringify(children || []));
-      localStorage.setItem('parentChild',    JSON.stringify(child || children?.[0] || null));
+      // Keep the bearer token in session storage by default. A remembered session
+      // is still revocable by the server (refresh cookies are HttpOnly).
+      const storage = sessionStorage;
+      ['parentToken', 'parentUser', 'parentChildren', 'parentChild'].forEach(k => {
+        localStorage.removeItem(k); sessionStorage.removeItem(k);
+      });
+      storage.setItem('parentToken', token);
+      storage.setItem('parentUser', JSON.stringify(user));
+      storage.setItem('parentChildren', JSON.stringify(children || []));
+      storage.setItem('parentChild', JSON.stringify(child || children?.[0] || null));
 
       if (must_change_password) {
         toast('Please set a new password to continue.', { icon: '🔐' });
@@ -112,6 +119,7 @@ const ParentLogin = () => {
                   </button>
                 </div>
               </div>
+              <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" /> Keep me signed in on this device</label>
 
               <button
                 type="submit"

@@ -41,6 +41,8 @@ import ParentLogin from './components/parent/ParentLogin';
 import ParentPortal from './components/parent/ParentPortal';
 import ParentForgotPassword from './components/parent/ParentForgotPassword';
 import ParentForceChangePassword from './components/parent/ParentForceChangePassword';
+import ParentActivation from './components/parent/ParentActivation';
+import ParentResetPassword from './components/parent/ParentResetPassword';
 import StaffScanStation from './components/attendance/StaffScanStation';
 import AdmissionsPortal from './components/admissions/AdmissionsPortal';
 
@@ -210,6 +212,8 @@ const AppContent = () => {
 
       {/* Parent Portal – standalone, own layout */}
       <Route path="/parent/welcome"         element={<Navigate to="/parent/forgot-password" replace />} />
+      <Route path="/parent/activate" element={<ParentActivation />} />
+      <Route path="/parent/reset-password" element={<ParentResetPassword />} />
       <Route path="/parent/login"           element={<ParentLogin />} />
       <Route path="/parent/forgot-password" element={<ParentForgotPassword />} />
       <Route path="/parent/change-password" element={<ParentForceChangePassword />} />

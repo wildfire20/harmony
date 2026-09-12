@@ -64,6 +64,9 @@ const db = {
     if (/INSERT INTO users/.test(sql) && /role/.test(sql)) {
       return row([{ id: state.nextParent++, first_name: params[0], last_name: params[1], phone_number: params[2], role: 'parent' }]);
     }
+    if (/SELECT id FROM users WHERE id=\$1 AND role=\$2 FOR UPDATE/.test(sql)) {
+      return row([{ id: Number(params[0]) }]);
+    }
     if (/FROM invoices/.test(sql)) return row([]);
     if (/SELECT u\.\*/.test(sql) && /users u/.test(sql)) {
       const p = Number(params[0]); const id = params[1] && Number(params[1]);

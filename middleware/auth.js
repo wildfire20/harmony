@@ -23,7 +23,7 @@ const authenticate = async (req, res, next) => {
       try {
         result = await db.query(`
           SELECT u.id, u.student_number, u.email, u.first_name, u.last_name, 
-                 u.role, u.grade_id, u.class_id, g.name as grade_name, c.name as class_name
+           u.role, u.grade_id, u.class_id, g.name as grade_name, c.name as class_name
           FROM users u
           LEFT JOIN grades g ON u.grade_id = g.id
           LEFT JOIN classes c ON u.class_id = c.id
@@ -47,6 +47,27 @@ const authenticate = async (req, res, next) => {
     }
 
     req.user = result.rows[0];
+
+    if (req.user.role === 'parent' && !decoded.session_id) {
+      return res.status(401).json({ message: 'Invalid parent session.' });
+    }
+    if (req.user.role === 'parent' && decoded.session_id) {
+      try {
+        const session = await db.query(`SELECT s.id FROM parent_sessions s
+          JOIN users u ON u.id=s.user_id
+          WHERE s.id=$1 AND s.user_id=$2 AND u.is_active=true
+            AND (u.auth_revoked_at IS NULL OR s.created_at>u.auth_revoked_at)
+            AND s.revoked_at IS NULL AND s.expires_at>NOW()
+            AND s.family_expires_at>NOW()`,
+          [decoded.session_id, req.user.id]);
+        if (!session.rows.length) return res.status(401).json({ message: 'Session revoked. Please login again.' });
+      } catch (sessionError) {
+        if (sessionError.code === '42P01' || sessionError.code === '42703') {
+          return res.status(503).json({ message: 'Parent authentication is not yet available.' });
+        }
+        throw sessionError;
+      }
+    }
 
     if (req.user.role === 'student' && !isStudentPortalEnabled()) {
       return res.status(403).json({ message: 'Student Portal access is currently unavailable.' });

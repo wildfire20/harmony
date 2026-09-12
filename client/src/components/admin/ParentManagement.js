@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import {
   UserPlus, Trash2, Edit2, Search, Users, AlertCircle, X,
   Phone, Copy, RotateCcw, Plus, Minus, Share2, Link2
+  ,ShieldCheck, ShieldOff, Mail
 } from 'lucide-react';
 
 const ParentManagement = () => {
@@ -23,6 +24,13 @@ const ParentManagement = () => {
 
   const emptyForm = { first_name: '', last_name: '', phone_number: '', email: '' };
   const [form, setForm] = useState(emptyForm);
+  const portalStatus = (p) => {
+    if (['NOT_INVITED', 'INVITE_SENT', 'ACTIVATED', 'DISABLED'].includes(p.portal_status)) return p.portal_status;
+    if (p.parent_account_status === 'disabled' || p.is_active === false) return 'DISABLED';
+    if (p.activated_at || p.parent_activation_state === 'active' || p.portal_status === 'activated' || p.portal_active) return 'ACTIVATED';
+    if (p.invitation_sent_at || p.invited_at || p.portal_status === 'invite_sent') return 'INVITE_SENT';
+    return 'NOT_INVITED';
+  };
 
   const loadParents = async () => {
     try {
@@ -118,15 +126,15 @@ const ParentManagement = () => {
           ...form,
           student_ids: linkedStudents.map(s => s.id),
         });
-        const { tempPassword, isExisting } = res.data;
-        if (tempPassword) {
-          setTempPassResult({ phone: form.phone_number, password: tempPassword });
+        const { activationLink, isExisting } = res.data;
+        if (activationLink) {
+          setTempPassResult({ link: activationLink });
         } else if (isExisting) {
           toast.success('Students added to existing parent account');
           setShowForm(false);
           loadParents();
         }
-        if (tempPassword) loadParents(); // refresh but keep modal to show password
+        if (activationLink) loadParents(); // refresh but keep modal to show handoff link
       }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to save');
@@ -147,18 +155,32 @@ const ParentManagement = () => {
   };
 
   const handleResetPassword = async (parent) => {
-    if (!window.confirm(`Reset password for ${parent.first_name} ${parent.last_name}? They will need to set a new password on next login.`)) return;
+    if (!window.confirm(`Reset portal access for ${parent.first_name} ${parent.last_name}?`)) return;
     try {
       const res = await api.post(`/parent/admin/reset-password/${parent.id}`);
-      setTempPassResult({ phone: parent.phone_number, password: res.data.tempPassword });
-      toast.success('Password reset. Share the temporary password with the parent.');
-    } catch {
-      toast.error('Failed to reset password');
+      if (res.data?.resetLink) copyToClipboard(res.data.resetLink);
+      toast.success('Reset link generated and copied');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to reset parent access');
     }
   };
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text).then(() => toast.success('Copied!'));
+  };
+
+  const parentAction = async (parent, action, success) => {
+    if (!window.confirm(`${action === 'disable' ? 'Disable' : action === 'enable' ? 'Re-enable' : action === 'reset-access' ? 'Reset portal access for' : 'Send an invitation to'} ${parent.first_name} ${parent.last_name}?`)) return;
+    try {
+      const endpoint = action === 'invitation' ? (parent.invitation_sent_at ? 'reissue' : 'invite') : action;
+      const res = action === 'reset-access'
+        ? await api.post(`/parent/admin/reset-password/${parent.id}`)
+        : await api.post(`/parent/admin/${parent.id}/${endpoint}`);
+      if (res.data?.activationLink) copyToClipboard(res.data.activationLink);
+      if (res.data?.resetLink) copyToClipboard(res.data.resetLink);
+      toast.success(success || 'Action completed');
+      loadParents();
+    } catch (err) { toast.error(err.response?.data?.message || 'Action could not be completed'); }
   };
 
   const filtered = parents.filter((p) => {
@@ -213,7 +235,7 @@ const ParentManagement = () => {
           <div className="flex items-start justify-between gap-3 mb-4">
             <div>
               <p className="font-bold text-amber-800 text-base">Parent account created!</p>
-              <p className="text-amber-700 text-sm">This temporary password is shown only once. Share it securely.</p>
+              <p className="text-amber-700 text-sm">This one-time activation handoff is shown only once. Share it securely.</p>
             </div>
             <button
               onClick={() => { setTempPassResult(null); setShowForm(false); }}
@@ -224,17 +246,12 @@ const ParentManagement = () => {
           </div>
 
           <div className="bg-white border border-amber-200 rounded-xl p-3">
-            <p className="text-amber-800 text-xs font-semibold mb-1.5 uppercase tracking-wide">One-time account handoff</p>
+              <p className="text-amber-800 text-xs font-semibold mb-1.5 uppercase tracking-wide">One-time activation link</p>
             <div className="space-y-2">
               <div className="flex items-center gap-3">
-                <span className="text-amber-600 text-xs w-20 shrink-0">Phone:</span>
-                <code className="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1 font-mono text-sm flex-1">{tempPassResult.phone}</code>
-                <button onClick={() => copyToClipboard(tempPassResult.phone)} className="p-1.5 text-amber-600 hover:bg-amber-100 rounded-lg shrink-0"><Copy className="h-3.5 w-3.5" /></button>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-amber-600 text-xs w-20 shrink-0">Password:</span>
-                <code className="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1 font-mono text-sm font-bold tracking-wide flex-1">{tempPassResult.password}</code>
-                <button onClick={() => copyToClipboard(tempPassResult.password)} className="p-1.5 text-amber-600 hover:bg-amber-100 rounded-lg shrink-0"><Copy className="h-3.5 w-3.5" /></button>
+                  <span className="text-amber-600 text-xs w-20 shrink-0">Link:</span>
+                  <code className="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1 font-mono text-xs flex-1 break-all">{tempPassResult.link}</code>
+                  <button onClick={() => copyToClipboard(tempPassResult.link)} className="p-1.5 text-amber-600 hover:bg-amber-100 rounded-lg shrink-0"><Copy className="h-3.5 w-3.5" /></button>
               </div>
             </div>
           </div>
@@ -417,6 +434,11 @@ const ParentManagement = () => {
                       <Phone className="h-3 w-3" />
                       {p.phone_number || <span className="text-red-400">No phone</span>}
                     </div>
+                    <div className="flex flex-wrap gap-2 mt-2 text-xs text-gray-500">
+                      <span className={`px-2 py-0.5 rounded-full ${portalStatus(p) === 'ACTIVATED' ? 'bg-emerald-100 text-emerald-700' : portalStatus(p) === 'DISABLED' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{portalStatus(p)}</span>
+                      {(p.invitation_sent_at || p.invited_at) && <span>Invited {new Date(p.invitation_sent_at || p.invited_at).toLocaleDateString()}</span>}
+                      {(p.last_login_at || p.lastLoginAt) && <span>Last login {new Date(p.last_login_at || p.lastLoginAt).toLocaleDateString()}</span>}
+                    </div>
 
                     {/* Children list */}
                     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -437,6 +459,12 @@ const ParentManagement = () => {
 
                 {/* Actions */}
                 <div className="flex items-center gap-2 flex-wrap">
+                  <button onClick={() => parentAction(p, p.is_active === false ? 'enable' : 'disable', p.is_active === false ? 'Parent re-enabled' : 'Parent disabled')} className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg font-medium ${p.is_active === false ? 'text-emerald-600 bg-emerald-50' : 'text-red-600 bg-red-50'}`}>
+                    {p.is_active === false ? <ShieldCheck className="h-3.5 w-3.5" /> : <ShieldOff className="h-3.5 w-3.5" />}{p.is_active === false ? 'Re-enable' : 'Disable'}
+                  </button>
+                  <button onClick={() => parentAction(p, 'invitation', 'Invitation sent')} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg font-medium"><Mail className="h-3.5 w-3.5" />{p.invitation_sent_at ? 'Reissue Invitation' : 'Send Invitation'}</button>
+                  <button onClick={async () => { try { const res = await api.post(`/parent/admin/${p.id}/copy-link`); if (res.data?.activationLink) copyToClipboard(res.data.activationLink); else toast.error('No activation link was returned'); } catch (err) { toast.error(err.response?.data?.message || 'Could not generate activation link'); } }} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-indigo-600 bg-indigo-50 rounded-lg font-medium"><Link2 className="h-3.5 w-3.5" />Generate/Copy Link</button>
+                  <button onClick={() => parentAction(p, 'reset-access', 'Parent access reset')} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg font-medium"><RotateCcw className="h-3.5 w-3.5" />Reset Access</button>
                   <button
                     onClick={() => handleResetPassword(p)}
                     title="Reset password"

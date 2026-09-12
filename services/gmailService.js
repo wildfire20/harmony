@@ -130,16 +130,16 @@ const htmlToPlainText = (html) => String(html || '')
   .replace(/\n{3,}/g, '\n\n')
   .trim();
 
-const createRawMessage = ({ to, subject, htmlBody, fromAddress }) => {
+const createRawMessage = ({ to, subject, htmlBody, fromAddress, fromName = SENDER_NAME, replyTo = REPLY_TO }) => {
   const safeTo = sanitizeHeader(to);
   const safeFromAddress = sanitizeHeader(fromAddress);
   if (!safeTo || !safeFromAddress) throw Object.assign(new Error('Invalid email envelope'), { status: 400 });
   const boundary = 'harmony-admissions-alternative';
   const textBody = htmlToPlainText(htmlBody);
   const mimeMessage = [
-    `From: ${encodeHeader(SENDER_NAME)} <${safeFromAddress}>`,
+    `From: ${encodeHeader(fromName)} <${safeFromAddress}>`,
     `To: ${safeTo}`,
-    `Reply-To: ${REPLY_TO}`,
+    `Reply-To: ${sanitizeHeader(replyTo)}`,
     `Subject: ${encodeHeader(subject)}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
@@ -159,7 +159,7 @@ const createRawMessage = ({ to, subject, htmlBody, fromAddress }) => {
   return Buffer.from(mimeMessage, 'utf8').toString('base64url');
 };
 
-async function sendEmail(to, subject, htmlBody) {
+async function sendEmail(to, subject, htmlBody, options = {}) {
   const config = getGmailApiConfig();
   if (!config.configured) {
     console.error(`Admissions email failed: ${EMAIL_ERROR_CATEGORIES.CONFIGURATION}`);
@@ -180,6 +180,8 @@ async function sendEmail(to, subject, htmlBody) {
           subject,
           htmlBody,
           fromAddress: config.user,
+          fromName: options.fromName || SENDER_NAME,
+          replyTo: options.replyTo || REPLY_TO,
         }),
       },
     }, { timeout: 30000 });

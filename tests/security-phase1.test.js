@@ -58,13 +58,16 @@ test('plaintext password fields and OTP response fallbacks are unused', () => {
 test('temporary passwords use cryptographic randomness and parent SMS recovery is removed', () => {
   const generator = read('utils/passwordGenerator.js');
   const auth = read('routes/auth.js');
-  const forgotPassword = read('client/src/components/parent/ParentForgotPassword.js');
   assert.match(generator, /crypto\.randomBytes/);
   assert.doesNotMatch(generator, /Math\.random/);
   assert.equal(fs.existsSync(path.join(root, 'services/sms.js')), false);
-  assert.doesNotMatch(auth, /parent\/forgot-password|parent\/verify-otp|parent\/reset-password|sendSMS|parent_otps/);
-  assert.doesNotMatch(forgotPassword, /send reset code|verify code|reset_token|phone_number|\/auth\//i);
-  assert.match(forgotPassword, /contact the school office/i);
+  // Phase 2 deliberately restores enumeration-safe email recovery.  Keep
+  // this assertion focused on the retired SMS/OTP flow.
+  assert.doesNotMatch(auth, /parent\/verify-otp|sendSMS|parent_otps/);
+  const forgotPassword = read('client/src/components/parent/ParentForgotPassword.js');
+  assert.doesNotMatch(forgotPassword, /send reset code|verify code|reset_token|phone_number|sendSMS|parent_otps/i);
+  assert.match(auth, /\/forgot-password/);
+  assert.match(auth, /If an account matches, password recovery instructions will be sent/);
 });
 
 test('JWT default lifetime is bounded', () => {

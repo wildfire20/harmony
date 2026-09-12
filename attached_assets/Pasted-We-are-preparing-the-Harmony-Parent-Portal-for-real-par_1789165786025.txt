@@ -1,0 +1,321 @@
+We are preparing the Harmony Parent Portal for real parent rollout.
+
+Phase 1 Parent Portal correctness/security hardening has passed independent review.
+
+Proceed with Phase 2 — Parent Activation, Persistent Login & Password Recovery.
+
+Do not deploy automatically.
+Do not run migrations automatically.
+Preserve all existing parent accounts and learner links.
+Do not recreate or automatically relink existing parents.
+
+1. Audit the existing parent-account state first
+
+Existing parent accounts and learner links already exist for many current Harmony learners.
+
+Before changing anything, determine how parent accounts currently represent:
+
+active account
+inactive account
+temporary password
+forced password change
+parent email
+parent phone number
+learner links
+
+We now need a clear Parent Portal onboarding lifecycle such as:
+
+NOT_INVITED
+INVITE_SENT
+ACTIVATED
+DISABLED
+
+Do not duplicate existing state unnecessarily if the same information can be safely derived from existing fields.
+
+If schema additions are required, prepare an additive, idempotent migration only.
+
+Do not run it.
+
+2. Parent invitation / activation flow
+
+Admin should be able to send an existing parent a secure Parent Portal invitation.
+
+The invitation email should say clearly that their Harmony Parent Portal is ready and explain that they can use it to view information such as:
+
+learner attendance
+grades / academic information
+school announcements
+documents
+fees and invoices
+payment information
+
+Add a button:
+
+Activate Parent Portal
+
+The activation link must:
+
+use a cryptographically secure random token
+store only a hash in the database
+expire
+be one-time for activation
+be revocable/reissuable
+never expose parent/database IDs
+never be logged
+
+The activation page should:
+
+verify the secure token
+show the parent-safe Harmony branding
+allow the parent to create their password
+confirm the phone number/account identity without exposing unnecessary data
+activate the account
+invalidate the activation token
+take them into the Parent Portal after successful activation
+
+Use the existing Gmail API/OAuth transport.
+
+Suggested sender branding:
+
+Harmony Learning Institute Parent Portal — powered by AutoM8
+
+Reply-To remains Harmony Learning Institute.
+
+Preserve the subtle Powered by AutoM8 footer.
+
+3. Parent accounts without email addresses
+
+Audit existing parent accounts and report:
+
+total parent accounts
+accounts with email
+accounts without email
+accounts with linked learners
+accounts with no linked learners
+
+Do not invent email addresses.
+
+For a parent without an email address, Admin should be able to generate a secure activation link and explicitly choose Copy Activation Link so Harmony can send it through an approved/manual channel such as WhatsApp.
+
+The raw activation link must only be returned at creation/reissue time and must never be recoverable from the stored token hash later.
+
+4. Persistent parent login
+
+Parents should not have to log in again every day.
+
+Implement a secure persistent-session architecture.
+
+Preferred model:
+
+short-lived access authentication
+long-lived refresh/session token
+refresh token is cryptographically random
+only a hash of the refresh token is stored server-side
+refresh token sent through an HttpOnly, Secure, appropriately SameSite cookie
+no long-lived authentication secret in localStorage
+token/session rotation where appropriate
+session revocation support
+
+Add:
+
+Keep me signed in on this device
+
+Recommended remembered session lifetime:
+
+30 days
+
+If the parent does not choose it, use a shorter normal session.
+
+A remembered session should transparently refresh authentication so a parent can open the portal days later without re-entering their password.
+
+Do not create an unlimited/permanent login.
+
+5. Session management
+
+Sessions must be revoked when:
+
+parent logs out
+Admin disables/deactivates the parent account
+parent changes password
+parent resets a forgotten password
+Admin resets parent access
+security-sensitive account changes require invalidation
+
+Add support for:
+
+normal logout of the current device
+Admin Reset Parent Access
+optional Log out all devices if safe to implement in this phase
+
+Concurrent/replayed refresh tokens must not create uncontrolled sessions.
+
+6. Strengthen password security
+
+Replace the current weak six-character minimum.
+
+Use a sensible modern password policy without making passwords unnecessarily difficult.
+
+Recommended:
+
+minimum 8 characters
+allow long passwords/passphrases
+securely hashed using the existing approved password hashing mechanism
+never log passwords
+never email passwords
+
+Parent-created passwords should replace the previous temporary-password workflow where activation links are used.
+
+Existing accounts must remain compatible.
+
+7. Forgot Password
+
+Add a real self-service:
+
+Forgot password?
+
+Parent enters their registered phone number or email as appropriate.
+
+For privacy, the response must not reveal whether an account exists.
+
+If an eligible account exists:
+
+create a secure password-reset token
+store only its hash
+give it a short expiry
+send the reset email using the existing Gmail API transport
+
+Reset page:
+
+validates token
+allows new password
+invalidates the reset token after use
+revokes all existing Parent Portal sessions
+does not alter learner links
+
+If email is unavailable for that parent, safely instruct them to contact Harmony instead of exposing account details.
+
+8. Admin Parent Management
+
+Extend the existing Parent Management screen so Admin can clearly see:
+
+parent name
+phone
+email where available
+linked learners
+Portal status:
+Not invited
+Invite sent
+Activated
+Disabled
+invitation sent date
+last successful login where safely available
+
+Admin actions:
+
+Send Invitation
+Reissue Invitation
+Copy Activation Link
+Reset Parent Access
+Disable Portal Access
+Re-enable Portal Access
+View linked learners
+
+Reissuing an invitation must invalidate the previous activation token.
+
+Do not automatically email all parents.
+
+Mass invitation will happen only during the controlled rollout later.
+
+9. New registered families
+
+Do not automatically create/link new parent accounts yet unless existing architecture already supports this safely.
+
+Instead, design the Phase 2 implementation so that a future phase can do:
+
+REGISTERED enrollment
+→ create or safely match parent using stable identifiers
+→ link learner
+→ send Parent Portal invitation
+
+Never match a parent/learner relationship using names alone.
+
+Report what would be required for that future automation.
+
+10. Authentication tests
+
+Add comprehensive tests for:
+
+valid login
+invalid password
+inactive parent
+parent with zero learners
+activation token generation
+activation expiry
+activation reuse
+activation reissue
+activation revocation
+password creation
+forgot-password enumeration protection
+password reset
+reset token expiry/reuse
+remembered session
+normal short session
+refresh/session rotation
+revoked session
+logout
+password change revokes sessions
+Admin disable revokes sessions
+multiple devices where supported
+existing parent account compatibility
+learner links remain unchanged throughout activation/password flows
+
+Also rerun:
+
+Parent Portal Phase 1 tests
+admissions regression tests
+security tests
+Student Portal retirement tests
+Gmail/email tests
+production client build
+
+Perform an independent security review.
+
+Scope protection
+
+Do not implement yet:
+
+WhatsApp API
+two-way parent messaging
+Parent Notification Centre
+attendance explanations
+new payment features
+calendar/timetable
+large UI redesign
+
+Those are later phases.
+
+Do not modify:
+
+existing learner records
+existing parent-to-learner relationships
+admissions token architecture
+Student Portal retirement
+Gmail OAuth transport
+
+Return:
+
+Existing parent-account audit
+Proposed/implemented activation lifecycle
+Invitation flow
+Persistent-session architecture
+Cookie/token security behavior
+Password-reset flow
+Admin Parent Management changes
+Database changes/migration if required
+Files changed
+Tests passed
+Independent review findings
+Exact migration required, if any
+Any blocker before Phase 3 Parent Notifications
+
+Do not deploy or run migrations automatically.

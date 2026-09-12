@@ -1,9 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, BookOpen, ShieldCheck } from 'lucide-react';
 
 const ParentForgotPassword = () => {
   const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault(); setLoading(true);
+    try {
+      await fetch('/api/auth/forgot-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+    } catch (_) { /* Deliberately do not disclose account existence. */ }
+    setSubmitted(true); setLoading(false);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-red-700 flex flex-col">
@@ -32,16 +42,7 @@ const ParentForgotPassword = () => {
               <ShieldCheck className="h-8 w-8 text-blue-700" />
             </div>
             <h2 className="text-xl font-bold text-gray-800 mb-3">Password assistance</h2>
-            <p className="text-gray-600 text-sm leading-6 mb-6">
-              For your security, password recovery is handled by Harmony Learning Institute administration.
-              Please contact the school office for assistance with your Parent Portal password.
-            </p>
-            <button
-              onClick={() => navigate('/parent/login')}
-              className="w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all"
-            >
-              Return to Parent Login
-            </button>
+             {!submitted ? <form onSubmit={submit} className="text-left"><p className="text-gray-600 text-sm leading-6 mb-5">Enter your email address. If an account matches, we’ll send a secure reset link.</p><label className="block text-sm font-medium text-gray-700 mb-1">Email address</label><input required value={email} onChange={e => setEmail(e.target.value)} type="email" autoComplete="email" className="w-full px-4 py-3 border rounded-xl mb-4" /><button disabled={loading} className="w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-xl disabled:opacity-60">{loading ? 'Submitting…' : 'Send reset link'}</button></form> : <><p className="text-gray-600 text-sm leading-6 mb-6">If an account matches that information, a reset link will arrive shortly. For your security, we never reveal whether an account exists.</p><button onClick={() => navigate('/parent/login')} className="w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-xl">Return to Parent Login</button></>}
           </div>
         </div>
       </div>

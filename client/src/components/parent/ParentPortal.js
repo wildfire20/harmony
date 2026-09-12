@@ -22,35 +22,30 @@ const NAV = [
 
 // ─── Auth helper ─────────────────────────────────────────────────────────────
 export const useParentAuth = () => {
-  const token    = localStorage.getItem('parentToken');
-  const user     = JSON.parse(localStorage.getItem('parentUser')     || 'null');
-  const children = JSON.parse(localStorage.getItem('parentChildren') || '[]');
-  const child    = JSON.parse(localStorage.getItem('parentChild')    || 'null');
+  const storage = sessionStorage;
+  const token    = storage.getItem('parentToken');
+  const user     = JSON.parse(storage.getItem('parentUser')     || 'null');
+  const children = JSON.parse(storage.getItem('parentChildren') || '[]');
+  const child    = JSON.parse(storage.getItem('parentChild')    || 'null');
   return { token, user, children, child, isAuthenticated: !!token };
 };
 
 // ─── API helper (auto-injects auth + child_id) ────────────────────────────────
 export const parentApi = async (path, opts = {}) => {
-  const token = localStorage.getItem('parentToken');
-  const selected = JSON.parse(localStorage.getItem('parentChild') || 'null');
+  const storage = sessionStorage;
+  const token = storage.getItem('parentToken');
+  const selected = JSON.parse(storage.getItem('parentChild') || 'null');
   const requestPath = path.includes('child_id=') || !selected?.id
     ? path
     : `${path}${path.includes('?') ? '&' : '?'}child_id=${encodeURIComponent(selected.id)}`;
-  const res = await fetch(`/api/parent${requestPath}`, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...(opts.headers || {}),
-    },
+  const request = (authToken) => fetch(`/api/parent${requestPath}`, {
+    ...opts, credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...(opts.headers || {}) },
   });
+  let res = await request(token);
   if (res.status === 401) {
-    localStorage.removeItem('parentToken');
-    localStorage.removeItem('parentUser');
-    localStorage.removeItem('parentChildren');
-    localStorage.removeItem('parentChild');
-    window.location.href = '/parent/login';
-    return null;
+    try { res = await request(await refreshParentAccess()); }
+    catch (_) { sessionStorage.clear(); window.location.href = '/parent/login'; return null; }
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -62,6 +57,39 @@ export const parentApi = async (path, opts = {}) => {
 // ─── Child context ────────────────────────────────────────────────────────────
 export const ChildContext = createContext({ child: null, children: [] });
 export const useSelectedChild = () => useContext(ChildContext);
+
+let parentRefreshPromise = null;
+export const refreshParentAccess = () => {
+  if (!parentRefreshPromise) parentRefreshPromise = fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' })
+    .then(async r => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.token) throw new Error(d.message || 'Session expired');
+      sessionStorage.setItem('parentToken', d.token);
+
+      // Hydrate the identity and authorized learner list while the refresh
+      // response is still current. Never trust a stale selected child.
+      const me = await fetch('/api/parent/me', {
+        credentials: 'include',
+        headers: { Authorization: `Bearer ${d.token}` },
+      });
+      const profile = await me.json().catch(() => ({}));
+      if (!me.ok) throw new Error(profile.message || 'Unable to load parent profile');
+      const children = profile.children || [];
+      const previous = JSON.parse(sessionStorage.getItem('parentChild') || 'null');
+      const selected = children.find(child => child.id === previous?.id) || children[0] || null;
+      if (profile.parent) sessionStorage.setItem('parentUser', JSON.stringify(profile.parent));
+      sessionStorage.setItem('parentChildren', JSON.stringify(children));
+      if (selected) sessionStorage.setItem('parentChild', JSON.stringify(selected));
+      else sessionStorage.removeItem('parentChild');
+      return d.token;
+    })
+    .catch((error) => {
+      ['parentToken', 'parentUser', 'parentChildren', 'parentChild'].forEach(key => sessionStorage.removeItem(key));
+      throw error;
+    })
+    .finally(() => { parentRefreshPromise = null; });
+  return parentRefreshPromise;
+};
 
 // ─── Child Switcher ───────────────────────────────────────────────────────────
 const ChildSwitcher = ({ children, selectedChild, onSelect }) => {
@@ -153,7 +181,7 @@ const usePushNotifications = () => {
         applicationServerKey: urlBase64ToUint8Array(publicKey),
       });
 
-      const token = localStorage.getItem('parentToken');
+      const token = (sessionStorage.getItem('parentToken') || localStorage.getItem('parentToken'));
       await fetch('/api/parent/push/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -189,8 +217,9 @@ const ParentPortal = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, children, isAuthenticated } = useParentAuth();
+  const [bootstrapping, setBootstrapping] = useState(!isAuthenticated);
   const [selectedChild, setSelectedChild] = useState(
-    JSON.parse(localStorage.getItem('parentChild') || 'null')
+    JSON.parse(sessionStorage.getItem('parentChild') || localStorage.getItem('parentChild') || 'null')
   );
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileChildOpen, setMobileChildOpen] = useState(false);
@@ -200,23 +229,30 @@ const ParentPortal = () => {
   const { permission, subscribed, subscribe } = usePushNotifications();
 
   useEffect(() => {
-    if (!isAuthenticated) navigate('/parent/login');
+    if (!isAuthenticated) {
+      refreshParentAccess().catch(() => {}).finally(() => {
+        setBootstrapping(false);
+        if (sessionStorage.getItem('parentToken')) window.location.reload();
+        else navigate('/parent/login', { replace: true });
+      });
+    } else setBootstrapping(false);
   }, [isAuthenticated, navigate]);
 
   // Refresh children data from the server so enrollment flag changes are reflected immediately
   useEffect(() => {
     if (!isAuthenticated) return;
-    const token = localStorage.getItem('parentToken');
+    const storage = sessionStorage.getItem('parentToken') ? sessionStorage : localStorage;
+    const token = storage.getItem('parentToken');
     fetch('/api/parent/me', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return;
         const freshChildren = data.children || [];
-        localStorage.setItem('parentChildren', JSON.stringify(freshChildren));
+        storage.setItem('parentChildren', JSON.stringify(freshChildren));
         // Update selectedChild with fresh data that includes up-to-date enrollment flags
         setSelectedChild(prev => {
           if (freshChildren.length === 0) {
-            localStorage.removeItem('parentChild');
+            storage.removeItem('parentChild');
             return null;
           }
           const refreshed = freshChildren.find(c => c.id === (prev?.id || freshChildren[0]?.id));
@@ -224,26 +260,26 @@ const ParentPortal = () => {
           // unlink occurred, fall back to the first learner returned by the
           // server rather than restoring stale local state.
           const updated = refreshed || freshChildren[0];
-          localStorage.setItem('parentChild', JSON.stringify(updated));
+          storage.setItem('parentChild', JSON.stringify(updated));
           return updated;
         });
       })
       .catch(() => {});
   }, [isAuthenticated]);
 
-  if (!isAuthenticated) return null;
+  if (bootstrapping || !isAuthenticated) return null;
 
   const handleSelectChild = (child) => {
     setSelectedChild(child);
-    localStorage.setItem('parentChild', JSON.stringify(child));
+    (sessionStorage.getItem('parentToken') ? sessionStorage : localStorage).setItem('parentChild', JSON.stringify(child));
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('parentToken');
-    localStorage.removeItem('parentUser');
-    localStorage.removeItem('parentChildren');
-    localStorage.removeItem('parentChild');
-    navigate('/parent/login');
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {}).finally(() => {
+      sessionStorage.clear();
+      localStorage.removeItem('parentUser'); localStorage.removeItem('parentChildren'); localStorage.removeItem('parentChild');
+      navigate('/parent/login', { replace: true });
+    });
   };
 
   const isActive = (path) => location.pathname === path;

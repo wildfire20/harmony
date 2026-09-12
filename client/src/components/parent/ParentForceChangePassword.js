@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Lock, BookOpen, CheckCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import ParentPasswordRequirements, { passwordIsValid } from './ParentPasswordRequirements';
 
 const ParentForceChangePassword = () => {
   const navigate = useNavigate();
@@ -11,22 +12,23 @@ const ParentForceChangePassword = () => {
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
 
-  const user = JSON.parse(localStorage.getItem('parentUser') || 'null');
+  const storage = sessionStorage.getItem('parentToken') ? sessionStorage : localStorage;
+  const user = JSON.parse(storage.getItem('parentUser') || 'null');
 
   useEffect(() => {
-    if (!localStorage.getItem('parentToken')) {
+    if (!sessionStorage.getItem('parentToken') && !localStorage.getItem('parentToken')) {
       navigate('/parent/login');
     }
   }, [navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (newPassword.length < 6) return toast.error('Password must be at least 6 characters');
+    if (!passwordIsValid(newPassword)) return toast.error('Password must be at least 8 characters');
     if (newPassword !== confirmPassword) return toast.error('Passwords do not match');
 
     setLoading(true);
     try {
-      const token = localStorage.getItem('parentToken');
+      const token = storage.getItem('parentToken');
       const res = await fetch('/api/parent/change-password', {
         method: 'POST',
         headers: {
@@ -85,16 +87,17 @@ const ParentForceChangePassword = () => {
                       type={showPass ? 'text' : 'password'}
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="At least 6 characters"
+                       placeholder="At least 8 characters"
                       className="w-full px-4 py-3 pr-12 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm"
                       required
-                      minLength={6}
+                       minLength={8}
                       autoFocus
                     />
                     <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">
                       {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
+                  <ParentPasswordRequirements password={newPassword} />
                 </div>
 
                 <div>
@@ -115,7 +118,7 @@ const ParentForceChangePassword = () => {
                 <div className="bg-blue-50 rounded-xl p-3">
                   <p className="text-blue-700 text-xs font-medium mb-1">Password tips:</p>
                   <ul className="text-blue-600 text-xs space-y-0.5">
-                    <li>• At least 6 characters long</li>
+                     <li>• At least 8 characters; longer passphrases are safer</li>
                     <li>• Mix letters and numbers for stronger security</li>
                     <li>• Don't share it with anyone</li>
                   </ul>
@@ -123,7 +126,7 @@ const ParentForceChangePassword = () => {
 
                 <button
                   type="submit"
-                  disabled={loading || newPassword !== confirmPassword || newPassword.length < 6}
+                  disabled={loading || newPassword !== confirmPassword || !passwordIsValid(newPassword)}
                   className="w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all disabled:opacity-60"
                 >
                   {loading ? 'Saving…' : 'Set My Password'}

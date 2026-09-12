@@ -8,6 +8,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { generateKidFriendlyPassword } = require('../utils/passwordGenerator');
 const BANKING_DETAILS = require('../config/bankingDetails');
 const { logAudit, getIp } = require('../utils/auditLogger');
+const { issueAuthToken, sendParentAuthEmail, hashToken, revokeUserSessions, withTransaction, authenticateSession } = require('../services/parentAuth');
 
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin  = [authenticate, authorize('admin', 'super_admin')];
@@ -17,6 +18,11 @@ const requireAdmin  = [authenticate, authorize('admin', 'super_admin')];
 function normalizePhone(raw) {
   if (!raw) return '';
   return raw.replace(/[\s\-().+]/g, '').replace(/^0/, '27');
+}
+
+function parentPortalUrl(pathname, token) {
+  const base = String(process.env.FRONTEND_URL || '').replace(/\/+$/, '');
+  return `${base}${pathname}?token=${encodeURIComponent(token)}`;
 }
 
 function generateTempPassword() {
@@ -396,15 +402,16 @@ router.get('/documents/:id/download', requireParent, async (req, res) => {
 // Used for forced first-time password change
 router.post('/change-password', requireParent, async (req, res) => {
   const { new_password } = req.body;
-  if (!new_password || new_password.length < 6) {
-    return res.status(400).json({ message: 'Password must be at least 6 characters' });
+  if (!new_password || new_password.length < 8) {
+    return res.status(400).json({ message: 'Password must be at least 8 characters' });
   }
   try {
     const hashed = await bcrypt.hash(new_password, 12);
     await db.query(
-      `UPDATE users SET password=$1, must_change_password=false, updated_at=NOW() WHERE id=$2`,
+      `UPDATE users SET password=$1, must_change_password=false, password_changed_at=NOW(), auth_revoked_at=NOW(), updated_at=NOW() WHERE id=$2`,
       [hashed, req.user.id]
     );
+    await revokeUserSessions(req.user.id);
     res.json({ success: true, message: 'Password updated successfully' });
   } catch (err) {
     console.error('Change password error:', err);
@@ -421,8 +428,12 @@ router.get('/admin/list', requireAdmin, async (req, res) => {
   try {
     // Get all parents with all their linked children
     const parentsRes = await db.query(`
-      SELECT u.id, u.first_name, u.last_name, u.phone_number, u.email, u.is_active,
-             u.must_change_password, u.created_at
+       SELECT u.id, u.first_name, u.last_name, u.phone_number, u.email, u.is_active,
+              u.must_change_password, u.created_at, u.invitation_sent_at, u.last_login_at,
+              CASE WHEN u.is_active=false THEN 'DISABLED'
+                WHEN u.activated_at IS NOT NULL THEN 'ACTIVATED'
+                WHEN u.invitation_sent_at IS NOT NULL THEN 'INVITE_SENT'
+                ELSE 'NOT_INVITED' END AS status
       FROM users u
       WHERE u.role = 'parent'
       ORDER BY u.last_name, u.first_name
@@ -502,23 +513,27 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
       }
     // Check if parent with this phone already exists
     const existing = await client.query(
-      `SELECT id FROM users WHERE phone_number=$1 AND role='parent'`, [normalizedPhone]
+      `SELECT id FROM users WHERE phone_number=$1 AND role='parent' FOR UPDATE`, [normalizedPhone]
     );
 
     let parentId;
     let tempPassword = null;
+    let activationLink = null;
+    let activationToken = null;
 
     if (existing.rows.length > 0) {
       // Parent exists – just add the new student links
       parentId = existing.rows[0].id;
     } else {
       // Create new parent
-      tempPassword = generateTempPassword();
-      const hashed = await bcrypt.hash(tempPassword, 12);
+      // New accounts are activated through a one-time link; no password is
+      // generated or disclosed to staff.
+      tempPassword = null;
+      const hashed = await bcrypt.hash(crypto.randomBytes(32).toString('base64url'), 12);
 
       const userResult = await client.query(`
-        INSERT INTO users (first_name, last_name, phone_number, email, password, role, is_active, must_change_password)
-        VALUES ($1, $2, $3, $4, $5, 'parent', true, true)
+       INSERT INTO users (first_name, last_name, phone_number, email, password, role, is_active, must_change_password)
+       VALUES ($1, $2, $3, $4, $5, 'parent', true, true)
         RETURNING id, first_name, last_name, phone_number, role, created_at
       `, [first_name, last_name, normalizedPhone, email || null, hashed]);
 
@@ -539,17 +554,32 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
       } catch { throw Object.assign(new Error(`Unable to link student ${sid}`), { status: 400 }); }
     }
 
+    if (!existing.rows.length) {
+      // Keep account creation, links, token revocation/issuance and invitation
+      // timestamp in this same transaction. The raw token is retained only
+      // in memory and is returned/emailed after COMMIT.
+      activationToken = await issueAuthToken(parentId, 'activation', req.user.id, client);
+    }
+
     await logAudit({ executor: client, required: true, userId: req.user.id,
       userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
       userRole: req.user.role, action: 'parent_create_or_link', entityType: 'parent',
       entityId: parentId, details: { studentIds: students }, ipAddress: getIp(req) });
     await client.query('COMMIT');
     client.release();
+    if (!existing.rows.length) {
+      activationLink = parentPortalUrl('/parent/activate', activationToken);
+      if (email) {
+        try { await sendParentAuthEmail(email, activationToken, 'activation', first_name); }
+        catch (emailError) { console.error('Parent activation email failed after commit:', emailError.message); }
+      }
+    }
     res.status(201).json({
       success: true,
       message: existing.rows.length > 0 ? 'Students added to existing parent account' : 'Parent account created',
       parentId,
-      tempPassword,
+       tempPassword: null,
+       activationLink,
       linkedStudents: linked,
       failedStudents: failed,
       isExisting: existing.rows.length > 0,
@@ -672,16 +702,115 @@ router.delete('/admin/:parentId', requireAdmin, async (req, res) => {
 // POST /api/parent/admin/reset-password/:parentId  – admin resets a parent's password
 router.post('/admin/reset-password/:parentId', requireAdmin, async (req, res) => {
   try {
-    const tempPassword = generateTempPassword();
-    const hashed = await bcrypt.hash(tempPassword, 12);
-    await db.query(
-      `UPDATE users SET password=$1, must_change_password=true, updated_at=NOW() WHERE id=$2 AND role='parent'`,
-      [hashed, req.params.parentId]
-    );
-    res.json({ success: true, tempPassword });
+    const parent = await db.query(`SELECT id,email,first_name FROM users WHERE id=$1 AND role='parent'`, [req.params.parentId]);
+    if (!parent.rows.length) return res.status(404).json({ message: 'Parent account not found' });
+    const token = await issueAuthToken(req.params.parentId, 'reset', req.user.id);
+    await revokeUserSessions(req.params.parentId);
+    const emailed = parent.rows[0].email
+      ? await sendParentAuthEmail(parent.rows[0].email, token, 'reset', parent.rows[0].first_name)
+      : { success: false, skipped: true };
+    res.json({ success: true, emailed: Boolean(emailed.success), resetLink: parentPortalUrl('/parent/reset-password', token) });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
+});
+
+// Token-based activation and recovery never expose a database identifier.
+router.get('/activation/validate', async (req, res) => {
+  try {
+    const token = String(req.query.token || '');
+    const found = await db.query(`SELECT u.first_name,u.last_name,u.phone_number FROM parent_auth_tokens t
+      JOIN users u ON u.id=t.user_id WHERE t.token_hash=$1 AND t.token_type='activation'
+      AND t.used_at IS NULL AND t.revoked_at IS NULL AND t.expires_at>NOW() AND u.role='parent'`, [hashToken(token)]);
+    if (!found.rows.length) return res.status(400).json({ valid: false, message: 'Invalid or expired activation link' });
+    const user = found.rows[0];
+    const phone = String(user.phone_number || '');
+    res.json({ valid: true, identity: { name: `${user.first_name || ''} ${(user.last_name || '').slice(0, 1)}.`, phone: phone.length > 3 ? `${'*'.repeat(Math.max(0, phone.length - 3))}${phone.slice(-3)}` : '***' } });
+  } catch (err) {
+    if (err.code === '42P01') return res.status(503).json({ valid: false, message: 'Parent authentication is not yet available.' });
+    res.status(500).json({ valid: false, message: 'Server error' });
+  }
+});
+
+router.post('/activate', async (req, res) => {
+  try {
+    const token = String(req.body?.token || '');
+    const found = await db.query(`SELECT t.id,t.user_id FROM parent_auth_tokens t JOIN users u ON u.id=t.user_id
+      WHERE t.token_hash=$1 AND t.token_type='activation' AND t.used_at IS NULL AND t.revoked_at IS NULL
+      AND t.expires_at>NOW() AND u.role='parent'`, [hashToken(token)]);
+    if (!found.rows.length) return res.status(400).json({ message: 'Invalid or expired activation link' });
+    if (!req.body.password || String(req.body.password).length < 8) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters' });
+    }
+    const hashed = await bcrypt.hash(req.body.password, 12);
+    let activatedUser;
+    await withTransaction(async (client) => {
+      const consumed = await client.query(`UPDATE parent_auth_tokens SET used_at=NOW()
+        WHERE id=$1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at>NOW() RETURNING user_id`, [found.rows[0].id]);
+      if (!consumed.rows.length) throw Object.assign(new Error('used'), { status: 400 });
+      await client.query(`UPDATE users SET password=$1,must_change_password=false,activated_at=NOW(),password_changed_at=NOW(),updated_at=NOW() WHERE id=$2`,
+        [hashed, found.rows[0].user_id]);
+      const user = await client.query(`SELECT id,email,role,student_number,first_name,last_name,phone_number,must_change_password
+        FROM users WHERE id=$1 AND role='parent' AND is_active=true FOR UPDATE`, [found.rows[0].user_id]);
+      if (!user.rows.length) throw Object.assign(new Error('inactive'), { status: 400 });
+      activatedUser = user.rows[0];
+    });
+    const session = await authenticateSession(req, res, activatedUser, true);
+    const children = await getChildren(activatedUser.id);
+    const { password: _, ...safeUser } = activatedUser;
+    res.json({ success: true, message: 'Parent account activated', token: session.token,
+      user: safeUser, children, child: children[0] || null, must_change_password: false });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ message: 'Invalid or expired activation link' });
+    if (err.code === '42P01' || err.code === '42703') return res.status(503).json({ message: 'Parent authentication is not yet available.' });
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.get('/admin/:parentId/status', requireAdmin, async (req, res) => {
+  const result = await db.query(`SELECT id,activated_at,invitation_sent_at,last_login_at,
+    password_changed_at,email,is_active, CASE WHEN is_active=false THEN 'DISABLED'
+      WHEN activated_at IS NOT NULL THEN 'ACTIVATED'
+      WHEN invitation_sent_at IS NOT NULL THEN 'INVITE_SENT' ELSE 'NOT_INVITED' END AS status
+    FROM users WHERE id=$1 AND role='parent'`, [req.params.parentId]);
+  if (!result.rows.length) return res.status(404).json({ message: 'Parent account not found' });
+  res.json({ parent: result.rows[0] });
+});
+
+async function adminInvite(req, res) {
+  try {
+    const parent = await db.query(`SELECT id,email,first_name FROM users WHERE id=$1 AND role='parent'`, [req.params.parentId]);
+    if (!parent.rows.length) return res.status(404).json({ message: 'Parent account not found' });
+    const token = await issueAuthToken(req.params.parentId, 'activation', req.user.id);
+    const link = parentPortalUrl('/parent/activate', token);
+    const emailed = req.path.endsWith('/copy-link') ? { success: false, skipped: true }
+      : (parent.rows[0].email ? await sendParentAuthEmail(parent.rows[0].email, token, 'activation', parent.rows[0].first_name) : { success: false });
+    res.json({ success: true, emailed: Boolean(emailed.success), activationLink: link });
+  } catch (err) { res.status(500).json({ message: 'Server error' }); }
+}
+router.post('/admin/:parentId/invite', requireAdmin, adminInvite);
+router.post('/admin/:parentId/reissue', requireAdmin, adminInvite);
+router.post('/admin/:parentId/copy-link', requireAdmin, async (req, res) => {
+  req.params.parentId = req.params.parentId;
+  return adminInvite(req, res);
+});
+router.post('/admin/:parentId/disable', requireAdmin, async (req, res) => {
+    await db.query(`UPDATE users SET is_active=false WHERE id=$1 AND role='parent'`, [req.params.parentId]);
+  await revokeUserSessions(req.params.parentId); res.json({ success: true });
+});
+router.post('/admin/:parentId/enable', requireAdmin, async (req, res) => {
+  await db.query(`UPDATE users SET is_active=true WHERE id=$1 AND role='parent'`, [req.params.parentId]);
+  res.json({ success: true });
+});
+
+// Account audit is intentionally aggregate and omits token values, URLs and secrets.
+router.get('/admin/:parentId/audit', requireAdmin, async (req, res) => {
+  try {
+    const result = await db.query(`SELECT action,entity_type,created_at,ip_address,
+      details FROM audit_logs WHERE entity_type='parent' AND entity_id=$1
+      ORDER BY created_at DESC LIMIT 100`, [req.params.parentId]);
+    res.json({ audit: result.rows });
+  } catch (err) { res.status(500).json({ message: 'Server error' }); }
 });
 
 router.get('/welcome-password', (req, res) => {
