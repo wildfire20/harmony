@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import { Eye, EyeOff, ArrowLeft, Phone } from 'lucide-react';
+import { Eye, EyeOff, ArrowLeft, Phone, Check } from 'lucide-react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 import { getReturnDestination } from './parentNavigation';
+import { refreshParentAccess } from './ParentPortal';
 import './ParentPortal.css';
 
 const ParentLogin = () => {
@@ -13,6 +14,19 @@ const ParentLogin = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [remember, setRemember] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    refreshParentAccess()
+      .then(() => {
+        if (active) navigate(getReturnDestination(location.search), { replace: true });
+      })
+      .catch(() => {
+        if (active) setCheckingSession(false);
+      });
+    return () => { active = false; };
+  }, [location.search, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -31,6 +45,9 @@ const ParentLogin = () => {
       storage.setItem('parentUser', JSON.stringify(user));
       storage.setItem('parentChildren', JSON.stringify(children || []));
       storage.setItem('parentChild', JSON.stringify(child || children?.[0] || null));
+      if (child?.id || children?.[0]?.id) {
+        localStorage.setItem('parentSelectedChildId', String(child?.id || children[0].id));
+      }
 
       if (must_change_password) {
         toast('Please set a new password to continue.');
@@ -45,6 +62,19 @@ const ParentLogin = () => {
       setLoading(false);
     }
   };
+
+  if (checkingSession) {
+    return (
+      <div className="parent-login min-h-[100dvh] flex items-center justify-center p-4 text-white">
+        <div className="text-center" role="status" aria-live="polite">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white p-2 shadow-lg">
+            <img src="/images/harmony-logo.png" alt="" className="max-h-full max-w-full object-contain" />
+          </div>
+          <p className="font-semibold">Checking your Parent Portal session…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="parent-login min-h-[100dvh] flex flex-col">
@@ -96,7 +126,7 @@ const ParentLogin = () => {
                   <label className="block text-sm font-medium text-gray-700">Password</label>
                   <Link
                     to="/parent/forgot-password"
-                    className="text-xs text-blue-600 hover:underline font-medium"
+                    className="text-xs text-[#176b73] hover:underline font-medium"
                   >
                     Forgot password?
                   </Link>
@@ -120,7 +150,13 @@ const ParentLogin = () => {
                   </button>
                 </div>
               </div>
-               <label className="flex min-h-[44px] cursor-pointer items-center gap-3 text-sm text-[#526879]"><input type="checkbox" aria-label="Keep me signed in on this device" checked={remember} onChange={e => setRemember(e.target.checked)} className="parent-remember" /> Keep me signed in on this device</label>
+               <label className="parent-remember-label flex min-h-[44px] cursor-pointer items-center gap-3 text-sm text-[#526879]">
+                 <input type="checkbox" aria-label="Keep me signed in on this device" checked={remember} onChange={e => setRemember(e.target.checked)} className="parent-remember" />
+                 <span className={`parent-remember-control ${remember ? 'is-checked' : ''}`} aria-hidden="true">
+                   {remember && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                 </span>
+                 <span>Keep me signed in on this device</span>
+               </label>
 
               <button
                 type="submit"

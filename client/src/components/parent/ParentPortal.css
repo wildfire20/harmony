@@ -32,6 +32,40 @@
 .parent-portal .parent-child-list { background: #f6f8f6; border-color: var(--parent-line); }
 .parent-portal .parent-avatar { background: #dceef0; color: var(--parent-teal); }
 .parent-portal .parent-signout { border-color: var(--parent-line); color: var(--parent-coral); }
+.parent-portal .parent-header-action,
+.parent-portal .parent-header-signout {
+  background: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+.parent-portal button.parent-header-action:hover,
+.parent-portal button.parent-header-action:focus,
+.parent-portal button.parent-header-action:active,
+.parent-portal button.parent-header-signout:hover,
+.parent-portal button.parent-header-signout:focus,
+.parent-portal button.parent-header-signout:active {
+  background: rgba(255,255,255,.1) !important;
+  background-image: none !important;
+  border-color: rgba(255,255,255,.14) !important;
+  color: #fff !important;
+}
+.parent-portal .parent-account-signout {
+  background: var(--parent-navy) !important;
+  background-image: none !important;
+  border-color: var(--parent-navy) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+.parent-portal button.parent-account-signout:hover,
+.parent-portal button.parent-account-signout:focus,
+.parent-portal button.parent-account-signout:active {
+  background: var(--parent-navy-deep) !important;
+  background-image: none !important;
+  border-color: var(--parent-navy-deep) !important;
+  color: #fff !important;
+}
 .parent-portal .parent-notification-banner { background: #fff8ed; color: #8a5b22; border-bottom: 1px solid #f0dfc2; }
 .parent-portal .parent-stat { box-shadow: 0 8px 18px rgba(31, 65, 83, .08); }
 .parent-portal .parent-select:focus { border-color: var(--parent-teal); box-shadow: 0 0 0 3px rgba(44,116,117,.14); }
@@ -49,27 +83,37 @@
 }
 
 .parent-remember {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 1.25rem !important;
-  height: 1.25rem !important;
-  min-height: 1.25rem !important;
-  min-width: 1.25rem !important;
-  flex: 0 0 1.25rem;
-  padding: 0 !important;
-  border: 1.5px solid #8ea1ad;
-  border-radius: .35rem;
-  background: #fff !important;
-  cursor: pointer;
+  position: absolute;
+  width: 1px !important;
+  height: 1px !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
-.parent-remember:checked {
+.parent-remember-control {
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: 0 0 1.25rem;
+  border: 1.5px solid #8ea1ad;
+  border-radius: .35rem;
+  background: #fff;
+  color: #fff;
+  transition: background-color .12s ease, border-color .12s ease;
+}
+
+.parent-remember-control.is-checked {
   border-color: var(--parent-teal);
-  background-color: var(--parent-teal) !important;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='m4 10 4 4 8-8'/%3E%3C/svg%3E");
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: .85rem;
+  background: var(--parent-teal);
+}
+
+.parent-remember:focus-visible + .parent-remember-control {
+  outline: 3px solid rgba(201, 104, 88, .38);
+  outline-offset: 2px;
 }
 
 @media (max-width: 639px) {
@@ -96,6 +140,54 @@
     background-image: none !important;
     border-radius: 0 !important;
   }
+  .parent-portal .parent-header-action {
+    min-width: 44px !important;
+    padding: .375rem !important;
+    background: transparent !important;
+    background-image: none !important;
+    border: 1px solid rgba(255,255,255,.14) !important;
+    color: #fff !important;
+    box-shadow: none !important;
+  }
+  .parent-portal .parent-child-switcher,
+  .parent-portal .parent-child-list,
+  .parent-portal .parent-child-row {
+    background: #f6f8f6 !important;
+    background-image: none !important;
+    color: var(--parent-ink) !important;
+    box-shadow: none !important;
+  }
+  .parent-portal .parent-child-row:hover,
+  .parent-portal .parent-child-row-active {
+    background: #e8f1ef !important;
+    color: var(--parent-teal) !important;
+  }
+  [data-theme="dark"] .parent-portal button.parent-child-switcher:hover,
+  [data-theme="dark"] .parent-portal button.parent-child-switcher:focus,
+  [data-theme="dark"] .parent-portal button.parent-child-switcher:active,
+  [data-theme="dark"] .parent-portal button.parent-child-row:hover,
+  [data-theme="dark"] .parent-portal button.parent-child-row:focus,
+  [data-theme="dark"] .parent-portal button.parent-child-row:active {
+    background: #e8f1ef !important;
+    background-image: none !important;
+    border-color: var(--parent-line) !important;
+    color: var(--parent-teal) !important;
+  }
+  .parent-portal .parent-signout {
+    background: var(--parent-surface) !important;
+    background-image: none !important;
+    color: var(--parent-coral) !important;
+    border-color: var(--parent-line) !important;
+    box-shadow: none !important;
+  }
+  .parent-portal button.parent-signout:hover,
+  .parent-portal button.parent-signout:focus,
+  .parent-portal button.parent-signout:active {
+    background: #fff7f5 !important;
+    background-image: none !important;
+    border-color: var(--parent-line) !important;
+    color: var(--parent-coral) !important;
+  }
   .parent-portal .parent-menu-item {
     background: var(--parent-surface) !important;
     color: var(--parent-muted) !important;
@@ -103,6 +195,20 @@
   .parent-portal .parent-menu-active {
     background: #e8f1ef !important;
     color: var(--parent-teal) !important;
+  }
+  [data-theme="dark"] .parent-portal button.parent-menu-item:hover,
+  [data-theme="dark"] .parent-portal button.parent-menu-item:focus,
+  [data-theme="dark"] .parent-portal button.parent-menu-item:active {
+    background: #e8f1ef !important;
+    background-image: none !important;
+    color: var(--parent-ink) !important;
+  }
+  [data-theme="dark"] .parent-portal button.parent-menu-active:hover,
+  [data-theme="dark"] .parent-portal button.parent-menu-active:focus,
+  [data-theme="dark"] .parent-portal button.parent-menu-active:active {
+    background: var(--parent-teal) !important;
+    background-image: none !important;
+    color: #fff !important;
   }
   .parent-portal .parent-mobile-menu button {
     min-height: 46px;
@@ -119,6 +225,19 @@
     background-image: none !important;
     border: 0 !important;
     border-radius: 0 !important;
+  }
+  [data-theme="dark"] .parent-portal button.parent-mobile-bottom-item:hover,
+  [data-theme="dark"] .parent-portal button.parent-mobile-bottom-item:focus,
+  [data-theme="dark"] .parent-portal button.parent-mobile-bottom-item:active {
+    background: #edf3f1 !important;
+    background-image: none !important;
+    color: var(--parent-teal) !important;
+  }
+  [data-theme="dark"] .parent-portal button.parent-mobile-bottom-item.parent-bottom-active:hover,
+  [data-theme="dark"] .parent-portal button.parent-mobile-bottom-item.parent-bottom-active:focus,
+  [data-theme="dark"] .parent-portal button.parent-mobile-bottom-item.parent-bottom-active:active {
+    background: #e8f1ef !important;
+    color: var(--parent-teal) !important;
   }
   .parent-portal .parent-mobile-bottom-nav button {
     min-width: 0;

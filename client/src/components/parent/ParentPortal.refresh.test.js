@@ -5,14 +5,15 @@
 import { refreshParentAccess } from './ParentPortal';
 
 test('refresh bootstrap hydrates parent identity and authorized child', async () => {
-  sessionStorage.setItem('parentChild', JSON.stringify({ id: 2 }));
+  sessionStorage.removeItem('parentChild');
+  localStorage.setItem('parentSelectedChildId', '2');
   global.fetch = jest.fn()
     .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'short-lived' }) })
     .mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         parent: { id: 9, first_name: 'Parent' },
-        children: [{ id: 1, first_name: 'First' }],
+        children: [{ id: 1, first_name: 'First' }, { id: 2, first_name: 'Remembered' }],
       }),
     });
 
@@ -23,7 +24,8 @@ test('refresh bootstrap hydrates parent identity and authorized child', async ()
     headers: { Authorization: 'Bearer short-lived' },
   }));
   expect(JSON.parse(sessionStorage.getItem('parentUser')).id).toBe(9);
-  expect(JSON.parse(sessionStorage.getItem('parentChild')).id).toBe(1);
+  expect(JSON.parse(sessionStorage.getItem('parentChild')).id).toBe(2);
+  expect(localStorage.getItem('parentSelectedChildId')).toBe('2');
   expect(sessionStorage.getItem('parentToken')).toBe('short-lived');
   expect(localStorage.getItem('parentToken')).toBeNull();
   expect(sessionStorage.getItem('parentPhone')).toBeNull();

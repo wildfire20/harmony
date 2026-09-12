@@ -33,7 +33,7 @@ const ParentAnnouncements = ({ child }) => {
 
       {loading ? (
         <div className="flex justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#2c7475]" />
         </div>
       ) : announcements.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-gray-400 text-sm">
@@ -50,14 +50,14 @@ const ParentAnnouncements = ({ child }) => {
                 className="w-full text-left bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow p-4"
               >
                 <div className="flex items-start gap-3">
-                  <div className="p-2.5 bg-blue-50 rounded-xl shrink-0 mt-0.5">
-                    <Bell className="h-4 w-4 text-blue-600" />
+                  <div className="p-2.5 bg-[#e8f1ef] rounded-xl shrink-0 mt-0.5">
+                    <Bell className="h-4 w-4 text-[#2c7475]" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-gray-800 font-semibold text-sm leading-snug">{a.title}</p>
                       {a.grade_name && (
-                        <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full shrink-0 font-medium">
+                        <span className="text-xs bg-[#e8f1ef] text-[#2c7475] px-2 py-0.5 rounded-full shrink-0 font-medium">
                           {a.grade_name}
                         </span>
                       )}

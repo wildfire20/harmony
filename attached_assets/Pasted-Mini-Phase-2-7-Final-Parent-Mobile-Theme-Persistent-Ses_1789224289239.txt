@@ -1,0 +1,281 @@
+Mini Phase 2.7 — Final Parent Mobile Theme & Persistent Session Production Fix
+
+Mini Phase 2.6 was deployed and tested on the real production Parent Portal.
+
+Production testing proves that three issues remain:
+
+Bright blue/purple/indigo styling is still visible on mobile.
+“Keep me signed in” still does not survive fully closing and reopening the browser.
+The Remember Me checkbox does not visually update immediately when tapped.
+
+These are launch blockers.
+
+Do not work on Parent activation/OTP yet.
+Do not change finance logic.
+Do not change admissions.
+Do not change learner authorization.
+Do not run migrations.
+Do not deploy automatically.
+
+A. Remove the remaining purple/indigo mobile styling
+
+The latest production screenshot still shows obvious bright purple/indigo in:
+
+learner switcher header/panel
+learner options area
+full-width Sign Out row
+notification button
+menu/close button
+potentially remaining buttons/selected states elsewhere
+
+The user does not want this blue-purple treatment.
+
+The approved desktop Parent Portal is the source of truth.
+
+Mobile should use:
+
+Harmony dark navy for the main header
+white/light neutral surfaces
+light grey page backgrounds
+restrained teal for selected/active states
+Harmony coral/red for destructive/sign-out emphasis where appropriate
+semantic green/red/orange for statuses
+
+Do not replace purple with another saturated blue.
+
+Specifically inspect Parent Portal source/CSS for remaining:
+
+indigo Tailwind classes
+violet Tailwind classes
+saturated blue-* classes
+legacy purple/blue hex values
+inline styles
+gradients
+pseudo-elements
+global CSS overrides
+mobile-specific selectors
+
+Search the entire Parent frontend, not just ParentPortal.css.
+
+The learner switcher should preferably be a white/light panel, with learner rows using subtle neutral/teal selected styling.
+
+The Sign Out row should not be a large purple block. Use a clean light row with an appropriate sign-out/destructive accent.
+
+Header notification/menu controls should visually belong to the navy desktop design and not appear as floating purple app buttons.
+
+Verify all authenticated Parent mobile pages.
+
+B. Remember Me checkbox must react immediately
+
+Current production behavior:
+
+user taps “Keep me signed in on this device”
+checkbox appears unchanged
+only after pressing Sign In does it visually turn green
+
+This is incorrect.
+
+The checkbox must be driven by local React state immediately.
+
+Expected interaction:
+
+Tap checkbox
+→ checked state changes immediately
+→ visible tick/checkmark appears immediately
+→ selected state changes immediately
+→ pressing it again immediately clears it
+
+Do not wait for form submission or server response.
+
+Verify the input is properly controlled, for example through the appropriate checked state and onChange/accessible label handling.
+
+The entire checkbox + label area should be tappable.
+
+Preserve keyboard accessibility and focus state.
+
+C. Persistent login still fails in REAL production
+
+Previous work fixed:
+
+remember → rememberMe
+
+But real production testing after deployment still fails:
+
+parent checks Keep me signed in
+parent logs in successfully
+parent closes the browser completely
+browser is removed from recent apps
+parent later reopens Harmony Parent Portal
+login screen appears again
+
+Browser/password autofill does not count as authentication.
+
+Therefore do not assume the previous fix solved the issue.
+
+Trace the actual production session lifecycle end-to-end.
+
+Verify:
+
+Checkbox state really produces rememberMe: true.
+Network login request reaching the backend actually contains the correct boolean.
+Backend creates the remembered 30-day session family.
+Login response actually emits the refresh Set-Cookie.
+Browser accepts and stores that cookie.
+Cookie contains the intended production attributes:
+HttpOnly
+Secure
+SameSite=Lax
+correct Path
+actual persistent Max-Age/Expires
+Cookie remains present after browser closure.
+On a fresh page load, frontend startup authentication runs before deciding the user is logged out.
+Startup refresh request actually includes credentials/cookies.
+Refresh endpoint receives the cookie.
+Refresh endpoint validates the session family.
+Access token/auth state is restored.
+Parent Portal is rendered without showing the login form.
+Selected learner is restored after authentication.
+
+Do not rely only on unit tests.
+
+Find the first point in that chain that fails.
+
+D. Check cookie origin/path carefully
+
+Production behavior must be tested against the actual Harmony production origin.
+
+Inspect:
+
+frontend hostname
+API hostname
+www vs non-www
+HTTP redirects
+cookie host/domain
+cookie Path
+refresh endpoint URL
+fetch/axios credentials
+CORS credentials if frontend/API are cross-origin
+
+If the cookie uses:
+
+Path=/api/auth
+
+verify the refresh request actually goes through a URL under that path.
+
+Do not broaden cookie scope unless technically necessary.
+
+E. Startup hydration race
+
+Inspect whether Parent Portal does this:
+
+app loads
+→ no in-memory access token
+→ immediately renders Login
+→ refresh restoration happens too late or is skipped
+
+There should be an authentication hydration/loading state.
+
+Conceptually:
+
+APP START
+↓
+Checking existing refresh session…
+↓
+Success → restore Parent
+Failure → show Login
+
+Do not render the login form until startup refresh has been resolved.
+
+F. Safe production diagnostics
+
+If necessary, add temporary/safe diagnostics around:
+
+rememberMe boolean received
+remembered vs browser-session family created
+persistent-cookie issuance attempted
+refresh request received
+session family found/not found
+refresh accepted/rejected reason category
+
+Never log:
+
+passwords
+refresh tokens
+access tokens
+raw cookies
+OTPs
+session secrets
+
+Remove unnecessary diagnostics after determining the root cause.
+
+G. Preserve security
+
+The remembered session must remain a maximum fixed 30-day family.
+
+Do not create unlimited persistent sessions.
+
+Preserve:
+
+refresh rotation
+replay detection
+logout revocation
+logout-all
+password-change revocation
+password-reset revocation
+Admin disable/revoke
+
+A normal login without Remember Me must remain a browser-session cookie.
+
+H. Required regression tests
+
+Test both remembered and normal sessions.
+
+Required cases:
+
+checkbox immediately shows checked state
+checkbox immediately returns to unchecked
+rememberMe true reaches backend
+rememberMe false reaches backend
+normal login receives session cookie
+remembered login receives persistent cookie
+correct expiry attributes
+startup refresh restores parent
+selected learner restored
+logout revokes remembered session
+password change revokes it
+reset revokes it
+Admin disable revokes it
+replay detection still works
+
+Test mobile styling at:
+
+320px
+360px
+375px
+390px
+412px
+tablet
+desktop regression
+
+Confirm there are no remaining bright purple/indigo Parent surfaces.
+
+Return a detailed report
+
+I need:
+
+Exact reason the persistent session still failed in production after the previous rememberMe fix.
+The exact point in the cookie/session lifecycle that was failing.
+Cookie behavior before and after.
+Whether a startup hydration race existed.
+Whether hostname/path/credentials/CORS contributed.
+Exact cause of delayed checkbox visual feedback.
+All remaining purple/indigo sources found.
+Mobile theme changes made.
+Files changed.
+Backend/frontend test counts.
+Whether any production-only verification is still required.
+
+Do not simply state “fixed.” Explain the actual root causes.
+
+Do not deploy automatically.
+Do not run migrations.

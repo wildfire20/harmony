@@ -101,11 +101,18 @@ export const refreshParentAccess = () => {
       const children = profile.children || [];
       let previous = null;
       try { previous = JSON.parse(sessionStorage.getItem('parentChild') || 'null'); } catch (_) {}
-      const selected = children.find(child => child.id === previous?.id) || children[0] || null;
+      const rememberedChildId = Number(localStorage.getItem('parentSelectedChildId')) || null;
+      const selected = children.find(child => child.id === previous?.id) ||
+        children.find(child => child.id === rememberedChildId) || children[0] || null;
       if (profile.parent) sessionStorage.setItem('parentUser', JSON.stringify(profile.parent));
       sessionStorage.setItem('parentChildren', JSON.stringify(children));
-      if (selected) sessionStorage.setItem('parentChild', JSON.stringify(selected));
-      else sessionStorage.removeItem('parentChild');
+      if (selected) {
+        sessionStorage.setItem('parentChild', JSON.stringify(selected));
+        localStorage.setItem('parentSelectedChildId', String(selected.id));
+      } else {
+        sessionStorage.removeItem('parentChild');
+        localStorage.removeItem('parentSelectedChildId');
+      }
       return d.token;
     })
     .catch((error) => {
@@ -125,11 +132,11 @@ const ChildSwitcher = ({ children, selectedChild, onSelect }) => {
   if (!children || children.length <= 1) {
     return selectedChild ? (
       <div className="hidden md:flex items-center gap-2 bg-white/10 rounded-full px-3 py-1.5">
-        <div className="w-6 h-6 rounded-full bg-blue-400 flex items-center justify-center text-xs font-bold">
+        <div className="w-6 h-6 rounded-full bg-[#8fc4c3] text-[#17324d] flex items-center justify-center text-xs font-bold">
           {selectedChild.first_name?.[0]}{selectedChild.last_name?.[0]}
         </div>
         <span className="text-sm text-white font-medium">{selectedChild.first_name} {selectedChild.last_name}</span>
-        <span className="text-blue-300 text-xs">• {selectedChild.grade_name}</span>
+        <span className="text-[#b9d5d4] text-xs">• {selectedChild.grade_name}</span>
       </div>
     ) : null;
   }
@@ -140,12 +147,12 @@ const ChildSwitcher = ({ children, selectedChild, onSelect }) => {
         onClick={() => setOpen(!open)}
         className="hidden md:flex items-center gap-2 bg-white/10 hover:bg-white/20 rounded-full px-3 py-1.5 transition-colors"
       >
-        <div className="w-6 h-6 rounded-full bg-blue-400 flex items-center justify-center text-xs font-bold">
+        <div className="w-6 h-6 rounded-full bg-[#8fc4c3] text-[#17324d] flex items-center justify-center text-xs font-bold">
           {selectedChild?.first_name?.[0]}{selectedChild?.last_name?.[0]}
         </div>
         <span className="text-sm text-white font-medium">{selectedChild?.first_name} {selectedChild?.last_name}</span>
-        <span className="text-blue-300 text-xs">• {selectedChild?.grade_name}</span>
-        <ChevronDown className="h-3.5 w-3.5 text-blue-300" />
+        <span className="text-[#b9d5d4] text-xs">• {selectedChild?.grade_name}</span>
+        <ChevronDown className="h-3.5 w-3.5 text-[#b9d5d4]" />
       </button>
 
       {open && (
@@ -159,11 +166,11 @@ const ChildSwitcher = ({ children, selectedChild, onSelect }) => {
               <button
                 key={child.id}
                 onClick={() => { onSelect(child); setOpen(false); }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 hover:bg-blue-50 transition-colors ${
-                  selectedChild?.id === child.id ? 'bg-blue-50' : ''
+                className={`w-full flex items-center gap-3 px-3 py-2.5 hover:bg-[#e8f1ef] transition-colors ${
+                  selectedChild?.id === child.id ? 'bg-[#e8f1ef]' : ''
                 }`}
               >
-                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-700 shrink-0">
+                <div className="w-8 h-8 rounded-full bg-[#dceef0] flex items-center justify-center text-xs font-bold text-[#2c7475] shrink-0">
                   {child.first_name?.[0]}{child.last_name?.[0]}
                 </div>
                 <div className="text-left">
@@ -171,7 +178,7 @@ const ChildSwitcher = ({ children, selectedChild, onSelect }) => {
                   <p className="text-gray-400 text-xs">{child.grade_name} • {child.student_number}</p>
                 </div>
                 {selectedChild?.id === child.id && (
-                  <div className="ml-auto w-2 h-2 rounded-full bg-blue-600" />
+                  <div className="ml-auto w-2 h-2 rounded-full bg-[#2c7475]" />
                 )}
               </button>
             ))}
@@ -347,12 +354,13 @@ const ParentPortal = () => {
   const handleSelectChild = (child) => {
     setSelectedChild(child);
     sessionStorage.setItem('parentChild', JSON.stringify(child));
+    localStorage.setItem('parentSelectedChildId', String(child.id));
   };
 
   const handleLogout = () => {
     fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {}).finally(() => {
       sessionStorage.clear();
-      ['parentToken', 'parentUser', 'parentChildren', 'parentChild'].forEach(key => localStorage.removeItem(key));
+      ['parentToken', 'parentUser', 'parentChildren', 'parentChild', 'parentSelectedChildId'].forEach(key => localStorage.removeItem(key));
       navigate('/parent/login', { replace: true });
     });
   };
@@ -381,19 +389,19 @@ const ParentPortal = () => {
               <button
                 onClick={() => navigate('/parent/notifications')}
                 aria-label="View notifications"
-                className="grid min-h-[44px] min-w-[44px] place-items-center rounded-xl text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+                className="parent-header-action grid min-h-[44px] min-w-[44px] place-items-center rounded-xl text-white/80 transition-colors hover:bg-white/10 hover:text-white"
               >
                 <span className="relative"><Bell className="h-5 w-5" />{unreadNotificationCount > 0 && <span aria-label={`${unreadNotificationCount} unread notifications`} className="absolute -right-2 -top-2 grid min-h-[17px] min-w-[17px] place-items-center rounded-full bg-[#e86e5b] px-1 text-[10px] font-bold text-white">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}</span>
               </button>
               <button
                 onClick={handleLogout}
-                className="hidden sm:flex items-center gap-1.5 text-white/70 hover:text-white text-sm transition-colors"
+                className="parent-header-signout hidden sm:flex items-center gap-1.5 text-white/70 hover:text-white text-sm transition-colors"
               >
                 <LogOut className="h-4 w-4" />
                 Sign out
               </button>
               <button
-                className="sm:hidden p-1.5 rounded-lg hover:bg-white/10"
+                className="parent-header-action sm:hidden p-1.5 rounded-lg hover:bg-white/10"
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               >
                 {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -409,7 +417,7 @@ const ParentPortal = () => {
                 <div className="border-b border-[#dce6ea]">
                   <button
                     onClick={() => setMobileChildOpen(!mobileChildOpen)}
-                    className="w-full flex items-center justify-between px-4 py-3"
+                    className="parent-child-switcher w-full flex items-center justify-between px-4 py-3"
                   >
                     <div className="flex items-center gap-3">
                        <div className="parent-avatar w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold">
@@ -434,7 +442,7 @@ const ParentPortal = () => {
                         <button
                           key={child.id}
                           onClick={() => { handleSelectChild(child); setMobileChildOpen(false); setMobileMenuOpen(false); }}
-                          className={`w-full flex items-center gap-3 px-5 py-2.5 ${selectedChild?.id === child.id ? 'bg-white/10' : 'hover:bg-white/5'}`}
+                           className={`parent-child-row w-full flex items-center gap-3 px-5 py-2.5 ${selectedChild?.id === child.id ? 'parent-child-row-active' : ''}`}
                         >
                            <div className="parent-avatar w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold">
                             {child.first_name?.[0]}{child.last_name?.[0]}

@@ -37,7 +37,7 @@ export default function ParentAccount({ user, children, selectedChild, onSelectC
         <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 text-[#176b73]" /><div><h2 className="font-bold text-[#19324a]">Security</h2><p className="mt-1 text-sm leading-6 text-[#617487]">Password and all-device sign-out options are available where your account supports them.</p></div></div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           <button onClick={() => navigate('/parent/change-password')} className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-[#b9d5d4] text-sm font-semibold text-[#176b73] transition-colors hover:bg-[#eef8f6]"><Lock className="h-4 w-4" /> Change password</button>
-          <button onClick={handleLogout} className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-[#19324a] text-sm font-semibold text-white transition-transform active:scale-[.98]"><LogOut className="h-4 w-4" /> Sign out</button>
+          <button onClick={handleLogout} className="parent-account-signout flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-[#19324a] text-sm font-semibold text-white transition-transform active:scale-[.98]"><LogOut className="h-4 w-4" /> Sign out</button>
         </div>
       </section>
       <div className="flex items-start gap-2 text-xs leading-5 text-[#84929e]"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> Harmony only shows information your parent account is authorised to see.</div>
