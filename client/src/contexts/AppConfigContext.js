@@ -13,6 +13,7 @@ export const useAppConfig = () => {
 
 export const AppConfigProvider = ({ children }) => {
   const [studentPortalEnabled, setStudentPortalEnabled] = useState(true);
+  const [parentSelfActivationEnabled, setParentSelfActivationEnabled] = useState(false);
   const [configLoading, setConfigLoading] = useState(true);
 
   useEffect(() => {
@@ -22,12 +23,14 @@ export const AppConfigProvider = ({ children }) => {
       .then((response) => {
         if (active) {
           setStudentPortalEnabled(response.data.studentPortalEnabled === true);
+          setParentSelfActivationEnabled(response.data.parentSelfActivationEnabled === true);
         }
       })
       .catch((error) => {
         console.error('Unable to load public application configuration:', error);
         if (active) {
           setStudentPortalEnabled(false);
+          setParentSelfActivationEnabled(false);
         }
       })
       .finally(() => {
@@ -42,7 +45,7 @@ export const AppConfigProvider = ({ children }) => {
   }, []);
 
   return (
-    <AppConfigContext.Provider value={{ studentPortalEnabled, configLoading }}>
+    <AppConfigContext.Provider value={{ studentPortalEnabled, parentSelfActivationEnabled, configLoading }}>
       {children}
     </AppConfigContext.Provider>
   );

@@ -54,7 +54,7 @@ const staffAttendanceRoutes = require('./routes/staffAttendance');
 const paymentProofsRoutes = require('./routes/paymentProofs');
 const studentFeesRoutes = require('./routes/studentFees');
 const servicePricesRoutes = require('./routes/servicePrices');
-const { isStudentPortalEnabled } = require('./config/features');
+const { isStudentPortalEnabled, isParentSelfActivationEnabled } = require('./config/features');
 
 // Import database
 const db = require('./config/database');
@@ -454,7 +454,10 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // API Routes
 app.get('/api/config/public', (req, res) => {
-  res.json({ studentPortalEnabled: isStudentPortalEnabled() });
+  res.json({
+    studentPortalEnabled: isStudentPortalEnabled(),
+    parentSelfActivationEnabled: isParentSelfActivationEnabled(),
+  });
 });
 
 app.use('/api/auth', authRoutes);

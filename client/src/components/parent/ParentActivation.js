@@ -3,6 +3,7 @@ import { ArrowLeft, CheckCircle, Eye, EyeOff, Mail, Phone } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ParentPasswordRequirements, { passwordIsValid } from './ParentPasswordRequirements';
 import './ParentPortal.css';
+import { useAppConfig } from '../../contexts/AppConfigContext';
 
 const REQUEST_PATH = '/api/parent/activation/request';
 const VERIFY_PATH = '/api/parent/activation/verify';
@@ -35,6 +36,7 @@ const saveParentSession = (data) => {
 
 const ParentActivation = () => {
   const navigate = useNavigate();
+  const { parentSelfActivationEnabled, configLoading } = useAppConfig();
   const [stage, setStage] = useState(1);
   const [form, setForm] = useState({ phone_number: '', email: '', email_confirmation: '' });
   const [otp, setOtp] = useState('');
@@ -52,6 +54,34 @@ const ParentActivation = () => {
     const timer = window.setInterval(() => setCooldown(value => Math.max(0, value - 1)), 1000);
     return () => window.clearInterval(timer);
   }, [cooldown]);
+
+  if (configLoading || !parentSelfActivationEnabled) {
+    return (
+      <div className="parent-activation min-h-[100dvh] bg-[#17324d] px-4 py-6 sm:py-10">
+        <div className="mx-auto flex min-h-[calc(100dvh-3rem)] w-full max-w-lg flex-col justify-center text-center">
+          <div className="rounded-3xl bg-white p-6 shadow-[0_20px_55px_rgba(16,40,62,.25)] sm:p-8">
+            <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-white p-2 shadow-lg">
+              <img src="/images/harmony-logo.png" alt="Harmony Learning Institute" className="max-h-full max-w-full object-contain" />
+            </div>
+            <h1 className="text-2xl font-bold text-[#19324a]">Parent Portal</h1>
+            <p className="mt-3 text-sm leading-6 text-[#617487]" role="status">
+              {configLoading ? 'Checking self-activation availability…' : 'Self-activation is not available yet.'}
+            </p>
+            {!configLoading && (
+              <div className="mt-6 space-y-3">
+                <button type="button" onClick={() => navigate('/parent/login')} className="w-full rounded-xl bg-[#2c7475] py-3.5 font-semibold text-white hover:bg-[#245f61]">
+                  Sign in
+                </button>
+                <button type="button" onClick={() => navigate('/parent/forgot-password')} className="text-sm font-semibold text-[#176b73] hover:underline">
+                  Forgot Password?
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const update = field => event => {
     setForm(current => ({ ...current, [field]: event.target.value }));

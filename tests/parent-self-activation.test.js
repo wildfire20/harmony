@@ -14,6 +14,7 @@ const jwt = require('jsonwebtoken');
 
 process.env.JWT_SECRET = 'parent-self-activation-test-secret';
 process.env.PARENT_OTP_SECRET = 'parent-self-activation-otp-secret';
+process.env.PARENT_SELF_ACTIVATION_ENABLED = 'true';
 process.env.NODE_ENV = 'test';
 process.env.FRONTEND_URL = 'https://portal.example.test/';
 
@@ -325,6 +326,29 @@ async function json(path, options = {}) {
   });
   return { response, body: await response.json() };
 }
+
+test('disabled self-activation fails closed before database or email work', async () => {
+  const previous = process.env.PARENT_SELF_ACTIVATION_ENABLED;
+  process.env.PARENT_SELF_ACTIVATION_ENABLED = 'false';
+  state.queries = [];
+  state.mail = [];
+  try {
+    for (const path of [
+      '/api/parent/activation/request',
+      '/api/parent/activation/verify',
+      '/api/parent/activation/complete',
+    ]) {
+      const result = await json(path, { method: 'POST', body: JSON.stringify({}) });
+      assert.equal(result.response.status, 503);
+      assert.deepEqual(result.body, { message: 'Parent self-activation is not available yet.' });
+    }
+    assert.equal(state.queries.length, 0);
+    assert.equal(state.mail.length, 0);
+  } finally {
+    if (previous === undefined) delete process.env.PARENT_SELF_ACTIVATION_ENABLED;
+    else process.env.PARENT_SELF_ACTIVATION_ENABLED = previous;
+  }
+});
 
 const activationInput = (phone = '073 123 4567') => ({
   phone_number: phone,

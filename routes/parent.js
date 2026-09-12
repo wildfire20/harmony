@@ -16,6 +16,7 @@ const {
   PARENT_OTP_RESEND_COOLDOWN_SECONDS, PARENT_OTP_DAILY_RESEND_LIMIT,
 } = require('../services/parentAuth');
 const { getStudentLedger } = require('../services/financeLedger');
+const { isParentSelfActivationEnabled } = require('../config/features');
 
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin  = [authenticate, authorize('admin', 'super_admin')];
@@ -31,6 +32,10 @@ const activationCompleteLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 8, standardHeaders: true, legacyHeaders: false,
   message: { message: 'Too many requests. Please try again later.' },
 });
+const requireParentSelfActivation = (req, res, next) => {
+  if (isParentSelfActivationEnabled()) return next();
+  return res.status(503).json({ message: 'Parent self-activation is not available yet.' });
+};
 
 const PARENT_NOTIFICATION_LIMIT = 100;
 const safePushEndpoint = (value) => {
@@ -896,7 +901,7 @@ async function matchingParentAccounts(phone) {
   return result.rows.filter((parent) => normalizePhone(parent.phone_number) === phone);
 }
 
-router.post('/activation/request', activationRequestLimiter, async (req, res) => {
+router.post('/activation/request', requireParentSelfActivation, activationRequestLimiter, async (req, res) => {
   const phone = normalizePhone(req.body?.phone_number || req.body?.phone);
   const email = validActivationEmail(req.body?.email);
   const confirmation = validActivationEmail(req.body?.email_confirmation);
@@ -1003,7 +1008,7 @@ router.post('/activation/request', activationRequestLimiter, async (req, res) =>
   }
 });
 
-router.post('/activation/verify', activationVerifyLimiter, async (req, res) => {
+router.post('/activation/verify', requireParentSelfActivation, activationVerifyLimiter, async (req, res) => {
   const challengeId = Number(req.body?.challenge_id || req.body?.challengeId);
   const otp = String(req.body?.otp || '');
   if (!Number.isSafeInteger(challengeId) || challengeId <= 0 || !/^\d{6}$/.test(otp)) {
@@ -1058,7 +1063,7 @@ router.post('/activation/verify', activationVerifyLimiter, async (req, res) => {
   }
 });
 
-router.post('/activation/complete', activationCompleteLimiter, async (req, res) => {
+router.post('/activation/complete', requireParentSelfActivation, activationCompleteLimiter, async (req, res) => {
   const challengeId = Number(req.body?.challenge_id || req.body?.challengeId);
   const completionToken = String(req.body?.completion_token || req.body?.completionToken || '');
   const password = String(req.body?.password || req.body?.new_password || '');

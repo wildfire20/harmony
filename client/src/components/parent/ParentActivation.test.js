@@ -11,6 +11,9 @@ jest.mock('react-router-dom', () => {
   const actual = jest.requireActual('react-router-dom');
   return { ...actual, useNavigate: () => mockNavigate };
 });
+jest.mock('../../contexts/AppConfigContext', () => ({
+  useAppConfig: () => ({ parentSelfActivationEnabled: true, configLoading: false }),
+}));
 
 const source = fs.readFileSync(path.join(__dirname, 'ParentActivation.js'), 'utf8');
 const accountSource = fs.readFileSync(path.join(__dirname, 'ParentAccount.js'), 'utf8');

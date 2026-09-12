@@ -16,6 +16,7 @@ const fs = require('node:fs');
 process.env.JWT_SECRET = 'phase2-test-secret';
 process.env.FRONTEND_URL = 'https://portal.example.test/';
 process.env.NODE_ENV = 'production';
+process.env.PARENT_SELF_ACTIVATION_ENABLED = 'false';
 
 const original = new Map();
 function mock(name, exports) {
@@ -212,6 +213,18 @@ test('parent login accepts legacy phone forms, rejects invalid/inactive users, a
   result = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1' }) });
   assert.equal(result.response.status, 401); assert.equal(result.body.message, 'Account is deactivated. Please contact the school.');
   state.user.is_active = true;
+});
+
+test('disabled self-activation is isolated from finance and operational tooling', () => {
+  assert.equal(process.env.PARENT_SELF_ACTIVATION_ENABLED, 'false');
+  for (const file of [
+    'services/financeLedger.js',
+    'routes/invoices.js',
+    'scripts/audit-parent-self-activation.js',
+    'scripts/run-parent-self-activation-migration.js',
+  ]) {
+    assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /PARENT_SELF_ACTIVATION_ENABLED|isParentSelfActivationEnabled/);
+  }
 });
 
 test('rememberMe reaches the server and refresh cookies have secure flags with distinct TTLs', async () => {

@@ -6,10 +6,12 @@ import toast from 'react-hot-toast';
 import { getReturnDestination } from './parentNavigation';
 import { refreshParentAccess } from './ParentPortal';
 import './ParentPortal.css';
+import { useAppConfig } from '../../contexts/AppConfigContext';
 
 const ParentLogin = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { parentSelfActivationEnabled } = useAppConfig();
   const [form, setForm] = useState({ phone_number: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -176,12 +178,12 @@ const ParentLogin = () => {
             </form>
 
             <div className="mt-6 pt-5 border-t border-gray-100 space-y-2">
-              <p className="text-center text-xs text-gray-400">
+              {parentSelfActivationEnabled && <p className="text-center text-xs text-gray-400">
                 First time using the Parent Portal?{' '}
                  <button type="button" onClick={() => navigate('/parent/activate')} className="parent-login-link text-[#176b73] hover:underline font-medium">
                   Activate your account.
                 </button>
-              </p>
+              </p>}
               <p className="text-center text-xs text-gray-400">
                 <button
                   type="button"
