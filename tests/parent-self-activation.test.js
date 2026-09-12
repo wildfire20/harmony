@@ -55,6 +55,7 @@ function parent(id = 10, phone = '27731234567') {
 }
 
 function reset(next = parent()) {
+  delete process.env.PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS;
   state.parents = [next];
   state.links = [{ id: 501, first_name: 'Learner', last_name: 'One', student_number: 'L-1' }];
   state.challenges = [];
@@ -157,7 +158,7 @@ async function execute(tx, sql, params = []) {
     item.delivery_confirmed_at = new Date().toISOString();
     return { rows: [{ id: item.id }] };
   }
-  if (/SELECT c\.id,c\.otp_hash/.test(sql) ||
+  if (/SELECT c\.id,c\.user_id,c\.otp_hash/.test(sql) ||
       /SELECT c\.id,c\.user_id,c\.email/.test(sql)) {
     const found = challengeFor(tx, params[0]);
     if (!found) return { rows: [] };
@@ -175,7 +176,7 @@ async function execute(tx, sql, params = []) {
       }] };
     }
     return { rows: [{
-      id: challenge.id, otp_hash: challenge.otp_hash, attempts: challenge.attempts,
+      id: challenge.id, user_id: challenge.user_id, otp_hash: challenge.otp_hash, attempts: challenge.attempts,
       max_attempts: challenge.max_attempts, expires_at: challenge.expires_at,
       verified_at: challenge.verified_at, delivery_confirmed_at: challenge.delivery_confirmed_at,
       consumed_at: challenge.consumed_at,
@@ -430,6 +431,36 @@ test('missing and ambiguous mobiles return the same public failure without sendi
   assert.equal(state.mail.length, 0);
 });
 
+test('pilot Parent is allowed while a non-pilot Parent is generically rejected', async () => {
+  reset(parent(433, '0731234567'));
+  process.env.PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS = '433,434';
+  const allowed = await json('/api/parent/activation/request', {
+    method: 'POST', body: JSON.stringify(activationInput('0731234567')),
+  });
+  assert.equal(allowed.response.status, 200);
+  assert.equal(state.challenges.length, 1);
+
+  reset(parent(435, '0731234567'));
+  process.env.PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS = '433,434';
+  const rejected = await json('/api/parent/activation/request', {
+    method: 'POST', body: JSON.stringify(activationInput('0731234567')),
+  });
+  assert.equal(rejected.response.status, 400);
+  assert.equal(rejected.body.message, 'We could not verify those details. Please contact your school.');
+  assert.equal(state.challenges.length, 0);
+  assert.equal(state.mail.length, 0);
+});
+
+test('removing the pilot restriction allows an ordinary eligible Parent', async () => {
+  reset(parent(435, '0731234567'));
+  delete process.env.PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS;
+  const result = await json('/api/parent/activation/request', {
+    method: 'POST', body: JSON.stringify(activationInput('0731234567')),
+  });
+  assert.equal(result.response.status, 200);
+  assert.equal(state.challenges.length, 1);
+});
+
 test('an already activated account cannot self-activate and is directed to password recovery', async () => {
   const activated = parent();
   activated.activated_at = new Date().toISOString();
@@ -587,7 +618,8 @@ test('completion requires its own verified challenge token, not only an ID or an
   assert.equal(state.parents[1].parent_account_status, 'pending');
 });
 
-test('completion is atomic, activates the existing Parent, preserves links, and issues identity session', async () => {
+test('multi-child pilot completion preserves all links and issues an identity session', async () => {
+  process.env.PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS = '10';
   state.links.push({ id: 502, first_name: 'Learner', last_name: 'Two', student_number: 'L-2' });
   const beforeLinks = clone(state.links);
   const flow = await requestCode('0731234567');

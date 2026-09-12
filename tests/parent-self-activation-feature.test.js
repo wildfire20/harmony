@@ -2,7 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
-const { isParentSelfActivationEnabled } = require('../config/features');
+const {
+  isParentSelfActivationEnabled,
+  isParentSelfActivationPilotParentAllowed,
+} = require('../config/features');
 
 test('Parent self-activation is default-deny and requires explicit true', () => {
   const previous = process.env.PARENT_SELF_ACTIVATION_ENABLED;
@@ -18,6 +21,22 @@ test('Parent self-activation is default-deny and requires explicit true', () => 
   } finally {
     if (previous === undefined) delete process.env.PARENT_SELF_ACTIVATION_ENABLED;
     else process.env.PARENT_SELF_ACTIVATION_ENABLED = previous;
+  }
+});
+
+test('pilot allowlist is optional, exact and fail-closed when configured incorrectly', () => {
+  const previous = process.env.PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS;
+  try {
+    delete process.env.PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS;
+    assert.equal(isParentSelfActivationPilotParentAllowed(433), true);
+    process.env.PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS = '433, 434';
+    assert.equal(isParentSelfActivationPilotParentAllowed(433), true);
+    assert.equal(isParentSelfActivationPilotParentAllowed(435), false);
+    process.env.PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS = 'not-an-id';
+    assert.equal(isParentSelfActivationPilotParentAllowed(433), false);
+  } finally {
+    if (previous === undefined) delete process.env.PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS;
+    else process.env.PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS = previous;
   }
 });
 

@@ -1,0 +1,77 @@
+Mini Phase 3.3 — Controlled Parent Self-Activation Pilot
+
+Mini Phase 3 has been migrated successfully in production.
+
+Production audit:
+
+total=297
+ready_for_self_activation=292
+already_activated=1
+invalid_mobile=4
+duplicate/shared mobile=0
+
+The global feature flag currently remains:
+
+PARENT_SELF_ACTIVATION_ENABLED=false
+
+Before enabling self-activation for all 292 eligible Parents, add a small controlled pilot mechanism.
+
+Do not change the activation flow, OTP security, Parent authentication, learner links, finance or admissions.
+
+Do not run migrations.
+
+Pilot allowlist
+
+Add an optional environment variable:
+
+PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS
+
+Example:
+
+433,434
+
+Behavior:
+
+If PARENT_SELF_ACTIVATION_ENABLED=false, self-activation remains completely disabled.
+If PARENT_SELF_ACTIVATION_ENABLED=true and PARENT_SELF_ACTIVATION_PILOT_PARENT_IDS contains Parent IDs, only those existing Parent accounts may complete self-activation.
+Other Parents must receive the same generic unavailable/not-eligible behavior without revealing account existence.
+If PARENT_SELF_ACTIVATION_ENABLED=true and the pilot list is empty/unset, normal full rollout behavior applies to all eligible Parent accounts.
+
+Do not expose Parent IDs in the frontend.
+
+Phone matching and anti-enumeration behavior must remain unchanged.
+
+Pilot testing
+
+Preserve:
+
+registered phone
+→ email
+→ Gmail OTP
+→ OTP verification
+→ create password
+→ activate existing Parent account
+→ automatically sign in
+→ linked learners appear
+
+Add regression tests for:
+
+pilot Parent allowed
+non-pilot Parent generically rejected
+already activated Parent still rejected
+invalid mobile rejected
+multi-child pilot Parent receives all linked learners
+removing pilot restriction allows ordinary eligible Parent activation
+normal Parent login unaffected
+remembered login unaffected
+
+No migration should be required.
+
+Return:
+
+Files changed
+Environment-variable behavior
+Tests passed
+Exact production pilot setup instructions
+
+Do not deploy automatically.

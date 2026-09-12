@@ -16,7 +16,10 @@ const {
   PARENT_OTP_RESEND_COOLDOWN_SECONDS, PARENT_OTP_DAILY_RESEND_LIMIT,
 } = require('../services/parentAuth');
 const { getStudentLedger } = require('../services/financeLedger');
-const { isParentSelfActivationEnabled } = require('../config/features');
+const {
+  isParentSelfActivationEnabled,
+  isParentSelfActivationPilotParentAllowed,
+} = require('../config/features');
 
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin  = [authenticate, authorize('admin', 'super_admin')];
@@ -919,6 +922,9 @@ router.post('/activation/request', requireParentSelfActivation, activationReques
 
     const parent = matches[0];
     if (!parent.is_active) return res.status(400).json({ message: genericActivationMessage });
+    if (!isParentSelfActivationPilotParentAllowed(parent.id)) {
+      return res.status(400).json({ message: genericActivationMessage });
+    }
     if (parent.activated_at || parent.parent_account_status === 'active') {
       return res.status(200).json({
         message: alreadyActivatedMessage,
@@ -1017,7 +1023,7 @@ router.post('/activation/verify', requireParentSelfActivation, activationVerifyL
   try {
     const verification = await withTransaction(async (client) => {
       const result = await client.query(
-        `SELECT c.id,c.otp_hash,c.attempts,c.max_attempts,c.expires_at,c.verified_at,
+        `SELECT c.id,c.user_id,c.otp_hash,c.attempts,c.max_attempts,c.expires_at,c.verified_at,
                 c.delivery_confirmed_at,
                 c.consumed_at,c.invalidated_at,u.is_active,u.role,u.activated_at,
                 u.parent_account_status
@@ -1025,7 +1031,8 @@ router.post('/activation/verify', requireParentSelfActivation, activationVerifyL
          WHERE c.id=$1 AND u.role='parent' FOR UPDATE`, [challengeId],
       );
       const challenge = result.rows[0];
-      if (!challenge || !challenge.is_active || !challenge.delivery_confirmed_at || challenge.consumed_at ||
+      if (!challenge || !isParentSelfActivationPilotParentAllowed(challenge.user_id) ||
+          !challenge.is_active || !challenge.delivery_confirmed_at || challenge.consumed_at ||
           challenge.invalidated_at || challenge.verified_at ||
           challenge.activated_at || challenge.parent_account_status === 'active' ||
           new Date(challenge.expires_at) <= new Date() ||
@@ -1085,7 +1092,8 @@ router.post('/activation/complete', requireParentSelfActivation, activationCompl
          WHERE c.id=$1 AND u.role='parent' FOR UPDATE`, [challengeId],
       );
       const challenge = found.rows[0];
-      if (!challenge || challenge.consumed_at ||
+      if (!challenge || !isParentSelfActivationPilotParentAllowed(challenge.user_id) ||
+          challenge.consumed_at ||
           !challenge.verified_at || challenge.consumed_at || challenge.invalidated_at ||
           new Date(challenge.expires_at) <= new Date() || challenge.activated_at ||
           !challenge.completion_token_hash ||
