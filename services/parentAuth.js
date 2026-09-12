@@ -42,7 +42,12 @@ function setRefreshCookie(req, res, raw, maxAge) {
   // A normal login deliberately gets a browser-session cookie. The database
   // expiry still bounds the session, but closing the browser must not restore
   // it. Remembered logins pass their remaining family lifetime here.
-  if (Number.isFinite(maxAge) && maxAge > 0) options.maxAge = Math.floor(maxAge * 1000);
+  if (Number.isFinite(maxAge) && maxAge > 0) {
+    const maxAgeMs = Math.floor(maxAge * 1000);
+    options.maxAge = maxAgeMs;
+    options.expires = new Date(Date.now() + maxAgeMs);
+    options.priority = 'high';
+  }
   res.cookie('parent_refresh', raw, options);
 }
 

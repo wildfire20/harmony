@@ -1,0 +1,388 @@
+Mini Phase 2.8 — Final Parent Portal Polish + Production Remembered-Session Root Cause
+
+Mini Phase 2.7 has been deployed to production and tested on a real Android phone.
+
+The Parent Portal is substantially improved, but several production issues remain.
+
+Do not begin OTP/self-activation yet.
+Do not change finance calculations, admissions, learner authorization, payment allocation logic, or database schema.
+Do not deploy automatically.
+Do not run migrations.
+
+1. Remove ALL remaining purple/indigo from Parent Portal
+
+The user wants the old bright blue-purple/indigo visual language removed completely from the Parent Portal.
+
+The latest production screenshots still show it in:
+
+Notice / Announcement cards
+Invoices button
+Submit Proof button
+Submit Proof of Payment button
+potentially other Parent actions not visible in these screenshots
+
+Search the entire Parent frontend for remaining:
+
+indigo-*
+violet-*
+inappropriate saturated blue-*
+legacy purple hex/RGB values
+gradients
+inline styles
+CSS variables
+hover/focus/active variants
+
+Do not merely override the screenshot-specific elements. Eliminate the obsolete Parent Portal theme at source.
+
+Approved visual language:
+
+Harmony navy
+white
+light neutral grey
+restrained teal
+Harmony coral/red where suitable
+semantic green/red/orange for statuses
+
+Do not substitute the purple with another bright royal blue.
+
+2. Redesign Notices & Announcements cards
+
+Current production notice cards are large solid purple blocks.
+
+Redesign them to match the clean desktop/mobile Harmony appearance.
+
+Prefer:
+
+white/light card
+subtle border/shadow
+navy notice title
+muted metadata
+restrained teal icon/accent
+grade badge using a subtle neutral/teal treatment
+
+Important/urgent notices may use a restrained semantic accent, but the entire card should not become a saturated block unless genuinely necessary.
+
+Preserve:
+
+announcement targeting
+grade targeting
+author
+dates
+notification behavior
+click/open behavior
+
+Visual changes only.
+
+3. Restyle Fees actions
+
+Remove the remaining purple treatment from:
+
+Invoices
+Submit Proof
+Submit Proof of Payment
+
+Use the established Harmony Parent palette.
+
+For example:
+
+primary navy
+restrained teal
+light outlined secondary controls
+
+Keep clear button hierarchy without filling the page with saturated colors.
+
+Do not change payment-proof functionality.
+
+4. Fix Services & Billing responsive layout
+
+Current mobile production shows text becoming cramped / escaping the intended visual area inside the service cards.
+
+Examples:
+
+Monthly Tuition
+Boarding Fee
+Transport Fee
+Enrollment only
+
+Fix this properly rather than shrinking the font excessively.
+
+Inspect:
+
+grid column widths
+min-width
+flex children
+white-space
+overflow
+word wrapping
+gap/padding
+badge positioning
+
+Children inside flex/grid layouts should use appropriate min-width: 0 where needed.
+
+Do not use nowrap where it causes overflow.
+
+On narrow phones, change layout when necessary.
+
+For example:
+
+320–375px:
+
+Monthly Tuition
+Enrollment only
+
+Boarding Fee
+Enrollment only
+
+Transport Fee
+Enrollment only
+
+A single-column layout is acceptable if that produces a cleaner result.
+
+At wider mobile widths, two columns may be used only if content fits comfortably.
+
+The priority is readability, not fitting as many cards in one row as possible.
+
+Test unusually long service names too.
+
+5. Persistent login is STILL broken in real production
+
+This is now the most important technical issue.
+
+Real production result:
+
+Parent checks Keep me signed in
+Parent logs in successfully
+Parent completely closes Chrome
+Chrome is removed from recent apps
+Parent later opens Harmony Parent Portal
+Login page appears again
+
+Therefore remembered-session restoration is still not working.
+
+Do not report this as fixed based only on automated tests.
+
+Previous work already fixed remember vs rememberMe.
+
+Find the next actual failure in production.
+
+6. Investigate the refresh-cookie Path specifically
+
+The remembered refresh cookie currently uses:
+
+Path=/api/auth
+
+This means the browser will not send that cookie directly to /parent/login.
+
+Therefore verify the architecture carefully.
+
+If /parent/login itself attempts to inspect an HttpOnly refresh cookie whose Path is /api/auth, that approach cannot work because the browser does not attach that cookie to /parent/login.
+
+The correct startup flow may need to be:
+
+Parent route loads
+      ↓
+frontend enters auth-hydration/loading state
+      ↓
+frontend calls an endpoint under /api/auth
+      ↓
+request includes credentials
+      ↓
+browser sends refresh cookie
+      ↓
+backend validates/rotates remembered session
+      ↓
+frontend restores parent identity
+      ↓
+portal renders
+
+Investigate whether this Path mismatch explains the remaining production failure.
+
+Do not broaden the cookie path unless necessary. Prefer calling the correct authenticated refresh endpoint.
+
+7. Inspect actual production cookie issuance
+
+Verify using the real deployed production configuration:
+
+After a remembered login, confirm the browser actually stores a cookie with:
+
+persistent expiry / Max-Age
+approximately the remaining fixed 30-day session-family lifetime
+HttpOnly
+Secure
+SameSite=Lax
+correct host/domain behavior
+Path /api/auth
+
+Compare remembered login against normal login.
+
+Verify whether the cookie is still stored after fully closing/reopening Chrome.
+
+If it disappears, determine why.
+
+If it remains but restoration fails, trace the refresh request.
+
+8. Trace startup authentication
+
+On a fresh browser opening with no access token in memory:
+
+Determine:
+
+Does the application attempt refresh?
+Which exact URL does it call?
+Does the request use credentials: include or the equivalent?
+Is the cookie attached?
+Does the backend receive it?
+Does the backend accept or reject it?
+Is a replacement rotated refresh cookie issued?
+Is the access token restored?
+Is Parent state restored?
+Is learner data loaded?
+
+Add a proper hydration state:
+
+UNKNOWN / CHECKING SESSION
+
+before deciding:
+
+AUTHENTICATED
+
+or:
+
+LOGGED OUT
+
+The Login component must not win a race against session restoration.
+
+9. Production host/redirect audit
+
+Check the exact Harmony production routing:
+
+harmonylearning.co.za
+www.harmonylearning.co.za
+any redirect between them
+API origin
+Railway proxy behavior
+frontend origin
+
+Determine whether a remembered cookie is being created on one host but the user later enters through another host.
+
+Use one canonical Parent Portal origin.
+
+Do not introduce an insecure cross-site cookie configuration just to make the test pass.
+
+10. Safe diagnostics
+
+Because previous automated tests passed while production failed, add safe diagnostic logging where necessary.
+
+Allowed diagnostic information:
+
+rememberMe=true/false
+session type = browser/remembered
+persistent cookie attempted = yes/no
+refresh request received = yes/no
+session found = yes/no
+rejection category
+rotation success/failure
+
+Never log:
+
+password
+access token
+refresh token
+raw Cookie/Set-Cookie value
+token hash
+secret
+11. Remember checkbox regression
+
+Preserve the Mini Phase 2.7 immediate checkbox interaction.
+
+Tapping:
+
+Keep me signed in on this device
+
+must immediately:
+
+show checked state
+display a visible check/tick
+use restrained teal/green selected styling
+
+It must not wait for Sign In.
+
+Test tapping the label as well as the checkbox.
+
+12. Responsive visual sweep
+
+This is now a detailed polish pass.
+
+Check every Parent screen for:
+
+text escaping cards
+overlapping text
+clipped labels
+oversized buttons
+inconsistent spacing
+unexpected horizontal scrolling
+content under bottom navigation
+long learner names
+long announcement names
+long service names
+button labels wrapping badly
+
+Test:
+
+320 × 800
+360 × 800
+375 × 812
+390 × 844
+412 × 915
+tablet
+desktop
+
+Screens:
+
+Login
+Home
+Attendance
+Notices
+Notifications
+Documents
+Fees
+Payment Proof
+Account
+Drawer
+Learner selector
+
+Desktop must not regress.
+
+13. Tests/security
+
+Preserve:
+
+30-day maximum remembered session family
+refresh rotation
+replay detection
+logout
+logout-all
+password reset/change revocation
+Admin disable/revoke
+
+Add tests for the actual startup refresh path and cookie-path behavior rather than only testing internal functions.
+
+Required final report
+
+Return:
+
+All remaining purple/blue sources found.
+Notices redesign performed.
+Fees responsive-overflow root cause and fix.
+Exact persistent-login production root cause.
+Whether /api/auth cookie Path contributed.
+Whether canonical hostname/redirect contributed.
+Whether browser retained the cookie but frontend failed to restore it, or whether cookie itself disappeared.
+Startup hydration changes.
+Files changed.
+Frontend/backend tests.
+Exact production verification still required.
+
+Do not deploy automatically.
+Do not run migrations.
+Do not state that persistent login is fixed unless the actual failing lifecycle has been identified.

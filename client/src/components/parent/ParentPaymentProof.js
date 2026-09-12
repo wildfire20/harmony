@@ -189,7 +189,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
           {view === 'list' ? (
             <button
               onClick={() => { setView('form'); setSuccess(null); setError(null); }}
-              className="flex items-center gap-2 bg-[#2c7475] text-white text-sm font-semibold px-4 py-2 rounded-xl active:scale-95 transition-transform"
+              className="parent-payment-primary flex items-center gap-2 text-white text-sm font-semibold px-4 py-2 rounded-xl active:scale-95 transition-transform"
             >
               <Upload className="h-4 w-4" /> Submit Proof
             </button>
@@ -207,7 +207,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
       {embedded && view === 'list' && (
         <button
           onClick={() => { setView('form'); setSuccess(null); setError(null); }}
-          className="w-full flex items-center justify-center gap-2 bg-[#2c7475] text-white text-sm font-semibold px-4 py-3 rounded-2xl active:scale-95 transition-transform"
+          className="parent-payment-primary w-full flex items-center justify-center gap-2 text-white text-sm font-semibold px-4 py-3 rounded-2xl active:scale-95 transition-transform"
         >
           <Upload className="h-4 w-4" /> Submit New Proof of Payment
         </button>
@@ -405,7 +405,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
           <button
             type="submit"
             disabled={submitting}
-             className="w-full bg-[#2c7475] text-white font-bold py-3.5 rounded-2xl text-sm active:scale-95 transition-transform disabled:opacity-60"
+             className="parent-payment-primary w-full text-white font-bold py-3.5 rounded-2xl text-sm active:scale-95 transition-transform disabled:opacity-60"
           >
             {submitting ? 'Submitting…' : 'Submit Proof of Payment'}
           </button>

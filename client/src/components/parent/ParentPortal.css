@@ -8,6 +8,8 @@
   --parent-wash: #f4f7f8;
   --parent-teal: #2c7475;
   --parent-coral: #c96858;
+  --harmony-primary: var(--parent-teal);
+  --harmony-gradient-primary: none;
   background: var(--parent-wash);
 }
 
@@ -69,13 +71,108 @@
 .parent-portal .parent-notification-banner { background: #fff8ed; color: #8a5b22; border-bottom: 1px solid #f0dfc2; }
 .parent-portal .parent-stat { box-shadow: 0 8px 18px rgba(31, 65, 83, .08); }
 .parent-portal .parent-select:focus { border-color: var(--parent-teal); box-shadow: 0 0 0 3px rgba(44,116,117,.14); }
+.parent-portal button.parent-announcement-card,
+.parent-portal button.parent-announcement-card:hover,
+.parent-portal button.parent-announcement-card:focus,
+.parent-portal button.parent-announcement-card:active {
+  background: var(--parent-surface) !important;
+  background-image: none !important;
+  border-color: var(--parent-line) !important;
+  color: var(--parent-ink) !important;
+  box-shadow: 0 6px 18px rgba(31,65,83,.07) !important;
+}
+.parent-portal button.parent-announcement-card:hover,
+.parent-portal button.parent-announcement-card:focus {
+  border-color: #bfd5d5 !important;
+  box-shadow: 0 8px 22px rgba(31,65,83,.1) !important;
+}
+.parent-portal button.parent-fee-tab,
+.parent-portal button.parent-fee-tab:hover,
+.parent-portal button.parent-fee-tab:focus,
+.parent-portal button.parent-fee-tab:active {
+  background: var(--parent-surface) !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  color: var(--parent-teal) !important;
+  box-shadow: 0 2px 8px rgba(31,65,83,.08) !important;
+}
+.parent-portal button.parent-payment-primary,
+.parent-portal button.parent-payment-primary:hover,
+.parent-portal button.parent-payment-primary:focus,
+.parent-portal button.parent-payment-primary:active {
+  background: var(--parent-teal) !important;
+  background-image: none !important;
+  border-color: var(--parent-teal) !important;
+  color: #fff !important;
+}
+.parent-portal button.parent-payment-primary:hover,
+.parent-portal button.parent-payment-primary:focus {
+  background: #245f61 !important;
+  border-color: #245f61 !important;
+}
+.parent-service-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.parent-service-name {
+  overflow-wrap: anywhere;
+}
 
 .parent-login {
   --parent-navy: #17324d;
   --parent-teal: #2c7475;
+  --harmony-primary: var(--parent-teal);
+  --harmony-gradient-primary: none;
   background:
     radial-gradient(circle at 12% 15%, rgba(201, 104, 88, .16), transparent 30%),
     var(--parent-navy);
+}
+
+.parent-login input:not([type="checkbox"]) {
+  background: #fff !important;
+  background-image: none !important;
+  border-color: #cbd9df !important;
+  color: #19324a !important;
+}
+.parent-login input:not([type="checkbox"])::placeholder {
+  color: #8a9aa5 !important;
+}
+[data-theme="dark"] .parent-login button {
+  background: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+.parent-login button.parent-login-submit,
+.parent-login button.parent-login-submit:hover,
+.parent-login button.parent-login-submit:focus,
+.parent-login button.parent-login-submit:active {
+  background: var(--parent-teal) !important;
+  background-image: none !important;
+  border-color: var(--parent-teal) !important;
+  color: #fff !important;
+  box-shadow: 0 8px 18px rgba(44,116,117,.2) !important;
+}
+.parent-login button.parent-password-toggle {
+  background: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  color: #6b7e8e !important;
+  box-shadow: none !important;
+}
+.parent-login button.parent-login-back {
+  background: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  color: rgba(255,255,255,.82) !important;
+  box-shadow: none !important;
+}
+.parent-login button.parent-login-link {
+  min-height: 44px;
+  background: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  color: #176b73 !important;
+  box-shadow: none !important;
 }
 
 .parent-login-card {
@@ -253,5 +350,14 @@
     background: var(--parent-navy) !important;
     background-image: none !important;
     box-shadow: 0 4px 18px rgba(16, 40, 62, .15);
+  }
+}
+
+@media (max-width: 389px) {
+  .parent-service-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .parent-service-card {
+    align-items: flex-start;
   }
 }

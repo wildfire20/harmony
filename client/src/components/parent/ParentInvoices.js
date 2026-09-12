@@ -51,7 +51,7 @@ const ParentInvoices = ({ child }) => {
       <div className="flex bg-gray-100 rounded-xl p-1 gap-1">
         <button
           onClick={() => setTab('invoices')}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
+          className={`parent-fee-tab flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
             tab === 'invoices'
                ? 'bg-white shadow text-[#176b73]'
               : 'text-gray-500 hover:text-gray-700'
@@ -62,7 +62,7 @@ const ParentInvoices = ({ child }) => {
         </button>
         <button
           onClick={() => setTab('pay')}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
+          className={`parent-fee-tab flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
             tab === 'pay'
                ? 'bg-white shadow text-[#176b73]'
               : 'text-gray-500 hover:text-gray-700'
@@ -97,16 +97,16 @@ const ParentInvoices = ({ child }) => {
              <div className="bg-[#f6f8f6] border border-[#dce6ea] rounded-2xl p-4">
                 <p className="text-[#19324a] font-semibold text-sm mb-1">Services &amp; Billing</p>
                 <p className="text-[#617487] text-xs mb-2">Enrollment is separate from what is billed on an invoice.</p>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="parent-service-grid grid gap-2">
                 {serviceComponents.map((component) => (
-                     <span key={component.key} className="flex items-center justify-between gap-2 bg-white text-[#617487] text-xs font-semibold px-2.5 py-1.5 rounded-lg">
-                    <span className="flex items-center gap-1.5">
+                     <span key={component.key} className="parent-service-card flex min-w-0 items-center justify-between gap-3 bg-white text-[#617487] text-xs font-semibold px-3 py-2 rounded-lg">
+                    <span className="parent-service-name flex min-w-0 items-center gap-1.5">
                       {component.key === 'boarding' && <Bed className="h-3.5 w-3.5" />}
                       {component.key === 'transport' && <Bus className="h-3.5 w-3.5" />}
                       {component.key === 'aftercare' && <Sunset className="h-3.5 w-3.5" />}
                       {component.label}
                     </span>
-                      <span className="text-right">Enrollment only</span>
+                      <span className="parent-service-note shrink-0 text-right">Enrollment only</span>
                   </span>
                 ))}
               </div>
@@ -116,7 +116,7 @@ const ParentInvoices = ({ child }) => {
           {/* Quick action: switch to pay tab */}
           <button
             onClick={() => setTab('pay')}
-            className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white font-semibold py-3 rounded-2xl text-sm active:scale-95 transition-transform"
+            className="parent-payment-primary w-full flex items-center justify-center gap-2 text-white font-semibold py-3 rounded-2xl text-sm active:scale-95 transition-transform"
           >
             <Upload className="h-4 w-4" />
             Submit Proof of Payment

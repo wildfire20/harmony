@@ -87,8 +87,31 @@ test('parent login uses the current activation and staff-only wording', () => {
 
 test('embedded payment proof uses the restrained Parent Portal palette', () => {
   const proof = source('ParentPaymentProof.js');
-  expect(proof).toMatch(/bg-\[#2c7475\]/);
+  expect(proof).toMatch(/parent-payment-primary/);
+  expect(source('ParentPortal.css')).toMatch(/button\.parent-payment-primary[\s\S]*background: var\(--parent-teal\) !important/);
   expect(proof).not.toMatch(/bg-blue-(50|100|600)|text-blue-(600|700|800)|border-blue-(100|200|500)/);
+});
+
+test('Parent login and authenticated action buttons are isolated from legacy dark-theme purple', () => {
+  const css = source('ParentPortal.css');
+  const login = source('ParentLogin.js');
+  expect(css).toMatch(/--harmony-primary: var\(--parent-teal\)/);
+  expect(css).toMatch(/\[data-theme="dark"\] \.parent-login button[\s\S]*background: transparent !important/);
+  expect(css).toMatch(/button\.parent-login-submit[\s\S]*background: var\(--parent-teal\) !important/);
+  expect(css).toMatch(/button\.parent-announcement-card[\s\S]*background: var\(--parent-surface\) !important/);
+  expect(login).toMatch(/parent-login-submit/);
+  expect(login).toMatch(/parent-password-toggle/);
+  expect(login).toMatch(/parent-login-link/);
+});
+
+test('fees service cards wrap safely and collapse to one column on narrow phones', () => {
+  const invoices = source('ParentInvoices.js');
+  const css = source('ParentPortal.css');
+  expect(invoices).toMatch(/parent-service-grid/);
+  expect(invoices).toMatch(/parent-service-card flex min-w-0/);
+  expect(invoices).toMatch(/parent-service-name flex min-w-0/);
+  expect(css).toMatch(/\.parent-service-grid[\s\S]*repeat\(2, minmax\(0, 1fr\)\)/);
+  expect(css).toMatch(/@media \(max-width: 389px\)[\s\S]*grid-template-columns: minmax\(0, 1fr\)/);
 });
 
 test('legacy Grades URLs redirect without changing startup session hydration', () => {

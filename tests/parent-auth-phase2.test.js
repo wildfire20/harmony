@@ -215,8 +215,10 @@ test('rememberMe reaches the server and refresh cookies have secure flags with d
     'rotating a normal session must not make it persistent');
   const remembered = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1', rememberMe: true }) });
   assert.match(remembered.response.headers.get('set-cookie'), /Max-Age=2592000/);
+  assert.match(remembered.response.headers.get('set-cookie'), /Expires=/);
   assert.match(remembered.response.headers.get('set-cookie'), /SameSite=Lax/);
   assert.match(remembered.response.headers.get('set-cookie'), /Path=\/api\/auth/);
+  assert.equal(remembered.body.sessionMode, 'remembered');
   assert.ok(state.sessions.every(s => s.family_expires_at instanceof Date));
   const family = state.sessions[0].family_expires_at.getTime();
   assert.equal(state.sessions[0].family_expires_at.getTime(), family);
@@ -225,6 +227,8 @@ test('rememberMe reaches the server and refresh cookies have secure flags with d
 test('frontend sends rememberMe and does not persist parent login credentials', () => {
   const loginSource = fs.readFileSync('client/src/components/parent/ParentLogin.js', 'utf8');
   assert.match(loginSource, /rememberMe:\s*remember/);
+  assert.match(loginSource, /if \(remember\)[\s\S]*await refreshParentAccess\(\)/);
+  assert.match(loginSource, /sessionMode !== 'remembered'/);
   assert.doesNotMatch(loginSource, /setItem\(['"](?:parentPhone|parentPassword)/);
   assert.match(loginSource, /const storage = sessionStorage/);
 });

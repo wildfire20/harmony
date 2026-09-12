@@ -33,7 +33,10 @@ const ParentLogin = () => {
     setLoading(true);
     try {
       const response = await api.post('/auth/login/parent', { ...form, rememberMe: remember });
-      const { token, user, children, child, must_change_password } = response.data;
+       const { token, user, children, child, must_change_password, sessionMode } = response.data;
+       if (remember && sessionMode !== 'remembered') {
+         throw new Error('The persistent session could not be created. Please try again.');
+       }
 
       // Keep the bearer token in session storage by default. A remembered session
       // is still revocable by the server (refresh cookies are HttpOnly).
@@ -48,6 +51,11 @@ const ParentLogin = () => {
       if (child?.id || children?.[0]?.id) {
         localStorage.setItem('parentSelectedChildId', String(child?.id || children[0].id));
       }
+      if (remember) {
+        // Verify that the browser accepted the HttpOnly persistent cookie using
+        // the same path and rotation endpoint required after a browser restart.
+        await refreshParentAccess();
+      }
 
       if (must_change_password) {
         toast('Please set a new password to continue.');
@@ -57,7 +65,7 @@ const ParentLogin = () => {
         navigate(getReturnDestination(location.search), { replace: true });
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Login failed. Check your phone number and password.');
+      toast.error(err.response?.data?.message || err.message || 'Login failed. Check your phone number and password.');
     } finally {
       setLoading(false);
     }
@@ -81,7 +89,7 @@ const ParentLogin = () => {
       <div className="p-4">
         <button
           onClick={() => navigate('/')}
-          className="flex min-h-[44px] items-center gap-2 text-white/80 hover:text-white transition-colors text-sm"
+          className="parent-login-back flex min-h-[44px] items-center gap-2 text-white/80 hover:text-white transition-colors text-sm"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Home
@@ -144,7 +152,7 @@ const ParentLogin = () => {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className="parent-password-toggle absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -161,7 +169,7 @@ const ParentLogin = () => {
               <button
                 type="submit"
                 disabled={loading}
-                 className="w-full py-3.5 bg-[#2c7475] text-white font-semibold rounded-xl hover:bg-[#245f61] transition-all shadow-md shadow-[#2c7475]/20 disabled:opacity-60 disabled:cursor-not-allowed text-base"
+                  className="parent-login-submit w-full py-3.5 text-white font-semibold rounded-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed text-base"
               >
                 {loading ? 'Signing in…' : 'Sign In'}
               </button>
@@ -170,7 +178,7 @@ const ParentLogin = () => {
             <div className="mt-6 pt-5 border-t border-gray-100 space-y-2">
               <p className="text-center text-xs text-gray-400">
                 First time using the Parent Portal?{' '}
-                <button type="button" onClick={() => navigate('/parent/activate')} className="text-[#176b73] hover:underline font-medium">
+                 <button type="button" onClick={() => navigate('/parent/activate')} className="parent-login-link text-[#176b73] hover:underline font-medium">
                   Activate your account.
                 </button>
               </p>
@@ -178,7 +186,7 @@ const ParentLogin = () => {
                 <button
                   type="button"
                   onClick={() => navigate('/login')}
-                  className="text-[#176b73] hover:underline font-medium"
+                   className="parent-login-link text-[#176b73] hover:underline font-medium"
                 >
                   Use the Staff Portal
                 </button>

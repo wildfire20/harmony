@@ -47,7 +47,7 @@ const ParentAnnouncements = ({ child }) => {
               <button
                 key={a.id}
                 onClick={() => setExpanded(isOpen ? null : a.id)}
-                className="w-full text-left bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow p-4"
+                className="parent-announcement-card w-full text-left rounded-2xl border shadow-sm transition-shadow p-4"
               >
                 <div className="flex items-start gap-3">
                   <div className="p-2.5 bg-[#e8f1ef] rounded-xl shrink-0 mt-0.5">

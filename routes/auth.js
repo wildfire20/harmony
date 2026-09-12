@@ -7,11 +7,18 @@ const db = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { isStudentPortalEnabled } = require('../config/features');
 const {
-  hashToken, randomToken, accessToken, setRefreshCookie, authenticateSession, revokeUserSessions,
+  hashToken, randomToken, accessToken, setRefreshCookie, authenticateSession, revokeUserSessions, secureCookie,
   withTransaction, NORMAL_DAYS, REMEMBERED_DAYS,
 } = require('../services/parentAuth');
 
 const router = express.Router();
+
+const logParentSession = (event, details = {}) => {
+  console.info('Parent session lifecycle', {
+    event,
+    ...details,
+  });
+};
 
 const createAuthLimiter = (max, message) => rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -310,8 +317,14 @@ router.post('/login/parent', loginLimiter, [
 
     // `remember` remains accepted during rollout so an older cached frontend
     // cannot silently downgrade a requested persistent session.
-    const session = await authenticateSession(req, res, user,
-      req.body.rememberMe === true || req.body.remember === true);
+    const rememberRequested = req.body.rememberMe === true || req.body.remember === true;
+    const session = await authenticateSession(req, res, user, rememberRequested);
+    logParentSession('login_cookie_issued', {
+      rememberMe: rememberRequested,
+      sessionType: rememberRequested ? 'remembered' : 'browser',
+      persistentCookieAttempted: rememberRequested,
+      secureRequest: session.refresh ? secureCookie(req) : false,
+    });
     await db.query('UPDATE users SET last_login_at=NOW() WHERE id=$1 AND role=$2', [user.id, 'parent']);
     const token = session.token;
     const { password: _, ...userWithoutPassword } = user;
@@ -323,6 +336,7 @@ router.post('/login/parent', loginLimiter, [
       children: childrenResult.rows,
       child: childrenResult.rows[0] || null,
       must_change_password: user.must_change_password || false,
+      sessionMode: rememberRequested ? 'remembered' : 'browser',
     });
 
   } catch (error) {
@@ -354,7 +368,10 @@ router.post('/refresh', async (req, res) => {
   let client;
   try {
     const pair = String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith('parent_refresh='));
-    if (!pair) return res.status(401).json({ message: 'Session expired' });
+    if (!pair) {
+      logParentSession('refresh_rejected', { refreshRequestReceived: true, sessionFound: false, rejectionCategory: 'cookie_missing' });
+      return res.status(401).json({ message: 'Session expired' });
+    }
     const raw = decodeURIComponent(pair.slice('parent_refresh='.length));
     client = await db.pool.connect();
     await client.query('BEGIN');
@@ -366,17 +383,23 @@ router.post('/refresh', async (req, res) => {
       FROM parent_sessions s JOIN users u ON u.id=s.user_id
       WHERE s.refresh_token_hash=$1 AND u.role='parent' AND u.is_active=true
         AND (u.auth_revoked_at IS NULL OR s.created_at > u.auth_revoked_at) FOR UPDATE`, [hashToken(raw)]);
-    if (!found.rows.length) { await client.query('ROLLBACK'); client.release(); return res.status(401).json({ message: 'Session expired' }); }
+    if (!found.rows.length) {
+      await client.query('ROLLBACK'); client.release();
+      logParentSession('refresh_rejected', { refreshRequestReceived: true, sessionFound: false, rejectionCategory: 'session_not_found' });
+      return res.status(401).json({ message: 'Session expired' });
+    }
     const old = found.rows[0];
     if (old.revoked_at || old.replaced_by_hash || new Date(old.expires_at) <= new Date()) {
       await client.query('UPDATE parent_sessions SET revoked_at=NOW() WHERE family_id=$1 AND revoked_at IS NULL', [old.family_id]);
       await client.query('COMMIT'); client.release();
+      logParentSession('refresh_rejected', { refreshRequestReceived: true, sessionFound: true, rejectionCategory: 'expired_or_replayed' });
       return res.status(401).json({ message: 'Session expired' });
     }
     const familyRemaining = new Date(old.family_expires_at).getTime() - Date.now();
     if (familyRemaining <= 0) {
       await client.query('UPDATE parent_sessions SET revoked_at=NOW() WHERE family_id=$1', [old.family_id]);
       await client.query('COMMIT'); client.release();
+      logParentSession('refresh_rejected', { refreshRequestReceived: true, sessionFound: true, rejectionCategory: 'family_expired' });
       return res.status(401).json({ message: 'Session expired' });
     }
     // Do not infer persistence from the remaining token TTL. A remembered
@@ -398,15 +421,24 @@ router.post('/refresh', async (req, res) => {
     if (!consumed.rows.length) {
       await client.query('UPDATE parent_sessions SET revoked_at=NOW() WHERE family_id=$1', [old.family_id]);
       await client.query('COMMIT'); client.release();
+      logParentSession('refresh_rejected', { refreshRequestReceived: true, sessionFound: true, rejectionCategory: 'rotation_conflict' });
       return res.status(401).json({ message: 'Session expired' });
     }
     await client.query('COMMIT'); client.release(); client = null;
     setRefreshCookie(req, res, successor,
       remember ? Math.max(1, Math.ceil(familyRemaining / 1000)) : undefined);
-    res.json({ token: accessToken(old, inserted.rows[0].id) });
+    logParentSession('refresh_rotated', {
+      refreshRequestReceived: true,
+      sessionFound: true,
+      sessionType: remember ? 'remembered' : 'browser',
+      persistentCookieAttempted: remember,
+      rotationSuccess: true,
+    });
+    res.json({ token: accessToken(old, inserted.rows[0].id), sessionMode: remember ? 'remembered' : 'browser' });
   } catch (error) {
     if (client) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); }
-    console.error('Parent refresh error:', error);
+    console.error('Parent refresh error category:', error?.code || 'unclassified');
+    logParentSession('refresh_rejected', { refreshRequestReceived: true, sessionFound: false, rejectionCategory: 'server_error' });
     res.status(401).json({ message: 'Session expired' });
   }
 });
