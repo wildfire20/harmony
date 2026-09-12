@@ -9,3 +9,4 @@
 - [Parent notification integrity](parent-notification-integrity.md) — durable parent-owned alerts require current learner access, stable dedupe, and allowlisted internal destinations.
 - [Finance ledger integrity](finance-ledger-integrity.md) — Admin and Parent totals share one ledger; carry-forward and reversals require explicit lineage and immutable events.
 - [Parent migration verification](parent-migration-verification.md) — legacy-compatible migrations must converge semantically and verify on the same transaction before reporting success.
+- [Parent self-activation](parent-self-activation.md) — self-activation verifies registered phone plus email OTP without creating accounts or changing learner links.

@@ -15,7 +15,9 @@
 
 .parent-portal button:focus-visible,
 .parent-login button:focus-visible,
-.parent-login input:focus-visible {
+.parent-login input:focus-visible,
+.parent-activation button:focus-visible,
+.parent-activation input:focus-visible {
   outline: 3px solid rgba(201, 104, 88, .38);
   outline-offset: 2px;
 }

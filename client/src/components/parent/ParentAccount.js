@@ -25,9 +25,18 @@ export default function ParentAccount({ user, children, selectedChild, onSelectC
           </div>
         </div>
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-2xl bg-[#f6f8f6] p-4"><p className="text-xs font-semibold uppercase tracking-wide text-[#84929e]">Identity</p><p className="mt-1 text-sm text-[#334b5d]">Verified parent account</p></div>
-          <div className="rounded-2xl bg-[#f6f8f6] p-4"><p className="text-xs font-semibold uppercase tracking-wide text-[#84929e]">Session</p><p className="mt-1 text-sm text-[#334b5d]">Protected Harmony session</p></div>
+          <div className="rounded-2xl bg-[#f6f8f6] p-4" aria-label="Mobile number, Registered">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#84929e]">Mobile number</p>
+            <p className="mt-1 text-sm font-semibold text-[#334b5d]">{user?.phone_number || 'Not available'}</p>
+            <p className="mt-1 text-xs text-[#176b73]">Registered</p>
+          </div>
+          <div className="rounded-2xl bg-[#f6f8f6] p-4" aria-label="Email, Verified">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#84929e]">Email</p>
+            <p className="mt-1 truncate text-sm font-semibold text-[#334b5d]">{user?.email || 'Not available'}</p>
+            <p className="mt-1 text-xs text-[#176b73]">Verified</p>
+          </div>
         </div>
+        <p className="mt-3 text-xs text-[#84929e]">These contact details are read-only. Contact Harmony if they need to be updated.</p>
       </section>
       <section className="rounded-3xl border border-[#dce7eb] bg-white p-5 shadow-[0_12px_35px_rgba(31,65,83,.07)]">
         <div className="mb-4 flex items-center gap-3"><Users className="h-5 w-5 text-[#176b73]" /><h2 className="font-bold text-[#19324a]">Linked learners</h2></div>

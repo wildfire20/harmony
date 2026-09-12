@@ -1,0 +1,142 @@
+Mini Phase 3 Requirement Update — Simplified Parent Self-Activation
+
+Simplify the Parent self-activation workflow.
+
+Harmony accepts the lower-friction activation model for the current rollout.
+
+Remove requirements for:
+
+learner/student number
+learner date of birth
+Parent ID number
+security questions
+verification of individual children
+
+The final self-activation flow must be:
+
+1. Enter registered mobile number
+2. Enter email address
+3. Harmony sends OTP to that email
+4. Parent enters OTP
+5. Parent creates password
+6. Existing Parent account becomes ACTIVATED
+7. Parent is automatically signed in
+8. All learners already linked to that Parent account appear automatically
+Registered mobile number
+
+The mobile number must already belong to an existing Parent account created by the school/Admin.
+
+Accept common South African formats:
+
+0731234567
+073 123 4567
+073-123-4567
++27731234567
+27731234567
+
+Normalize them internally for matching.
+
+Do not force Parents to type +27.
+
+Use a friendly placeholder such as:
+
+e.g. 073 123 4567
+Existing Parent/learner relationships
+
+Do NOT create new Parent accounts during self-activation.
+
+Admin remains responsible for creating Parent accounts and linking the correct learners.
+
+Self-activation only activates the existing account.
+
+If a Parent has multiple children, all existing linked learners must automatically appear after activation.
+
+The Parent does not verify each child.
+
+Parents not yet on the system
+
+If the school has not yet created their Parent account, self-activation cannot create one.
+
+Use a generic message directing them to Harmony for assistance.
+
+Admin will create the account and learner links first.
+
+Email
+
+Ask for:
+
+Email address
+Confirm email address
+
+Explain:
+
+Harmony will use this email for account recovery and important school, learner and payment notifications.
+
+The entered email becomes associated with the Parent account only after OTP verification succeeds.
+
+Email OTP
+
+Use the existing Harmony Gmail API.
+
+Send a 6-digit OTP.
+
+Requirements:
+
+cryptographically secure
+short expiry
+hash stored only
+never log plaintext OTP
+never display OTP on the production website
+maximum attempts
+resend cooldown
+resend limits
+one-time use
+new OTP invalidates previous active OTP where appropriate
+Activation safeguards
+
+Keep this workflow simple but preserve:
+
+only unactivated Parent accounts may self-activate
+already activated accounts must use Forgot Password instead
+rate limiting
+anti-abuse controls
+OTP expiry/replay protection
+activation audit log
+duplicate/shared mobile numbers must fail safely and be marked NEEDS_REVIEW
+no automatic merging of Parent accounts
+Admin disable/revoke remains supported
+After activation
+
+Atomically:
+
+save verified email
+set email verified timestamp
+securely save new password
+mark Parent ACTIVATED
+invalidate activation challenges
+preserve all existing Parent-to-learner links
+automatically sign Parent in
+
+Existing normal login and Keep me signed in must continue working.
+
+Account page
+
+Show:
+
+Mobile number
+Registered
+
+Email
+Verified
+
+Do not allow Parents to casually change the registered mobile number.
+
+Important
+
+Do not add learner-number/DOB verification back into this phase.
+
+Harmony has consciously chosen the simpler activation flow:
+
+registered phone + verified email OTP + password
+
+Keep all other Mini Phase 3 requirements concerning migration safety, Gmail, testing, audits, mobile responsiveness and existing Parent security unless they conflict with this simplified flow.

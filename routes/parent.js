@@ -2,17 +2,35 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const fs = require('fs');
+const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { generateKidFriendlyPassword } = require('../utils/passwordGenerator');
 const BANKING_DETAILS = require('../config/bankingDetails');
 const { logAudit, getIp } = require('../utils/auditLogger');
-const { issueAuthToken, sendParentAuthEmail, hashToken, revokeUserSessions, withTransaction, authenticateSession } = require('../services/parentAuth');
+const {
+  issueAuthToken, sendParentAuthEmail, hashToken, randomToken, revokeUserSessions, withTransaction, authenticateSession,
+  normalizePhone, parentOtpHash, generateParentOtp, sendParentActivationOtp,
+  PARENT_OTP_TTL_MINUTES, PARENT_OTP_MAX_ATTEMPTS,
+  PARENT_OTP_RESEND_COOLDOWN_SECONDS, PARENT_OTP_DAILY_RESEND_LIMIT,
+} = require('../services/parentAuth');
 const { getStudentLedger } = require('../services/financeLedger');
 
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin  = [authenticate, authorize('admin', 'super_admin')];
+const activationRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 8, standardHeaders: true, legacyHeaders: false,
+  message: { message: 'Too many requests. Please try again later.' },
+});
+const activationVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false,
+  message: { message: 'Too many attempts. Please try again later.' },
+});
+const activationCompleteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 8, standardHeaders: true, legacyHeaders: false,
+  message: { message: 'Too many requests. Please try again later.' },
+});
 
 const PARENT_NOTIFICATION_LIMIT = 100;
 const safePushEndpoint = (value) => {
@@ -48,11 +66,6 @@ const validatePushSubscription = (subscription) => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function normalizePhone(raw) {
-  if (!raw) return '';
-  return raw.replace(/[\s\-().+]/g, '').replace(/^0/, '27');
-}
-
 function parentPortalUrl(pathname, token) {
   const base = String(process.env.FRONTEND_URL || '').replace(/\/+$/, '');
   return `${base}${pathname}?token=${encodeURIComponent(token)}`;
@@ -62,8 +75,8 @@ function generateTempPassword() {
   return generateKidFriendlyPassword();
 }
 
-async function getChildren(parentId) {
-  const result = await db.query(`
+async function getChildren(parentId, executor = db) {
+  const result = await executor.query(`
     SELECT u.id, u.first_name, u.last_name, u.student_number,
            g.name AS grade_name, c.name AS class_name,
            u.grade_id, u.class_id,
@@ -860,6 +873,288 @@ router.post('/admin/reset-password/:parentId', requireAdmin, async (req, res) =>
     res.json({ success: true, emailed: Boolean(emailed.success), resetLink: parentPortalUrl('/parent/reset-password', token) });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ─── Parent self-activation (OTP) ─────────────────────────────────────────────
+// These routes deliberately never create a user or alter parent_students.  The
+// school must have created the parent account first.
+const genericActivationMessage = 'We could not verify those details. Please contact your school.';
+const alreadyActivatedMessage = 'This Parent account is already activated. Please use Forgot Password to regain access.';
+
+function validActivationEmail(value) {
+  const email = String(value || '').trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 320 ? email : '';
+}
+
+async function matchingParentAccounts(phone) {
+  const result = await db.query(`
+    SELECT u.id, u.phone_number, u.email, u.first_name, u.last_name,
+           u.is_active, u.activated_at, u.parent_account_status
+    FROM users u WHERE u.role='parent'
+  `);
+  return result.rows.filter((parent) => normalizePhone(parent.phone_number) === phone);
+}
+
+router.post('/activation/request', activationRequestLimiter, async (req, res) => {
+  const phone = normalizePhone(req.body?.phone_number || req.body?.phone);
+  const email = validActivationEmail(req.body?.email);
+  const confirmation = validActivationEmail(req.body?.email_confirmation);
+  if (!phone || !email || confirmation !== email) {
+    return res.status(400).json({ message: genericActivationMessage });
+  }
+
+  try {
+    const matches = await matchingParentAccounts(phone);
+    if (matches.length !== 1) {
+      // Shared numbers are unsafe: do not guess which account the caller
+      // means, and make the school resolve every affected account.
+      if (matches.length > 1) {
+        await db.query(
+          `UPDATE users SET parent_account_status='needs_review', updated_at=NOW()
+           WHERE id = ANY($1::int[]) AND role='parent'`,
+          [matches.map(parent => parent.id)],
+        );
+      }
+      return res.status(400).json({ message: genericActivationMessage });
+    }
+
+    const parent = matches[0];
+    if (!parent.is_active) return res.status(400).json({ message: genericActivationMessage });
+    if (parent.activated_at || parent.parent_account_status === 'active') {
+      return res.status(200).json({
+        message: alreadyActivatedMessage,
+        forgotPassword: '/api/auth/forgot-password',
+      });
+    }
+    if (parent.parent_account_status === 'needs_review') {
+      return res.status(400).json({ message: genericActivationMessage });
+    }
+
+    const otp = generateParentOtp();
+    const otpHash = parentOtpHash(otp);
+    const challenge = await withTransaction(async (client) => {
+      const locked = await client.query(
+        `SELECT id,is_active,activated_at,parent_account_status FROM users
+         WHERE id=$1 AND role='parent' FOR UPDATE`, [parent.id],
+      );
+      if (!locked.rows.length || !locked.rows[0].is_active) {
+        throw Object.assign(new Error('not eligible'), { status: 400 });
+      }
+      if (locked.rows[0].activated_at || locked.rows[0].parent_account_status === 'active') {
+        throw Object.assign(new Error('already activated'), { status: 409 });
+      }
+      const recent = await client.query(
+        `SELECT id, last_sent_at FROM parent_activation_challenges
+         WHERE user_id=$1 AND invalidated_at IS NULL AND consumed_at IS NULL
+         ORDER BY created_at DESC LIMIT 1`, [parent.id],
+      );
+      if (recent.rows.length &&
+          (Date.now() - new Date(recent.rows[0].last_sent_at).getTime()) <
+            PARENT_OTP_RESEND_COOLDOWN_SECONDS * 1000) {
+        throw Object.assign(new Error('cooldown'), { status: 429 });
+      }
+      const daily = await client.query(
+        `SELECT COUNT(*)::int AS count FROM parent_activation_challenges
+         WHERE user_id=$1 AND created_at >= CURRENT_DATE`, [parent.id],
+      );
+      if (Number(daily.rows[0]?.count || 0) >= PARENT_OTP_DAILY_RESEND_LIMIT) {
+        throw Object.assign(new Error('daily limit'), { status: 429 });
+      }
+      await client.query(
+        `UPDATE parent_activation_challenges SET invalidated_at=NOW()
+         WHERE user_id=$1 AND invalidated_at IS NULL AND consumed_at IS NULL`, [parent.id],
+      );
+      const inserted = await client.query(
+        `INSERT INTO parent_activation_challenges
+          (user_id,email,otp_hash,expires_at,attempts,max_attempts,last_sent_at,delivery_confirmed_at)
+         VALUES ($1,$2,$3,NOW()+($4 * INTERVAL '1 minute'),0,$5,NOW(),NULL)
+         RETURNING id`, [parent.id, email, otpHash, PARENT_OTP_TTL_MINUTES, PARENT_OTP_MAX_ATTEMPTS],
+      );
+      return { id: inserted.rows[0]?.id };
+    });
+
+    try {
+      await sendParentActivationOtp(email, otp, parent.first_name);
+      const confirmed = await db.query(
+        `UPDATE parent_activation_challenges SET delivery_confirmed_at=NOW()
+         WHERE id=$1 AND delivery_confirmed_at IS NULL AND consumed_at IS NULL
+           AND invalidated_at IS NULL RETURNING id`,
+        [challenge.id],
+      );
+      if (!confirmed.rows.length) throw new Error('challenge delivery confirmation failed');
+    } catch (sendError) {
+      await db.query(
+        `UPDATE parent_activation_challenges SET invalidated_at=NOW()
+         WHERE id=$1 AND consumed_at IS NULL AND invalidated_at IS NULL`,
+        [challenge.id],
+      ).catch(() => {});
+      // Never include provider details or the OTP in a public response.
+      console.error('Parent activation email delivery failed:', sendError.message);
+      return res.status(503).json({ message: 'We could not send a verification code. Please try again later.' });
+    }
+    return res.status(200).json({
+      message: 'If the details match an eligible Parent account, a verification code has been sent.',
+      challenge_id: challenge.id,
+    });
+  } catch (err) {
+    if (err.status === 409) return res.status(200).json({
+      message: alreadyActivatedMessage, forgotPassword: '/api/auth/forgot-password',
+    });
+    if (err.status === 429) return res.status(429).json({ message: 'Please wait before requesting another code.' });
+    if (err.code === '42P01' || err.code === '42703') {
+      return res.status(503).json({ message: 'Parent activation is not yet available.' });
+    }
+    console.error('Parent activation request error:', err.message);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/activation/verify', activationVerifyLimiter, async (req, res) => {
+  const challengeId = Number(req.body?.challenge_id || req.body?.challengeId);
+  const otp = String(req.body?.otp || '');
+  if (!Number.isSafeInteger(challengeId) || challengeId <= 0 || !/^\d{6}$/.test(otp)) {
+    return res.status(400).json({ message: genericActivationMessage });
+  }
+  try {
+    const verification = await withTransaction(async (client) => {
+      const result = await client.query(
+        `SELECT c.id,c.otp_hash,c.attempts,c.max_attempts,c.expires_at,c.verified_at,
+                c.delivery_confirmed_at,
+                c.consumed_at,c.invalidated_at,u.is_active,u.role,u.activated_at,
+                u.parent_account_status
+         FROM parent_activation_challenges c JOIN users u ON u.id=c.user_id
+         WHERE c.id=$1 AND u.role='parent' FOR UPDATE`, [challengeId],
+      );
+      const challenge = result.rows[0];
+      if (!challenge || !challenge.is_active || !challenge.delivery_confirmed_at || challenge.consumed_at ||
+          challenge.invalidated_at || challenge.verified_at ||
+          challenge.activated_at || challenge.parent_account_status === 'active' ||
+          new Date(challenge.expires_at) <= new Date() ||
+          Number(challenge.attempts) >= Number(challenge.max_attempts)) {
+        throw Object.assign(new Error('invalid challenge'), { status: 400 });
+      }
+      if (!crypto.timingSafeEqual(
+        Buffer.from(parentOtpHash(otp), 'hex'), Buffer.from(String(challenge.otp_hash), 'hex'),
+      )) {
+        await client.query(
+          `UPDATE parent_activation_challenges
+           SET attempts=attempts+1,
+               invalidated_at=CASE WHEN attempts+1 >= max_attempts THEN NOW() ELSE invalidated_at END
+           WHERE id=$1 AND consumed_at IS NULL AND invalidated_at IS NULL`, [challengeId],
+        );
+        return null;
+      }
+      const completionToken = randomToken();
+      await client.query(
+        `UPDATE parent_activation_challenges SET verified_at=NOW(),completion_token_hash=$2
+         WHERE id=$1 AND verified_at IS NULL AND consumed_at IS NULL AND invalidated_at IS NULL`,
+        [challengeId, hashToken(completionToken)],
+      );
+      return completionToken;
+    });
+    if (!verification) return res.status(400).json({ message: genericActivationMessage });
+    return res.json({ success: true, challenge_id: challengeId, completion_token: verification });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ message: genericActivationMessage });
+    if (err.code === '42P01' || err.code === '42703') {
+      return res.status(503).json({ message: 'Parent activation is not yet available.' });
+    }
+    console.error('Parent activation verification error:', err.message);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/activation/complete', activationCompleteLimiter, async (req, res) => {
+  const challengeId = Number(req.body?.challenge_id || req.body?.challengeId);
+  const completionToken = String(req.body?.completion_token || req.body?.completionToken || '');
+  const password = String(req.body?.password || req.body?.new_password || '');
+  if (!Number.isSafeInteger(challengeId) || challengeId <= 0 ||
+      !/^[A-Za-z0-9_-]{40,}$/.test(completionToken) ||
+      password.length < 8 || password.length > 256) {
+    return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+  }
+  let completionCookieAttempted = false;
+  try {
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const completed = await withTransaction(async (client) => {
+      const found = await client.query(
+        `SELECT c.id,c.user_id,c.email,c.verified_at,c.consumed_at,c.invalidated_at,c.expires_at,
+                c.completion_token_hash,
+                u.id AS parent_id,u.email AS current_email,u.role,u.is_active,u.activated_at,
+                u.parent_account_status,u.first_name,u.last_name,u.phone_number
+         FROM parent_activation_challenges c JOIN users u ON u.id=c.user_id
+         WHERE c.id=$1 AND u.role='parent' FOR UPDATE`, [challengeId],
+      );
+      const challenge = found.rows[0];
+      if (!challenge || challenge.consumed_at ||
+          !challenge.verified_at || challenge.consumed_at || challenge.invalidated_at ||
+          new Date(challenge.expires_at) <= new Date() || challenge.activated_at ||
+          !challenge.completion_token_hash ||
+          !crypto.timingSafeEqual(
+            Buffer.from(hashToken(completionToken), 'hex'),
+            Buffer.from(String(challenge.completion_token_hash), 'hex'),
+          )) {
+        throw Object.assign(new Error('invalid challenge'), { status: 400 });
+      }
+      const lockedUser = await client.query(
+        `SELECT id,role,is_active,activated_at,parent_account_status FROM users
+         WHERE id=$1 AND role='parent' FOR UPDATE`, [challenge.user_id],
+      );
+      const user = lockedUser.rows[0];
+      if (!user || !user.is_active || user.activated_at ||
+          ['active', 'needs_review'].includes(user.parent_account_status)) {
+        throw Object.assign(new Error('invalid account'), { status: 400 });
+      }
+      const updated = await client.query(
+        `UPDATE users SET password=$1,email=$2,email_verified_at=NOW(),
+           must_change_password=false,activated_at=NOW(),parent_account_status='active',
+            password_changed_at=NOW(),updated_at=NOW() WHERE id=$3 AND role='parent'
+          RETURNING id,email,email_verified_at,role,student_number,first_name,last_name,
+                    phone_number,must_change_password`,
+        [hashedPassword, challenge.email, challenge.user_id],
+      );
+      if (!updated.rows.length) {
+        throw Object.assign(new Error('invalid account'), { status: 400 });
+      }
+      const updatedUser = updated.rows[0];
+      await client.query(
+        `UPDATE parent_activation_challenges
+         SET consumed_at=NOW(),invalidated_at=COALESCE(invalidated_at,NOW())
+         WHERE user_id=$1 AND consumed_at IS NULL AND invalidated_at IS NULL`, [challenge.user_id],
+      );
+      await client.query(
+        `UPDATE parent_auth_tokens SET revoked_at=NOW()
+         WHERE user_id=$1 AND used_at IS NULL AND revoked_at IS NULL`,
+        [challenge.user_id],
+      );
+      await logAudit({
+        executor: client, required: true, userId: challenge.user_id,
+        userName: `${updatedUser.first_name || ''} ${updatedUser.last_name || ''}`.trim(),
+        userRole: 'parent', action: 'parent_self_activation_completed',
+        entityType: 'parent', entityId: challenge.user_id, ipAddress: getIp(req),
+        details: { email_verified: true },
+      });
+      const safeUser = { ...updatedUser, is_active: true };
+      const children = await getChildren(safeUser.id, client);
+      const session = await authenticateSession(req, res, safeUser, true, undefined, client);
+      completionCookieAttempted = true;
+      return { user: safeUser, children, token: session.token };
+    });
+    return res.json({
+      success: true, message: 'Parent account activated', token: completed.token,
+      user: completed.user, children: completed.children, child: completed.children[0] || null,
+    });
+  } catch (err) {
+    if (completionCookieAttempted) {
+      res.clearCookie('parent_refresh', { path: '/api/auth' });
+    }
+    if (err.status === 400) return res.status(400).json({ message: genericActivationMessage });
+    if (err.code === '42P01' || err.code === '42703') {
+      return res.status(503).json({ message: 'Parent activation is not yet available.' });
+    }
+    console.error('Parent activation completion error:', err.message);
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 

@@ -6,8 +6,54 @@ const { sendEmail, escapeHtml } = require('./gmailService');
 const ACCESS_SECONDS = 10 * 60;
 const REMEMBERED_DAYS = 30;
 const NORMAL_DAYS = 1;
+const PARENT_OTP_TTL_MINUTES = 10;
+const PARENT_OTP_MAX_ATTEMPTS = 5;
+const PARENT_OTP_RESEND_COOLDOWN_SECONDS = 60;
+const PARENT_OTP_DAILY_RESEND_LIMIT = 5;
 const hashToken = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const randomToken = () => crypto.randomBytes(32).toString('base64url');
+
+/**
+ * Store and compare phone numbers in one canonical South African mobile
+ * format.  This intentionally accepts the formats commonly copied from
+ * school records, but does not turn arbitrary numbers into parent accounts.
+ */
+function normalizePhone(raw) {
+  if (raw === null || raw === undefined) return '';
+  let value = String(raw).trim().replace(/[\s().-]/g, '');
+  if (value.startsWith('00')) value = value.slice(2);
+  if (value.startsWith('+')) value = value.slice(1);
+  if (value.startsWith('0')) value = `27${value.slice(1)}`;
+  // Some exports contain the trunk zero after the country code.
+  if (value.startsWith('270')) value = `27${value.slice(3)}`;
+  if (!/^27[6-8]\d{8}$/.test(value)) return '';
+  return value;
+}
+
+function parentOtpHash(otp) {
+  // A separate pepper means disclosure of a database dump does not permit
+  // offline OTP guessing without the application secret.
+  const pepper = process.env.PARENT_OTP_SECRET || process.env.SESSION_SECRET || process.env.JWT_SECRET;
+  if (!pepper) throw new Error('A Parent OTP application secret is required');
+  return crypto.createHmac('sha256', pepper).update(String(otp)).digest('hex');
+}
+
+function generateParentOtp() {
+  return String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+}
+
+async function sendParentActivationOtp(email, otp, name = '') {
+  return sendEmail(
+    email,
+    'Harmony Parent Portal — verification code',
+    `<!doctype html><html><body><h2>Harmony Parent Portal</h2>
+      <p>Dear ${escapeHtml(name)},</p>
+      <p>Your Parent Portal verification code is <strong>${escapeHtml(otp)}</strong>.</p>
+      <p>This code expires shortly and can only be used once. If you did not request this, you can ignore this email.</p>
+      <hr><p>Harmony Learning Institute</p><p>Powered by AutoM8</p></body></html>`,
+    { fromName: 'Harmony Parent Portal — powered by AutoM8', replyTo: 'harmonylearninginstitute@gmail.com' },
+  );
+}
 // Express' `req.secure` is proxy-aware when trust proxy is configured. Keep the
 // production fallback as a defence-in-depth measure, while accepting the first
 // forwarded protocol value used by common load balancers.
@@ -22,12 +68,12 @@ function accessToken(user, sessionId) {
     process.env.JWT_SECRET, { expiresIn: `${ACCESS_SECONDS}s` });
 }
 
-async function issueRefresh(req, user, remember = false, familyId = crypto.randomUUID(), familyExpiresAt) {
+async function issueRefresh(req, user, remember = false, familyId = crypto.randomUUID(), familyExpiresAt, executor = db) {
   const raw = randomToken();
   const days = remember ? REMEMBERED_DAYS : NORMAL_DAYS;
   const familyExpiry = familyExpiresAt ? new Date(familyExpiresAt) : new Date(Date.now() + days * 86400000);
   const expiresIn = Math.max(1, Math.ceil((familyExpiry.getTime() - Date.now()) / 1000));
-  const inserted = await db.query(`INSERT INTO parent_sessions
+  const inserted = await executor.query(`INSERT INTO parent_sessions
     (user_id, refresh_token_hash, family_id, family_expires_at, expires_at, user_agent, ip_address)
     VALUES ($1,$2,$3,$4,LEAST($4,NOW()+($5 * INTERVAL '1 day')),$6,$7) RETURNING id`,
     [user.id, hashToken(raw), familyId, familyExpiry, days, req.get('user-agent') || null, req.ip || null]);
@@ -51,8 +97,8 @@ function setRefreshCookie(req, res, raw, maxAge) {
   res.cookie('parent_refresh', raw, options);
 }
 
-async function authenticateSession(req, res, user, remember = false, familyId) {
-  const refresh = await issueRefresh(req, user, remember, familyId);
+async function authenticateSession(req, res, user, remember = false, familyId, executor = db) {
+  const refresh = await issueRefresh(req, user, remember, familyId, undefined, executor);
   setRefreshCookie(req, res, refresh.raw, remember ? refresh.expiresIn : undefined);
   return { token: accessToken(user, refresh.id), refresh };
 }
@@ -104,4 +150,7 @@ async function sendParentAuthEmail(email, token, type, name = '') {
 module.exports = {
   ACCESS_SECONDS, REMEMBERED_DAYS, NORMAL_DAYS, hashToken, randomToken, accessToken, authenticateSession, withTransaction,
   setRefreshCookie, revokeUserSessions, issueAuthToken, sendParentAuthEmail, secureCookie,
+  normalizePhone, parentOtpHash, generateParentOtp, sendParentActivationOtp,
+  PARENT_OTP_TTL_MINUTES, PARENT_OTP_MAX_ATTEMPTS,
+  PARENT_OTP_RESEND_COOLDOWN_SECONDS, PARENT_OTP_DAILY_RESEND_LIMIT,
 };
