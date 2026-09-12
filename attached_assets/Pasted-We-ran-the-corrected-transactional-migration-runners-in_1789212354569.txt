@@ -1,0 +1,124 @@
+We ran the corrected transactional migration runners in production and all three still fail verification and roll back.
+
+Do not create another migration yet.
+Do not modify application functionality.
+Do not deploy automatically.
+Do not run production queries automatically.
+Do not touch finance.
+
+Production results:
+
+Phase 2
+
+npm run migrate:parent-activation
+
+fails verification for:
+
+parent_auth_tokens indexes
+parent_sessions indexes
+primary keys
+unique constraints
+token type check
+parent auth/session foreign keys
+
+Phase 3
+
+npm run migrate:parent-notifications
+
+fails verification for:
+
+parent notification indexes
+notification primary/unique/check constraints
+notification/read foreign keys
+push subscription primary key
+push endpoint uniqueness
+active-parent push index
+push parent foreign key
+
+After rollback, preflight also still sees the old legacy definitions for is_active, created_at, and updated_at, which is expected if the transaction rolled back.
+
+Phase 4
+
+npm run migrate:parent-targeting
+
+still fails for:
+
+announcements.idx_announcements_target_parent_ids
+documents.idx_documents_target_parent_ids
+
+even though the previous fix claimed the verifier now understood GIN indexes.
+
+This strongly suggests we still have a mismatch between the actual PostgreSQL catalog representation and what parent-schema-verifier.js expects, or that the intended SQL objects are not being executed/created as assumed.
+
+First task: diagnostic only
+
+Create a read-only production schema diagnostic command:
+
+npm run audit:parent-schema-debug
+
+It must query PostgreSQL system catalogs / information_schema and print the actual production metadata for only these tables:
+
+parent_auth_tokens
+parent_sessions
+parent_notifications
+parent_notification_reads
+parent_push_subscriptions
+announcements
+documents
+
+Report:
+
+Exact table schema/name
+Columns, PostgreSQL data types, nullable state and defaults
+Exact indexes:
+index name
+access method (btree, gin, etc.)
+uniqueness
+indexed columns/expressions
+Exact constraints:
+primary key
+unique
+check
+foreign key
+Foreign-key referenced table/column and delete behavior
+Relevant sequences/identity/defaults where applicable
+
+Do not print actual row contents, tokens, parent information, passwords, emails or other sensitive data.
+
+Second task: verifier self-audit
+
+Audit parent-schema-verifier.js against PostgreSQL catalog semantics.
+
+Specifically inspect whether it incorrectly assumes:
+
+constraint/index names instead of semantic equivalence
+p/u/c/f internal constraint labels in a way that cannot match its own queries
+schema-qualified names incorrectly
+ordered B-tree metadata for GIN indexes
+SERIAL versus integer+sequence representation
+timestamp versus timestamptz
+constraint-backed unique indexes versus standalone unique indexes
+composite primary keys
+PostgreSQL-generated names
+Third task: migration execution audit
+
+Verify that each runner actually executes the complete intended SQL file(s) before verification:
+
+Phase 2 migration SQL
+Phase 3 base SQL
+Phase 3 legacy repair SQL
+Phase 4 targeting SQL
+
+Check for transaction behavior, premature returns, multiple-statement handling and any swallowed SQL errors.
+
+Return only
+Diagnostic script/files added
+Exact command to run
+What metadata it will output
+Any verifier bugs found through static review
+Any migration-runner bugs found
+Tests performed
+
+Do not yet change the migration SQL or verifier expectations based on guesses.
+
+We will run the diagnostic against production and provide its output before deciding the repair.

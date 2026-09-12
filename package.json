@@ -26,6 +26,7 @@
     "migrate:parent-targeting": "node scripts/run-parent-targeting-migration.js",
     "migrate:manual-finance-reconciliation": "node scripts/run-manual-finance-reconciliation-migration.js",
     "audit:parent-rollout-preflight": "node scripts/audit-parent-rollout-preflight.js",
+    "audit:parent-schema-debug": "node scripts/audit-parent-schema-debug.js",
     "fix:enrollment-status-width": "node scripts/fix-enrollment-status-width.js",
     "install-client": "cd client && npm install",
     "heroku-postbuild": "npm run build",
