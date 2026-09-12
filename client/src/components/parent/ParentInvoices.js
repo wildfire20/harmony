@@ -16,6 +16,7 @@ const R = (n) => `R ${Number(n || 0).toFixed(2)}`;
 const ParentInvoices = ({ child }) => {
   const [tab, setTab] = useState('invoices');
   const [invoices, setInvoices] = useState([]);
+  const [serviceComponents, setServiceComponents] = useState([]);
   const [totals, setTotals] = useState({ totalDue: 0, totalPaid: 0, outstanding: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -24,7 +25,11 @@ const ParentInvoices = ({ child }) => {
   useEffect(() => {
     setLoading(true);
     parentApi('/invoices')
-      .then((d) => { setInvoices(d.invoices || []); setTotals(d.totals || {}); })
+      .then((d) => {
+        setInvoices(d.invoices || []);
+        setTotals(d.totals || {});
+        setServiceComponents(d.serviceComponents || []);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
     parentApi('/banking-details').then(d => setBanking(d.banking)).catch(() => {});
@@ -88,25 +93,21 @@ const ParentInvoices = ({ child }) => {
           </div>
 
           {/* Enrolled services */}
-          {child && (child.is_boarder || child.uses_transport || child.uses_aftercare) && (
+          {serviceComponents.length > 0 && (
             <div className="bg-purple-50 border border-purple-100 rounded-2xl p-4">
               <p className="text-purple-800 font-semibold text-sm mb-2">Enrolled Services</p>
-              <div className="flex flex-wrap gap-2">
-                {child.is_boarder && (
-                  <span className="flex items-center gap-1.5 bg-purple-100 text-purple-700 text-xs font-semibold px-2.5 py-1 rounded-full">
-                    <Bed className="h-3.5 w-3.5" /> Boarding
+              <div className="grid grid-cols-2 gap-2">
+                {serviceComponents.map((component) => (
+                  <span key={component.key} className="flex items-center justify-between gap-2 bg-white/70 text-purple-700 text-xs font-semibold px-2.5 py-1.5 rounded-lg">
+                    <span className="flex items-center gap-1.5">
+                      {component.key === 'boarding' && <Bed className="h-3.5 w-3.5" />}
+                      {component.key === 'transport' && <Bus className="h-3.5 w-3.5" />}
+                      {component.key === 'aftercare' && <Sunset className="h-3.5 w-3.5" />}
+                      {component.label}
+                    </span>
+                    <span>R {Number(component.amount || 0).toFixed(2)}</span>
                   </span>
-                )}
-                {child.uses_transport && (
-                  <span className="flex items-center gap-1.5 bg-blue-100 text-blue-700 text-xs font-semibold px-2.5 py-1 rounded-full">
-                    <Bus className="h-3.5 w-3.5" /> Transport
-                  </span>
-                )}
-                {child.uses_aftercare && (
-                  <span className="flex items-center gap-1.5 bg-amber-100 text-amber-700 text-xs font-semibold px-2.5 py-1 rounded-full">
-                    <Sunset className="h-3.5 w-3.5" /> Aftercare
-                  </span>
-                )}
+                ))}
               </div>
             </div>
           )}

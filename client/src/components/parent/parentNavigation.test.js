@@ -12,6 +12,12 @@ describe('parent return-to safety', () => {
     expect(getSafeParentDestination('/admin/users')).toBeNull();
     expect(getReturnDestination('?returnTo=https%3A%2F%2Fexample.com')).toBe('/parent/dashboard');
   });
+
+  test('does not allow the rollout-disabled Grades destination', () => {
+    expect(getSafeParentDestination('/parent/grades')).toBeNull();
+    expect(getReturnDestination('?returnTo=%2Fparent%2Fgrades')).toBe('/parent/dashboard');
+    expect(parentLoginPath('/parent/grades')).toBe('/parent/login');
+  });
 });
 
 describe('existing browser push subscription ownership', () => {

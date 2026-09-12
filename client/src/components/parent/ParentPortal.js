@@ -1,23 +1,22 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Home, CalendarDays, GraduationCap, Bell, CreditCard, FolderOpen,
-  LogOut, Menu, X, BookOpen, ChevronDown, ChevronRight, Users, BellRing, Settings2
+  Home, CalendarDays, Bell, CreditCard, FolderOpen,
+  LogOut, Menu, X, ChevronDown, ChevronRight, Users, BellRing, Settings2
 } from 'lucide-react';
 import ParentDashboard from './ParentDashboard';
 import ParentAttendance from './ParentAttendance';
-import ParentGrades from './ParentGrades';
 import ParentAnnouncements from './ParentAnnouncements';
 import ParentInvoices from './ParentInvoices';
 import ParentDocuments from './ParentDocuments';
 import ParentAccount from './ParentAccount';
 import ParentNotifications from './ParentNotifications';
 import { getSafeParentDestination, parentLoginPath } from './parentNavigation';
+import './ParentPortal.css';
 
 const NAV = [
   { path: '/parent/dashboard',      label: 'Home',        icon: Home },
   { path: '/parent/attendance',     label: 'Attendance',  icon: CalendarDays },
-  { path: '/parent/grades',         label: 'Grades',      icon: GraduationCap },
   { path: '/parent/announcements',  label: 'Notices',     icon: Bell },
   { path: '/parent/documents',      label: 'Documents',   icon: FolderOpen },
   { path: '/parent/invoices',       label: 'Fees',        icon: CreditCard },
@@ -26,7 +25,6 @@ const NAV = [
 const MOBILE_NAV_PATHS = new Set([
   '/parent/dashboard',
   '/parent/attendance',
-  '/parent/grades',
   '/parent/invoices',
   '/parent/account',
 ]);
@@ -35,9 +33,12 @@ const MOBILE_NAV_PATHS = new Set([
 export const useParentAuth = () => {
   const storage = sessionStorage;
   const token    = storage.getItem('parentToken');
-  const user     = JSON.parse(storage.getItem('parentUser')     || 'null');
-  const children = JSON.parse(storage.getItem('parentChildren') || '[]');
-  const child    = JSON.parse(storage.getItem('parentChild')    || 'null');
+  const parse = (key, fallback) => {
+    try { return JSON.parse(storage.getItem(key) || fallback); } catch (_) { return JSON.parse(fallback); }
+  };
+  const user     = parse('parentUser', 'null');
+  const children = parse('parentChildren', '[]');
+  const child    = parse('parentChild', 'null');
   return { token, user, children, child, isAuthenticated: !!token };
 };
 
@@ -46,7 +47,8 @@ export const parentApi = async (path, opts = {}) => {
   const { skipChildId, ...requestOptions } = opts;
   const storage = sessionStorage;
   const token = storage.getItem('parentToken');
-  const selected = JSON.parse(storage.getItem('parentChild') || 'null');
+  let selected = null;
+  try { selected = JSON.parse(storage.getItem('parentChild') || 'null'); } catch (_) {}
   const requestPath = skipChildId || path.includes('child_id=') || !selected?.id
     ? path
     : `${path}${path.includes('?') ? '&' : '?'}child_id=${encodeURIComponent(selected.id)}`;
@@ -92,7 +94,8 @@ export const refreshParentAccess = () => {
       const profile = await me.json().catch(() => ({}));
       if (!me.ok) throw new Error(profile.message || 'Unable to load parent profile');
       const children = profile.children || [];
-      const previous = JSON.parse(sessionStorage.getItem('parentChild') || 'null');
+      let previous = null;
+      try { previous = JSON.parse(sessionStorage.getItem('parentChild') || 'null'); } catch (_) {}
       const selected = children.find(child => child.id === previous?.id) || children[0] || null;
       if (profile.parent) sessionStorage.setItem('parentUser', JSON.stringify(profile.parent));
       sessionStorage.setItem('parentChildren', JSON.stringify(children));
@@ -101,7 +104,10 @@ export const refreshParentAccess = () => {
       return d.token;
     })
     .catch((error) => {
-      ['parentToken', 'parentUser', 'parentChildren', 'parentChild'].forEach(key => sessionStorage.removeItem(key));
+      ['parentToken', 'parentUser', 'parentChildren', 'parentChild'].forEach(key => {
+        sessionStorage.removeItem(key);
+        localStorage.removeItem(key);
+      });
       throw error;
     })
     .finally(() => { parentRefreshPromise = null; });
@@ -173,7 +179,7 @@ const ChildSwitcher = ({ children, selectedChild, onSelect }) => {
 
 // ─── Push Notification Hook ───────────────────────────────────────────────────
 export const verifyParentPushSubscription = async (subscription) => {
-  const token = sessionStorage.getItem('parentToken') || localStorage.getItem('parentToken');
+  const token = sessionStorage.getItem('parentToken');
   const response = await fetch('/api/parent/push/subscribe', {
     method: 'POST',
     credentials: 'include',
@@ -264,10 +270,11 @@ const ParentPortal = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, children, isAuthenticated } = useParentAuth();
+  const [, setAuthVersion] = useState(0);
   const [bootstrapping, setBootstrapping] = useState(!isAuthenticated);
-  const [selectedChild, setSelectedChild] = useState(
-    JSON.parse(sessionStorage.getItem('parentChild') || localStorage.getItem('parentChild') || 'null')
-  );
+  const [selectedChild, setSelectedChild] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('parentChild') || 'null'); } catch (_) { return null; }
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileChildOpen, setMobileChildOpen] = useState(false);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
@@ -280,7 +287,7 @@ const ParentPortal = () => {
     if (!isAuthenticated) {
       refreshParentAccess().catch(() => {}).finally(() => {
         setBootstrapping(false);
-        if (sessionStorage.getItem('parentToken')) window.location.reload();
+        if (sessionStorage.getItem('parentToken')) setAuthVersion(version => version + 1);
         else navigate(parentLoginPath(getSafeParentDestination(`${location.pathname}${location.search}`)), { replace: true });
       });
     } else setBootstrapping(false);
@@ -289,9 +296,9 @@ const ParentPortal = () => {
   // Refresh children data from the server so enrollment flag changes are reflected immediately
   useEffect(() => {
     if (!isAuthenticated) return;
-    const storage = sessionStorage.getItem('parentToken') ? sessionStorage : localStorage;
+    const storage = sessionStorage;
     const token = storage.getItem('parentToken');
-    fetch('/api/parent/me', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/parent/me', { credentials: 'include', headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return;
@@ -301,6 +308,7 @@ const ParentPortal = () => {
         setSelectedChild(prev => {
           if (freshChildren.length === 0) {
             storage.removeItem('parentChild');
+            localStorage.removeItem('parentChild');
             return null;
           }
           const refreshed = freshChildren.find(c => c.id === (prev?.id || freshChildren[0]?.id));
@@ -329,13 +337,13 @@ const ParentPortal = () => {
 
   const handleSelectChild = (child) => {
     setSelectedChild(child);
-    (sessionStorage.getItem('parentToken') ? sessionStorage : localStorage).setItem('parentChild', JSON.stringify(child));
+    sessionStorage.setItem('parentChild', JSON.stringify(child));
   };
 
   const handleLogout = () => {
     fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {}).finally(() => {
       sessionStorage.clear();
-      localStorage.removeItem('parentUser'); localStorage.removeItem('parentChildren'); localStorage.removeItem('parentChild');
+      ['parentToken', 'parentUser', 'parentChildren', 'parentChild'].forEach(key => localStorage.removeItem(key));
       navigate('/parent/login', { replace: true });
     });
   };
@@ -349,8 +357,8 @@ const ParentPortal = () => {
         <header className="sticky top-0 z-30 border-b border-white/10 bg-[#19324a] text-white shadow-[0_8px_22px_rgba(25,50,74,.18)]">
           <div className="mx-auto flex h-[68px] max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
             <div className="flex items-center gap-2 shrink-0">
-              <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#e86e5b]"><BookOpen className="h-5 w-5 text-white" /></div>
-              <div><span className="block text-sm font-bold tracking-tight">Harmony Learning</span><span className="block text-[10px] uppercase tracking-[0.18em] text-[#b9d5d4]">Parent portal</span></div>
+               <div className="grid h-9 w-9 place-items-center rounded-xl bg-white p-1"><img src="/images/harmony-logo.png" alt="" className="max-h-full max-w-full object-contain" /></div>
+               <div><span className="block text-sm font-bold tracking-tight">Harmony Learning</span><span className="block text-[10px] uppercase tracking-[0.18em] text-[#b9d5d4]">Parent portal</span></div>
             </div>
 
             {/* Child switcher (desktop) */}
@@ -386,7 +394,7 @@ const ParentPortal = () => {
 
           {/* Mobile menu */}
           {mobileMenuOpen && (
-            <div className="sm:hidden bg-blue-950/95 border-t border-white/10">
+             <div className="parent-mobile-menu sm:hidden border-t border-white/10">
               {/* Child switcher for mobile */}
               {children && children.length > 0 && (
                 <div className="border-b border-white/10">
@@ -502,7 +510,7 @@ const ParentPortal = () => {
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard"     element={<ParentDashboard  child={selectedChild} user={user} />} />
               <Route path="attendance"    element={<ParentAttendance child={selectedChild} />} />
-              <Route path="grades"        element={<ParentGrades     child={selectedChild} />} />
+               <Route path="grades"        element={<Navigate to="/parent/dashboard" replace />} />
               <Route path="announcements" element={<ParentAnnouncements child={selectedChild} />} />
               <Route path="notifications"  element={<ParentNotifications />} />
               <Route path="documents"       element={<ParentDocuments     child={selectedChild} />} />

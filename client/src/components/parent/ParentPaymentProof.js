@@ -47,8 +47,9 @@ export default function ParentPaymentProof({ child, embedded = false }) {
   const viewReceipt = async (id, fileName) => {
     setReceiptLoading(id);
     try {
-      const token = localStorage.getItem('parentToken');
+      const token = sessionStorage.getItem('parentToken');
       const res = await fetch(`/api/payment-proofs/${id}/receipt`, {
+        credentials: 'include',
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -82,8 +83,8 @@ export default function ParentPaymentProof({ child, embedded = false }) {
   );
 
   const authFetch = (url) => {
-    const token = localStorage.getItem('parentToken');
-    return fetch(url, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
+    const token = sessionStorage.getItem('parentToken');
+    return fetch(url, { credentials: 'include', headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
   };
 
   const loadSubmissions = () => {
@@ -153,9 +154,10 @@ export default function ParentPaymentProof({ child, embedded = false }) {
       if (child?.id) fd.append('child_id', child.id);
       if (file) fd.append('receipt', file);
 
-      const token = localStorage.getItem('parentToken');
+      const token = sessionStorage.getItem('parentToken');
       const res = await fetch('/api/payment-proofs', {
         method: 'POST',
+        credentials: 'include',
         headers: { Authorization: `Bearer ${token}` },
         body: fd,
       });

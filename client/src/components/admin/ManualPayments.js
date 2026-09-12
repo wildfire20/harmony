@@ -448,6 +448,12 @@ const ManualPayments = () => {
                         </td>
                         <td className="px-4 py-3 text-sm font-medium text-green-600">
                           R {parseFloat(payment.amount).toFixed(2)}
+                           {payment.is_reversal && (
+                             <span className="ml-2 text-xs text-gray-500">(reversal)</span>
+                           )}
+                           {!payment.is_reversal && payment.is_reversed && (
+                             <span className="ml-2 text-xs text-gray-500">(reversed)</span>
+                           )}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-900">
                           {months.find(m => m.value === payment.month)?.label} {payment.year}
@@ -465,20 +471,24 @@ const ManualPayments = () => {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm space-x-2">
-                          <button
-                            onClick={() => handleEditPayment(payment)}
-                            className="text-blue-600 hover:text-blue-800"
-                            title="Edit"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeletePayment(payment.id)}
-                            className="text-red-600 hover:text-red-800"
-                            title="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                           {!payment.is_reversal && !payment.is_reversed && (
+                             <>
+                               <button
+                                 onClick={() => handleEditPayment(payment)}
+                                 className="text-blue-600 hover:text-blue-800"
+                                 title="Edit"
+                               >
+                                 <Edit className="h-4 w-4" />
+                               </button>
+                               <button
+                                 onClick={() => handleDeletePayment(payment.id)}
+                                 className="text-red-600 hover:text-red-800"
+                                 title="Delete"
+                               >
+                                 <Trash2 className="h-4 w-4" />
+                               </button>
+                             </>
+                           )}
                         </td>
                       </tr>
                     ))}

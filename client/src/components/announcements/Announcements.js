@@ -18,7 +18,10 @@ const Announcements = () => {
     title: '',
     content: '',
     priority: 'normal',
-    target_audience: 'everyone'
+    target_audience: 'everyone',
+    grade_id: '',
+    class_id: '',
+    parent_ids: ''
   });
 
   const isDark = theme === 'dark';
@@ -59,7 +62,10 @@ const Announcements = () => {
           title: '',
           content: '',
           priority: 'normal',
-          target_audience: 'everyone'
+          target_audience: 'everyone',
+          grade_id: '',
+          class_id: '',
+          parent_ids: ''
         });
         toast.success('Announcement created successfully!');
       },
@@ -104,7 +110,14 @@ const Announcements = () => {
       title: formData.title.trim(),
       content: formData.content.trim(),
       priority: formData.priority || 'normal',
-      target_audience: formData.target_audience || 'everyone'
+      target_audience: user?.role === 'teacher'
+        ? 'staff'
+        : (formData.target_audience || 'everyone'),
+      ...(formData.grade_id ? { grade_id: Number(formData.grade_id) } : {}),
+      ...(formData.class_id ? { class_id: Number(formData.class_id) } : {}),
+      ...(formData.target_audience === 'specific_parents'
+        ? { parent_ids: formData.parent_ids.split(',').map(value => Number(value.trim())).filter(Number.isSafeInteger) }
+        : {})
     };
 
     createAnnouncementMutation.mutate(submitData);
@@ -151,6 +164,11 @@ const Announcements = () => {
       case 'staff': return 'Staff Only';
       case 'students': return 'Students Only';
       case 'everyone': return 'Everyone';
+      case 'parents':
+      case 'all_parents': return 'All Parents';
+      case 'grade': return 'Grade';
+      case 'class': return 'Class';
+      case 'specific_parents': return 'Specific Parents';
       default: return targetAudience;
     }
   };
@@ -242,9 +260,48 @@ const Announcements = () => {
                   >
                     <option value="everyone">Everyone</option>
                     <option value="staff">Staff Only</option>
-                    <option value="students">Students Only</option>
+                    <option value="parents">All Parents</option>
+                    <option value="grade">Grade</option>
+                    <option value="class">Class</option>
+                    <option value="specific_parents">Specific Parents</option>
                   </select>
                 </div>
+              )}
+              {(user?.role === 'admin' || user?.role === 'super_admin') &&
+                ['grade', 'class'].includes(formData.target_audience) && (
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Grade ID"
+                    value={formData.grade_id}
+                    onChange={(e) => setFormData({ ...formData, grade_id: e.target.value })}
+                    required
+                    className={`w-full px-4 py-2.5 rounded-xl border ${cardBorder} ${cardBg} ${textPrimary}`}
+                  />
+                  {formData.target_audience === 'class' && (
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Class ID"
+                      value={formData.class_id}
+                      onChange={(e) => setFormData({ ...formData, class_id: e.target.value })}
+                      required
+                      className={`w-full px-4 py-2.5 rounded-xl border ${cardBorder} ${cardBg} ${textPrimary}`}
+                    />
+                  )}
+                </div>
+              )}
+              {(user?.role === 'admin' || user?.role === 'super_admin') &&
+                formData.target_audience === 'specific_parents' && (
+                <input
+                  type="text"
+                  placeholder="Parent IDs (comma-separated)"
+                  value={formData.parent_ids}
+                  onChange={(e) => setFormData({ ...formData, parent_ids: e.target.value })}
+                  required
+                  className={`w-full px-4 py-2.5 rounded-xl border ${cardBorder} ${cardBg} ${textPrimary}`}
+                />
               )}
 
               <div>

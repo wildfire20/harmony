@@ -9,6 +9,13 @@ const s3Service = require('../services/s3Service');
 const { notifyDocument } = require('../services/parentNotificationService');
 
 const router = express.Router();
+const DOCUMENT_AUDIENCES = [
+  'everyone', 'student', 'staff', 'parents', 'all_parents',
+  'grade', 'class', 'specific_parents',
+];
+const toIdArray = (value) => Array.isArray(value)
+  ? [...new Set(value.map(Number).filter(id => Number.isSafeInteger(id) && id > 0))]
+  : [];
 
 // Configure multer for handling file uploads (now stores in memory for S3)
 const storage = multer.memoryStorage(); // Use memory storage for S3 upload
@@ -180,6 +187,8 @@ router.get('/grade/:gradeId/class/:classId', [
           OR
           -- Admin target audience documents
           (d.target_audience = 'everyone')
+           OR (d.target_audience = 'grade' AND d.grade_id = $1)
+           OR (d.target_audience = 'class' AND d.grade_id = $1 AND d.class_id = $2)
           OR
           (d.target_audience = 'student' AND $3 = 'student')
           OR
@@ -216,6 +225,8 @@ router.get('/grade/:gradeId/class/:classId', [
             OR
             -- Admin target audience documents
             (d.target_audience = 'everyone')
+            OR (d.target_audience = 'grade' AND d.grade_id = $1)
+            OR (d.target_audience = 'class' AND d.grade_id = $1 AND d.class_id = $2)
             OR
             (d.target_audience = 'student' AND $3 = 'student')
             OR
@@ -301,8 +312,21 @@ router.post('/upload', [
       });
     }
 
-    const { title, description, document_type, grade_id, class_id, target_audience } = req.body;
+    const {
+      title, description, document_type, grade_id, class_id, target_audience,
+    } = req.body;
     const user = req.user;
+    const important = String(req.body.important || '').toLowerCase() === 'true';
+    const notifyEmail = String(req.body.notify_email || '').toLowerCase() === 'true';
+    const audience = String(target_audience || '').toLowerCase();
+
+    if (user.role === 'teacher' && audience) {
+      return res.status(403).json({ success: false, message: 'Teachers can only publish to their assigned class' });
+    }
+    const postedParentIds = req.body.parent_ids ?? req.body['parent_ids[]'];
+    let targetParentIds = Array.isArray(postedParentIds)
+      ? toIdArray(postedParentIds)
+      : toIdArray(typeof postedParentIds === 'string' ? postedParentIds.split(',') : []);
 
     // Validate required fields based on user role
     if (!title || !document_type) {
@@ -321,12 +345,20 @@ router.post('/upload', [
         });
       }
       
-      const validAudiences = ['everyone', 'student', 'staff', 'parents'];
-      if (!validAudiences.includes(target_audience)) {
+      if (!DOCUMENT_AUDIENCES.includes(audience)) {
         return res.status(400).json({ 
           success: false,
-          message: 'Invalid target audience. Must be: everyone, student, staff, or parents' 
+          message: 'Invalid target audience'
         });
+      }
+      if (['grade', 'class'].includes(audience) && !grade_id) {
+        return res.status(400).json({ success: false, message: 'Grade ID is required for grade/class targeting' });
+      }
+      if (audience === 'class' && !class_id) {
+        return res.status(400).json({ success: false, message: 'Class ID is required for class targeting' });
+      }
+      if (audience === 'specific_parents' && !targetParentIds.length) {
+        return res.status(400).json({ success: false, message: 'Select at least one parent' });
       }
     } else {
       // For teacher uploads, validate grade_id and class_id
@@ -341,17 +373,35 @@ router.post('/upload', [
     let gradeId = null;
     let classId = null;
 
-    // Only process grade/class for non-admin uploads
-    if (user.role === 'teacher') {
+    // Process grade/class for teacher uploads and explicitly scoped admin
+    // uploads.  These values are validated again below and never imply
+    // parent membership by themselves.
+    if (user.role === 'teacher' || ['grade', 'class'].includes(audience)) {
       gradeId = parseInt(grade_id, 10);
-      classId = parseInt(class_id, 10);
+      classId = class_id ? parseInt(class_id, 10) : null;
 
-      if (isNaN(gradeId) || isNaN(classId)) {
+      if (isNaN(gradeId) || (audience === 'class' && isNaN(classId))) {
         return res.status(400).json({ 
           success: false,
           message: 'Invalid grade or class ID' 
         });
       }
+    }
+
+    if (audience === 'specific_parents') {
+      const eligible = await db.query(`
+        SELECT DISTINCT p.id
+        FROM users p
+        JOIN parent_students ps ON ps.parent_id = p.id
+        JOIN users s ON s.id = ps.student_id AND s.role = 'student' AND s.is_active = true
+        WHERE p.role = 'parent' AND p.is_active = true AND p.id = ANY($1::int[])
+      `, [targetParentIds]);
+      targetParentIds = eligible.rows.map(row => Number(row.id));
+      if (!targetParentIds.length) {
+        return res.status(400).json({ success: false, message: 'No selected parents have an active linked student' });
+      }
+    } else {
+      targetParentIds = [];
     }
 
     // Check if teacher has access to this grade/class - MANDATORY CHECK
@@ -429,9 +479,10 @@ router.post('/upload', [
     console.log('💾 Inserting document record into database...');
     const result = await db.query(`
       INSERT INTO documents (title, description, document_type, file_name, file_path, original_file_name, file_size, 
-                           grade_id, class_id, uploaded_by, s3_key, s3_url, target_audience)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       RETURNING id, title, description, document_type, file_name, file_path, original_file_name, file_size, uploaded_at, target_audience, s3_key, grade_id, class_id
+                           grade_id, class_id, uploaded_by, s3_key, s3_url, target_audience,
+                           target_parent_ids, important, notify_email)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, $16)
+       RETURNING id, title, description, document_type, file_name, file_path, original_file_name, file_size, uploaded_at, target_audience, target_parent_ids, important, notify_email, s3_key, grade_id, class_id
     `, [
       title,
       description || null,
@@ -445,7 +496,10 @@ router.post('/upload', [
       user.id,
       s3UploadResult.s3Key,
       s3UploadResult.s3Url,
-      target_audience || null
+      audience || null,
+      JSON.stringify(targetParentIds),
+      important,
+      notifyEmail
     ]);
 
     console.log('✅ Document uploaded successfully:', result.rows[0]);
@@ -966,6 +1020,7 @@ router.get('/all', [
     let query = `
       SELECT d.id, d.title, d.description, d.document_type, d.file_name as filename, d.file_name as original_filename,
              d.file_size, d.uploaded_at, d.is_active, d.uploaded_by,
+             d.target_audience, d.target_parent_ids, d.important, d.notify_email,
              u.first_name as uploaded_by_first_name, u.last_name as uploaded_by_last_name,
              g.name as grade_name, c.name as class_name
       FROM documents d
@@ -999,6 +1054,7 @@ router.get('/all', [
       query = `
         SELECT d.id, d.title, d.description, d.document_type, d.file_name as filename, d.file_name as original_filename,
                d.file_size, d.uploaded_at, d.is_active, d.uploaded_by,
+               d.target_audience, d.target_parent_ids, d.important, d.notify_email,
                u.first_name as uploaded_by_first_name, u.last_name as uploaded_by_last_name,
                g.name as grade_name, c.name as class_name
         FROM documents d

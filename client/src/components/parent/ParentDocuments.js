@@ -58,8 +58,9 @@ const ParentDocuments = ({ child }) => {
   const filtered = filter === 'all' ? documents : documents.filter(d => d.document_type === filter);
 
   const fetchDocument = async (path) => {
-    const token = localStorage.getItem('parentToken');
+    const token = sessionStorage.getItem('parentToken');
     const response = await fetch(path, {
+      credentials: 'include',
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) throw new Error('Unable to retrieve document');

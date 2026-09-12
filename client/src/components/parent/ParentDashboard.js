@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { parentApi } from './ParentPortal';
 import {
-  CheckCircle, XCircle, Clock, BookOpen, Bell,
+  CheckCircle, XCircle, Clock, Bell,
   TrendingUp, AlertCircle, CreditCard, CalendarDays
 } from 'lucide-react';
 
@@ -38,7 +38,7 @@ const ParentDashboard = ({ child, user }) => {
     </div>
   );
 
-  const { weekAttendance, recentGrades, outstandingBalance, recentAnnouncements } = data || {};
+  const { weekAttendance, outstandingBalance, recentAnnouncements } = data || {};
 
   const attendanceRate = weekAttendance?.total > 0
     ? Math.round((parseInt(weekAttendance.present) / parseInt(weekAttendance.total)) * 100)
@@ -90,46 +90,6 @@ const ParentDashboard = ({ child, user }) => {
           </div>
         </div>
       )}
-
-      {/* Recent grades */}
-      <section>
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Recent Grades</h2>
-        {recentGrades?.length > 0 ? (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 divide-y divide-gray-50">
-            {recentGrades.map((g) => {
-              const pct = g.max_score > 0 ? Math.round((g.score / g.max_score) * 100) : null;
-              const color = pct >= 75 ? 'text-emerald-600' : pct >= 50 ? 'text-amber-600' : 'text-red-600';
-              return (
-                <div key={g.id} className="flex items-center justify-between px-4 py-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="p-2 bg-blue-50 rounded-lg shrink-0">
-                      <BookOpen className="h-4 w-4 text-blue-600" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-gray-800 font-medium text-sm truncate">{g.task_title}</p>
-                      <p className="text-gray-400 text-xs capitalize">{g.task_type}</p>
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    {g.score !== null ? (
-                      <>
-                        <p className={`font-bold text-sm ${color}`}>{g.score}/{g.max_score}</p>
-                        {pct !== null && <p className="text-gray-400 text-xs">{pct}%</p>}
-                      </>
-                    ) : (
-                      <span className="text-gray-400 text-xs">Pending</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center text-gray-400 text-sm">
-            No graded work yet
-          </div>
-        )}
-      </section>
 
       {/* Recent announcements */}
       <section>

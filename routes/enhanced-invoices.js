@@ -12,6 +12,7 @@ const FNBPDFParser = require('../utils/fnbPDFParser');
 
 const router = express.Router();
 const { logAudit, getIp } = require('../utils/auditLogger');
+const { allocatePayment, getStudentLedger, reversePayment } = require('../services/financeLedger');
 
 // Configure multer for CSV and PDF uploads
 const upload = multer({
@@ -626,123 +627,35 @@ async function processTransactions(transactions, userId) {
       const studentFirstName = matchedInvoice.first_name || 'Unknown';
       const studentLastName  = matchedInvoice.last_name  || 'Student';
 
-      // Ensure overpaid_amount column exists (one-time guard)
-      try {
-        await client.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS overpaid_amount DECIMAL(10,2) DEFAULT 0.00`);
-      } catch (_) { /* already exists */ }
-
-      // Fetch every unpaid/partial invoice for this student, oldest due date first
-      const allUnpaidResult = await client.query(`
-        SELECT id, reference_number, amount_due, amount_paid,
-               COALESCE(outstanding_balance, amount_due - amount_paid) AS outstanding_balance,
-               COALESCE(overpaid_amount, 0) AS overpaid_amount, due_date
-        FROM invoices
-        WHERE student_id = $1 AND status IN ('Unpaid', 'Partial')
-        ORDER BY due_date ASC
-      `, [studentId]);
-
-      const allUnpaid = allUnpaidResult.rows;
-      if (allUnpaid.length === 0) {
-        // Matched student has no remaining unpaid invoices — rare edge case
-        await client.query('COMMIT');
-        results.unmatched.push({ ...transaction, reason: 'Student matched but no unpaid invoices remain.' });
-        continue;
-      }
-
-      const thisYear       = new Date().getFullYear();
-      let   remaining      = Math.round(parseFloat(transaction.amount) * 100) / 100;
-      const allocations    = []; // track where each portion went
-
-      for (const inv of allUnpaid) {
-        if (remaining <= 0.004) break; // fully allocated
-
-        const outstanding  = Math.round(parseFloat(inv.outstanding_balance) * 100) / 100;
-        const currentPaid  = Math.round(parseFloat(inv.amount_paid || 0)    * 100) / 100;
-        const amountDue    = Math.round(parseFloat(inv.amount_due)           * 100) / 100;
-        const toApply      = Math.round(Math.min(remaining, outstanding)     * 100) / 100;
-
-        const newPaid      = Math.round((currentPaid + toApply) * 100) / 100;
-        const newOutstanding = Math.max(0, Math.round((outstanding - toApply) * 100) / 100);
-        const newStatus    = newPaid >= amountDue
-          ? (newPaid > amountDue ? 'Overpaid' : 'Paid')
-          : 'Partial';
-        const overpaidAmt  = newStatus === 'Overpaid'
-          ? Math.round((newPaid - amountDue) * 100) / 100
-          : 0;
-
-        // Update this invoice (outstanding_balance is a generated column — DB computes it automatically)
-        await client.query(`
-          UPDATE invoices SET
-            status          = $1,
-            amount_paid     = $2::DECIMAL(10,2),
-            overpaid_amount = $3::DECIMAL(10,2),
-            updated_at      = NOW()
-          WHERE id = $4
-        `, [newStatus, newPaid, overpaidAmt, inv.id]);
-
-        // Derive month/year from the invoice's due_date for the transaction record
-        const invDue   = inv.due_date ? new Date(inv.due_date) : null;
-        const txMonth  = invDue ? invDue.getMonth() + 1 : null;
-        const txYear   = invDue ? invDue.getFullYear()  : null;
-        const isArrears = txYear !== null && txYear < thisYear;
-
-        const descSuffix = isArrears
-          ? ` [Applied to arrears from ${txYear}]`
-          : '';
-
-        // Insert one payment_transaction row per invoice allocation
-        const transactionResult = await client.query(`
-          INSERT INTO payment_transactions (
-            invoice_id, student_id, student_number, reference_number,
-            amount, transaction_date, payment_date, description,
-            payment_method, month, year
-          ) VALUES ($1,$2,$3,$4,$5,$6,$6,$7,'bank_transfer',$8,$9)
-          RETURNING id
-        `, [
-          inv.id, studentId, studentNumber,
-          transaction.reference,
-          toApply,
-          transaction.date,
-          (transaction.description || '') + descSuffix,
-          txMonth, txYear
-        ]);
-
-        // The transaction row is the stable source event ID for dedupe.
-        const transactionId = transactionResult.rows[0]?.id;
-        allocations.push({
-          transactionId,
-          invoiceId:     inv.id,
-          reference:     inv.reference_number,
-          month:         txMonth,
-          year:          txYear,
-          appliedAmount: toApply,
-          newStatus,
-          isArrears
-        });
-
-        remaining = Math.round((remaining - toApply) * 100) / 100;
-
-        console.log(`  → Applied R${toApply} to invoice ${inv.reference_number} (${txYear ? txYear : 'n/a'}) — now ${newStatus}${isArrears ? ' [ARREARS]' : ''}`);
-      }
-
-      // If payment exceeded ALL outstanding invoices, mark last invoice as overpaid
-      if (remaining > 0.004 && allocations.length > 0) {
-        const lastAlloc = allocations[allocations.length - 1];
-        const lastInv   = allUnpaid[allUnpaid.length - 1];
-        const newOverpaid = Math.round((parseFloat(lastInv.overpaid_amount || 0) + remaining) * 100) / 100;
-        const newPaidFinal = Math.round((parseFloat(lastInv.amount_paid || 0) + remaining) * 100) / 100;
-        await client.query(`
-          UPDATE invoices SET status='Overpaid', amount_paid=$1, overpaid_amount=$2, updated_at=NOW() WHERE id=$3
-        `, [newPaidFinal, newOverpaid, lastInv.id]);
-        lastAlloc.newStatus = 'Overpaid';
-        lastAlloc.overpaidAmount = remaining;
-        remaining = 0;
-      }
+      const allocationResult = await allocatePayment(client, {
+        studentId,
+        amount: transaction.amount,
+        paymentDate: transaction.date,
+        paymentMethod: 'bank_transfer',
+        reference: transaction.reference,
+        description: transaction.description,
+        recordedBy: userId,
+      });
+      const allocations = allocationResult.allocations.map((allocation) => ({
+        transactionId: allocation.transactionId,
+        invoiceId: allocation.invoiceId,
+        reference: allocation.reference,
+        dueDate: allocation.dueDate,
+        status: allocation.status,
+        appliedAmount: allocation.amount,
+        isArrears: allocation.dueDate
+          ? new Date(allocation.dueDate).getUTCFullYear() < new Date().getUTCFullYear()
+          : false,
+      }));
+      const overpayment = allocations.find((allocation) => allocation.invoiceId == null);
+      const totalApplied = allocations
+        .filter((allocation) => allocation.invoiceId != null)
+        .reduce((sum, allocation) => sum + allocation.appliedAmount, 0);
 
       await client.query('COMMIT');
-      console.log(`✅ Processed R${transaction.amount} for ${studentFirstName} ${studentLastName} (${studentNumber}) — ${allocations.length} invoice(s) updated`);
+      console.log(`✅ Processed R${transaction.amount} for ${studentFirstName} ${studentLastName} (${studentNumber}) — ${allocations.length} allocation(s) recorded`);
       await Promise.allSettled(allocations
-        .filter((allocation) => allocation.transactionId != null)
+          .filter((allocation) => allocation.transactionId != null)
         .map((allocation) => notifyPayment({
           kind: 'applied',
           paymentId: allocation.transactionId,
@@ -753,14 +666,12 @@ async function processTransactions(transactions, userId) {
       // ── Build result data for the response ──────────────────────────────────
       const arrearsAllocations  = allocations.filter(a => a.isArrears);
       const currentAllocations  = allocations.filter(a => !a.isArrears);
-      const totalApplied        = Math.round((parseFloat(transaction.amount) - remaining) * 100) / 100;
-      const primaryAllocation   = allocations[0]; // oldest / most relevant for display
+      const remaining            = Math.max(0, Math.round((parseFloat(transaction.amount) - totalApplied) * 100) / 100);
+      const primaryAllocation   = allocations.find((allocation) => allocation.invoiceId != null) || allocations[0];
 
       // Overall result category
       let resultCategory;
-      if (remaining > 0.004) {
-        resultCategory = 'overpaid';
-      } else if (allocations.some(a => a.newStatus === 'Overpaid')) {
+      if (overpayment) {
         resultCategory = 'overpaid';
       } else {
         resultCategory = 'matched';
@@ -774,12 +685,12 @@ async function processTransactions(transactions, userId) {
         ...transaction,
         invoice: {
           id:                primaryAllocation.invoiceId,
-          reference_number:  primaryAllocation.reference,
+          reference_number:  matchedInvoice.reference_number,
           student_id:        studentId,
           student_number:    studentNumber,
-          original_amount:   allUnpaid[0]?.amount_due,
+          original_amount:   matchedInvoice.amount_due,
           amount_paid:       primaryAllocation.appliedAmount,
-          status:            primaryAllocation.newStatus
+          status:            overpayment ? 'Overpaid' : 'Applied'
         },
         student: {
           id:             studentId,
@@ -791,7 +702,7 @@ async function processTransactions(transactions, userId) {
         processing: {
           transaction_amount:    parseFloat(transaction.amount),
           total_applied:         totalApplied,
-          invoices_updated:      allocations.length,
+          invoices_updated:      allocations.filter((allocation) => allocation.invoiceId != null).length,
           arrears_invoices:      arrearsAllocations.length,
           current_invoices:      currentAllocations.length,
           arrears_note:          arrearsNote,
@@ -1007,11 +918,23 @@ router.get('/student-payment-history/:studentNumber', [
       m.year === currentYear && m.monthNumber <= currentMonth
     );
 
-    const totalDue = monthsUpToNow.reduce((sum, m) => sum + m.amountDue, 0);
-    const totalPaid = monthlyHistory.reduce((sum, m) => sum + m.amountPaid, 0);
-    const totalOutstanding = Math.max(0, totalDue - totalPaid);
-    const missedCount = monthsUpToNow.filter(m => m.paymentStatus === 'Missed Payment').length;
-    const paidCount = monthsUpToNow.filter(m => m.paymentStatus === 'Paid' || m.paymentStatus === 'Overpaid').length;
+    let totalDue = monthsUpToNow.reduce((sum, m) => sum + m.amountDue, 0);
+    let totalPaid = monthlyHistory.reduce((sum, m) => sum + m.amountPaid, 0);
+    let totalOutstanding = Math.max(0, totalDue - totalPaid);
+    let missedCount = monthsUpToNow.filter(m => m.paymentStatus === 'Missed Payment').length;
+    let paidCount = monthsUpToNow.filter(m => m.paymentStatus === 'Paid' || m.paymentStatus === 'Overpaid').length;
+
+    // Summary values must be byte-for-byte reconcilable with the Parent
+    // Portal.  The legacy monthly view remains available for exports, but its
+    // current-year presentation is not a ledger calculation.
+    const authoritativeLedger = await getStudentLedger(student.id);
+    totalDue = authoritativeLedger.totals.totalDue;
+    totalPaid = authoritativeLedger.totals.totalPaid;
+    totalOutstanding = authoritativeLedger.totals.outstanding;
+    missedCount = authoritativeLedger.invoices.filter((invoice) =>
+      invoice.outstanding_balance > 0 && invoice.amount_paid <= 0).length;
+    paidCount = authoritativeLedger.invoices.filter((invoice) =>
+      invoice.status === 'Paid' || invoice.status === 'Overpaid').length;
     
     const responseData = {
       success: true,
@@ -1027,11 +950,15 @@ router.get('/student-payment-history/:studentNumber', [
         totalDue,
         totalPaid,
         totalOutstanding,
+        overpaid: authoritativeLedger.totals.overpaid,
+        unallocated: authoritativeLedger.totals.unallocated,
         missedPayments: missedCount,
         completedPayments: paidCount,
         totalMonths: monthlyHistory.filter(m => m.amountDue > 0).length
       },
-      monthlyHistory
+      monthlyHistory,
+      serviceComponents: authoritativeLedger.service_components,
+      paymentTransactions: authoritativeLedger.transactions,
     };
     
     if (format === 'excel') {
@@ -1395,64 +1322,58 @@ router.post('/manual-payment', [
 
     const student = studentResult.rows[0];
 
-    // Insert the manual payment
+    // Manual, bank, and proof payments all use the same locked allocation
+    // algorithm.  The requested month/year are retained in the audit details;
+    // allocation itself is arrears-first and cannot silently double-charge a
+    // selected invoice.
     const refValue = reference || `MANUAL-${Date.now()}`;
-    const paymentResult = await db.query(`
-      INSERT INTO payment_transactions (
-        student_id, amount, payment_date, transaction_date, 
-        reference, reference_number, description, 
-        payment_method, recorded_by, month, year,
-        student_number
-      )
-      VALUES ($1, $2, $3, $3, $4, $4, $5, 'manual_entry', $6, $7, $8, $9)
-      RETURNING *
-    `, [
-      student_id, 
-      amount, 
-      payment_date, 
-      refValue,
-      description || `Manual payment entry by admin`,
-      adminId,
-      month || new Date(payment_date).getMonth() + 1,
-      year || new Date(payment_date).getFullYear(),
-      student.student_number || ''
-    ]);
-
-    // If there's an invoice for this month/year, update it
-    const paymentMonth = month || new Date(payment_date).getMonth() + 1;
-    const paymentYear = year || new Date(payment_date).getFullYear();
-
-    const invoiceResult = await db.query(`
-      UPDATE invoices 
-      SET amount_paid = COALESCE(amount_paid, 0) + $1,
-          status = CASE 
-            WHEN COALESCE(amount_paid, 0) + $1 >= amount_due THEN 'Paid'
-            WHEN COALESCE(amount_paid, 0) + $1 > 0 THEN 'Partial'
-            ELSE status
-          END
-      WHERE student_id = $2 
-        AND EXTRACT(MONTH FROM due_date) = $3 
-        AND EXTRACT(YEAR FROM due_date) = $4
-      RETURNING *
-    `, [amount, student_id, paymentMonth, paymentYear]);
+    const client = await db.pool.connect();
+    let allocation;
+    let paymentResult;
+    try {
+      await client.query('BEGIN');
+      allocation = await allocatePayment(client, {
+        studentId: student_id,
+        amount,
+        paymentDate: payment_date,
+        paymentMethod: 'manual_entry',
+        reference: refValue,
+        description: description || 'Manual payment entry by admin',
+        recordedBy: adminId,
+      });
+      const firstPaymentId = allocation.allocations[0]?.transactionId;
+      paymentResult = await client.query(
+        'SELECT * FROM payment_transactions WHERE id = $1',
+        [firstPaymentId],
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    const paymentMonth = month || new Date(payment_date).getUTCMonth() + 1;
+    const paymentYear = year || new Date(payment_date).getUTCFullYear();
+    const invoiceUpdated = allocation.allocations.some((item) => item.invoiceId != null);
 
     console.log(`✅ Manual payment recorded: R${amount} for ${student.first_name} ${student.last_name} (${student.student_number})`);
 
     await logAudit({
       userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
       userRole: req.user.role, action: 'manual_payment_add',
-      entityType: 'payment', entityId: paymentResult.rows[0].id,
+      entityType: 'payment', entityId: paymentResult.rows[0]?.id || null,
       details: {
         summary: `R${amount} recorded for ${student.first_name} ${student.last_name} (${student.student_number})`,
         student: `${student.first_name} ${student.last_name}`, student_number: student.student_number,
         amount, month: paymentMonth, year: paymentYear, reference: refValue,
-        invoice_updated: invoiceResult.rows.length > 0
+        invoice_updated: invoiceUpdated,
       },
       ipAddress: getIp(req)
     });
     await notifyPayment({
       kind: 'applied',
-      paymentId: paymentResult.rows[0].id,
+      paymentId: paymentResult.rows[0]?.id,
       learnerId: student.id,
       amount,
     });
@@ -1461,7 +1382,8 @@ router.post('/manual-payment', [
       success: true,
       message: `Payment of R${amount} recorded for ${student.first_name} ${student.last_name}`,
       payment: paymentResult.rows[0],
-      invoiceUpdated: invoiceResult.rows.length > 0,
+      allocations: allocation.allocations,
+      invoiceUpdated,
       student: {
         id: student.id,
         name: `${student.first_name} ${student.last_name}`,
@@ -1504,9 +1426,15 @@ router.get('/student-payments/:studentId', [
     // Get all payments for this student
     const paymentsResult = await db.query(`
       SELECT pt.*, 
+             pt.reverses_transaction_id,
+             (pt.reverses_transaction_id IS NOT NULL) AS is_reversal,
+             reversal.id AS reversal_id,
+             (reversal.id IS NOT NULL) AS is_reversed,
              COALESCE(pt.payment_date, pt.transaction_date) as effective_date,
              u.first_name as recorded_by_name, u.last_name as recorded_by_lastname
       FROM payment_transactions pt
+      LEFT JOIN payment_transactions reversal
+        ON reversal.reverses_transaction_id = pt.id
       LEFT JOIN users u ON pt.recorded_by = u.id
       WHERE pt.student_id = $1
       ORDER BY COALESCE(pt.payment_date, pt.transaction_date) DESC
@@ -1546,84 +1474,75 @@ router.put('/manual-payment/:paymentId', [
     const { paymentId } = req.params;
     const { amount, payment_date, description, reference, month, year } = req.body;
 
-    // Get original payment
-    const originalPayment = await db.query(
-      'SELECT * FROM payment_transactions WHERE id = $1',
-      [paymentId]
-    );
+    const client = await db.pool.connect();
+    let original;
+    let replacement;
+    let replacementPayment;
+    let reversalId;
+    try {
+      await client.query('BEGIN');
+      const originalResult = await client.query(`
+        SELECT *
+        FROM payment_transactions
+        WHERE id = $1
+        FOR UPDATE
+      `, [paymentId]);
+      if (!originalResult.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ success: false, message: 'Payment not found' });
+      }
+      original = originalResult.rows[0];
+      const oldAmount = parseFloat(original.amount);
+      const newAmount = amount == null ? oldAmount : parseFloat(amount);
+      const newDate = payment_date || original.payment_date || original.transaction_date;
+      const newMonth = month ? parseInt(month, 10) : (original.month || (newDate ? new Date(newDate).getUTCMonth() + 1 : null));
+      const newYear = year ? parseInt(year, 10) : (original.year || (newDate ? new Date(newDate).getUTCFullYear() : null));
 
-    if (originalPayment.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Payment not found' });
+      const reversal = await reversePayment(client, {
+        transactionId: paymentId,
+        recordedBy: req.user.id,
+        description: `Reversal for edit of payment ${paymentId}`,
+      });
+      if (reversal.alreadyReversed) {
+        const error = new Error('Payment was already reversed and cannot be edited');
+        error.status = 409;
+        throw error;
+      }
+      reversalId = reversal.reversalId;
+      const allocation = await allocatePayment(client, {
+        studentId: original.student_id,
+        amount: newAmount,
+        paymentDate: newDate,
+        paymentMethod: original.payment_method || 'manual_entry',
+        reference: reference || original.reference || original.reference_number,
+        description: description || original.description || `Edited payment ${paymentId}`,
+        recordedBy: req.user.id,
+        // Preserve the original allocation identity. A month/year edit must
+        // never touch every invoice for that student and period.
+        // Carry-forward reversals can target the active arrears successor,
+        // not the historical source invoice. Never blindly reuse the source
+        // transaction's invoice_id after reversePayment has resolved it.
+        invoiceId: reversal.effectiveInvoiceId == null ? 0 : reversal.effectiveInvoiceId,
+        transactionMonth: newMonth,
+        transactionYear: newYear,
+      });
+      replacement = allocation.allocations[0] || null;
+      if (replacement?.transactionId) {
+        const replacementResult = await client.query(
+          'SELECT * FROM payment_transactions WHERE id = $1',
+          [replacement.transactionId],
+        );
+        replacementPayment = replacementResult.rows[0] || null;
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
 
-    const original = originalPayment.rows[0];
-
-    // Resolve old and new month/year
-    const oldMonth = original.month || (original.payment_date ? new Date(original.payment_date).getMonth() + 1 : null);
-    const oldYear  = original.year  || (original.payment_date ? new Date(original.payment_date).getFullYear()  : null);
-    const newMonth = month  ? parseInt(month)  : oldMonth;
-    const newYear  = year   ? parseInt(year)   : oldYear;
-    const oldAmount = parseFloat(original.amount);
-    const newAmount = amount ? parseFloat(amount) : oldAmount;
-
-    // Update payment_transactions — save ALL changed fields including month/year
-    const updateResult = await db.query(`
-      UPDATE payment_transactions 
-      SET amount       = COALESCE($1, amount),
-          payment_date = COALESCE($2, payment_date),
-          transaction_date = COALESCE($2, transaction_date),
-          description  = COALESCE($3, description),
-          reference    = COALESCE($4, reference),
-          reference_number = COALESCE($4, reference_number),
-          month        = $5,
-          year         = $6
-      WHERE id = $7
-      RETURNING *
-    `, [amount || null, payment_date || null, description || null, reference || null,
-        newMonth, newYear, paymentId]);
-
-    // ── Update invoices ────────────────────────────────────────────────────────
-    // If the month/year OR the amount changed we need to:
-    //   1. Reverse the payment on the OLD invoice
-    //   2. Apply  the payment on the NEW invoice
-    const monthYearChanged = (newMonth !== oldMonth) || (newYear !== oldYear);
-    const amountChanged    = newAmount !== oldAmount;
-
-    if ((monthYearChanged || amountChanged) && original.student_id) {
-      // 1. Reverse old invoice (subtract old amount)
-      if (oldMonth && oldYear) {
-        await db.query(`
-          UPDATE invoices
-          SET amount_paid = GREATEST(COALESCE(amount_paid, 0) - $1, 0),
-              status = CASE
-                WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) = 0 THEN 'Unpaid'
-                WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) < amount_due THEN 'Partial'
-                ELSE status
-              END
-          WHERE student_id = $2
-            AND EXTRACT(MONTH FROM due_date) = $3
-            AND EXTRACT(YEAR  FROM due_date) = $4
-        `, [oldAmount, original.student_id, oldMonth, oldYear]);
-      }
-
-      // 2. Apply new amount to new invoice
-      if (newMonth && newYear) {
-        await db.query(`
-          UPDATE invoices
-          SET amount_paid = COALESCE(amount_paid, 0) + $1,
-              status = CASE
-                WHEN COALESCE(amount_paid, 0) + $1 >= amount_due THEN 'Paid'
-                WHEN COALESCE(amount_paid, 0) + $1 > 0 THEN 'Partial'
-                ELSE 'Unpaid'
-              END
-          WHERE student_id = $2
-            AND EXTRACT(MONTH FROM due_date) = $3
-            AND EXTRACT(YEAR  FROM due_date) = $4
-        `, [newAmount, original.student_id, newMonth, newYear]);
-      }
-    }
-
-    console.log(`✅ Manual payment ${paymentId} updated: month ${oldMonth}/${oldYear} → ${newMonth}/${newYear}, amount R${oldAmount} → R${newAmount}`);
+    console.log(`✅ Manual payment ${paymentId} reversed and reapplied as transaction ${replacement?.transactionId || 'unallocated'}`);
 
     await logAudit({
       userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
@@ -1631,8 +1550,9 @@ router.put('/manual-payment/:paymentId', [
       entityType: 'payment', entityId: parseInt(paymentId),
       details: {
         summary: `Payment #${paymentId} edited`,
-        old_amount: oldAmount, new_amount: newAmount,
-        old_period: `${oldMonth}/${oldYear}`, new_period: `${newMonth}/${newYear}`,
+        old_amount: parseFloat(original.amount), new_amount: amount == null ? parseFloat(original.amount) : parseFloat(amount),
+        replacement_transaction_id: replacement?.transactionId || null,
+        reversal_transaction_id: reversalId,
         student_id: original.student_id
       },
       ipAddress: getIp(req)
@@ -1641,12 +1561,12 @@ router.put('/manual-payment/:paymentId', [
     res.json({
       success: true,
       message: 'Payment updated successfully',
-      payment: updateResult.rows[0]
+      payment: replacementPayment || replacement
     });
 
   } catch (error) {
     console.error('Edit payment error:', error);
-    res.status(500).json({
+    res.status(error.status || 500).json({
       success: false,
       message: 'Failed to update payment',
       error: error.message
@@ -1664,37 +1584,33 @@ router.delete('/manual-payment/:paymentId', [
   try {
     const { paymentId } = req.params;
 
-    // Get payment before deleting
-    const paymentResult = await db.query(
-      'SELECT * FROM payment_transactions WHERE id = $1',
-      [paymentId]
-    );
-
-    if (paymentResult.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Payment not found' });
-    }
-
-    const payment = paymentResult.rows[0];
-
-    // Delete payment
-    await db.query('DELETE FROM payment_transactions WHERE id = $1', [paymentId]);
-
-    // Update invoice to subtract this amount
-    const delMonth = payment.month || (payment.payment_date ? new Date(payment.payment_date).getMonth() + 1 : null);
-    const delYear = payment.year || (payment.payment_date ? new Date(payment.payment_date).getFullYear() : null);
-    if (delMonth && delYear) {
-      await db.query(`
-        UPDATE invoices 
-        SET amount_paid = GREATEST(COALESCE(amount_paid, 0) - $1, 0),
-            status = CASE 
-              WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) = 0 THEN 'Unpaid'
-              WHEN GREATEST(COALESCE(amount_paid, 0) - $1, 0) < amount_due THEN 'Partial'
-              ELSE 'Paid'
-            END
-        WHERE student_id = $2 
-          AND EXTRACT(MONTH FROM due_date) = $3 
-          AND EXTRACT(YEAR FROM due_date) = $4
-      `, [payment.amount, payment.student_id, delMonth, delYear]);
+    const client = await db.pool.connect();
+    let payment;
+    let reversalId;
+    try {
+      await client.query('BEGIN');
+      const paymentResult = await client.query(`
+        SELECT *
+        FROM payment_transactions
+        WHERE id = $1
+        FOR UPDATE
+      `, [paymentId]);
+      if (!paymentResult.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ success: false, message: 'Payment not found' });
+      }
+      payment = paymentResult.rows[0];
+      ({ reversalId } = await reversePayment(client, {
+        transactionId: paymentId,
+        recordedBy: req.user.id,
+        description: `Reversal of deleted payment ${paymentId}`,
+      }));
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
 
     await logAudit({
@@ -1702,21 +1618,23 @@ router.delete('/manual-payment/:paymentId', [
       userRole: req.user.role, action: 'manual_payment_delete',
       entityType: 'payment', entityId: parseInt(paymentId),
       details: {
-        summary: `Payment #${paymentId} deleted (R${payment.amount})`,
+        summary: `Payment #${paymentId} reversed (R${payment.amount})`,
         amount: payment.amount, student_id: payment.student_id,
-        month: delMonth, year: delYear, method: payment.payment_method
+        invoice_id: payment.invoice_id, reversal_transaction_id: reversalId,
+        month: payment.month, year: payment.year, method: payment.payment_method
       },
       ipAddress: getIp(req)
     });
 
     res.json({
       success: true,
-      message: 'Payment deleted successfully'
+      message: 'Payment reversed successfully',
+      reversal_transaction_id: reversalId
     });
 
   } catch (error) {
     console.error('Delete payment error:', error);
-    res.status(500).json({
+    res.status(error.status || 500).json({
       success: false,
       message: 'Failed to delete payment',
       error: error.message
@@ -1750,72 +1668,33 @@ router.post('/manual-payment/apply-arrears-first', [
     if (!studentResult.rows.length) return res.status(404).json({ success: false, message: 'Student not found' });
     const student = studentResult.rows[0];
 
-    // Fetch all unpaid/partial invoices for this student, oldest first
-    const allUnpaidResult = await db.query(`
-      SELECT id, reference_number, amount_due, amount_paid,
-             COALESCE(outstanding_balance, amount_due - amount_paid) AS outstanding_balance,
-             due_date
-      FROM invoices
-      WHERE student_id = $1 AND status IN ('Unpaid', 'Partial')
-      ORDER BY due_date ASC
-    `, [student_id]);
-
-    if (!allUnpaidResult.rows.length) {
-      return res.status(400).json({ success: false, message: `${student.first_name} ${student.last_name} has no outstanding invoices.` });
-    }
-
-    const thisYear    = new Date().getFullYear();
-    let   remaining   = Math.round(parseFloat(amount) * 100) / 100;
-    const allocations = [];
     const refValue    = reference || `MANUAL-${Date.now()}`;
     const client      = await db.pool.connect();
+    let allocations;
 
     try {
       await client.query('BEGIN');
 
-      for (const inv of allUnpaidResult.rows) {
-        if (remaining <= 0.004) break;
-        const outstanding = Math.round(parseFloat(inv.outstanding_balance) * 100) / 100;
-        const currentPaid = Math.round(parseFloat(inv.amount_paid || 0) * 100) / 100;
-        const amountDue   = Math.round(parseFloat(inv.amount_due) * 100) / 100;
-        const toApply     = Math.round(Math.min(remaining, outstanding) * 100) / 100;
-        const newPaid     = Math.round((currentPaid + toApply) * 100) / 100;
-        const newOutstanding = Math.max(0, Math.round((outstanding - toApply) * 100) / 100);
-        const newStatus   = newPaid >= amountDue ? (newPaid > amountDue ? 'Overpaid' : 'Paid') : 'Partial';
-
-        // outstanding_balance is a generated column — DB computes it automatically from amount_due - amount_paid
-        await client.query(`
-          UPDATE invoices SET
-            status = $1, amount_paid = $2::DECIMAL(10,2), updated_at = NOW()
-          WHERE id = $3
-        `, [newStatus, newPaid, inv.id]);
-
-        const invDue  = inv.due_date ? new Date(inv.due_date) : null;
-        const txMonth = invDue ? invDue.getMonth() + 1 : null;
-        const txYear  = invDue ? invDue.getFullYear()  : null;
-        const isArrears = txYear !== null && txYear < thisYear;
-
-        const transactionResult = await client.query(`
-          INSERT INTO payment_transactions (
-            invoice_id, student_id, student_number, reference_number, reference,
-            amount, transaction_date, payment_date, description, payment_method,
-            recorded_by, month, year
-          ) VALUES ($1,$2,$3,$4,$4,$5,$6,$6,$7,'manual_entry',$8,$9,$10)
-          RETURNING id
-        `, [
-          inv.id, student_id, student.student_number, refValue,
-          toApply, payment_date,
-          (description || 'Manual payment') + (isArrears ? ` [Arrears from ${txYear}]` : ''),
-          req.user.id, txMonth, txYear
-        ]);
-
-        allocations.push({
-          transactionId: transactionResult.rows[0]?.id,
-          invoiceId: inv.id, reference: inv.reference_number, month: txMonth, year: txYear,
-          appliedAmount: toApply, newStatus, isArrears
-        });
-        remaining = Math.round((remaining - toApply) * 100) / 100;
-      }
+      const allocationResult = await allocatePayment(client, {
+        studentId: student_id,
+        amount,
+        paymentDate: payment_date,
+        paymentMethod: 'manual_entry',
+        reference: refValue,
+        description: description || 'Manual payment',
+        recordedBy: req.user.id,
+      });
+      allocations = allocationResult.allocations.map((allocation) => ({
+        transactionId: allocation.transactionId,
+        invoiceId: allocation.invoiceId,
+        reference: allocation.reference,
+        dueDate: allocation.dueDate,
+        status: allocation.status,
+        appliedAmount: allocation.amount,
+        isArrears: allocation.dueDate
+          ? new Date(allocation.dueDate).getUTCFullYear() < new Date().getUTCFullYear()
+          : false,
+      }));
 
       await client.query('COMMIT');
     } catch (err) {
@@ -1826,11 +1705,14 @@ router.post('/manual-payment/apply-arrears-first', [
     }
 
     const arrearsAllocations = allocations.filter(a => a.isArrears);
-    const currentAllocations = allocations.filter(a => !a.isArrears);
+    const currentAllocations = allocations.filter(a => !a.isArrears && a.invoiceId != null);
+    const totalApplied = allocations
+      .filter((allocation) => allocation.invoiceId != null)
+      .reduce((sum, allocation) => sum + allocation.appliedAmount, 0);
 
     const summaryMsg = arrearsAllocations.length > 0
       ? `R${parseFloat(amount).toFixed(2)} applied: R${arrearsAllocations.reduce((s,a)=>s+a.appliedAmount,0).toFixed(2)} to previous-year arrears${currentAllocations.length ? `, R${currentAllocations.reduce((s,a)=>s+a.appliedAmount,0).toFixed(2)} to current year` : ''}`
-      : `R${parseFloat(amount).toFixed(2)} applied across ${allocations.length} invoice(s)`;
+      : `R${parseFloat(amount).toFixed(2)} applied across ${currentAllocations.length} invoice(s)`;
 
     await logAudit({
       userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
@@ -1839,7 +1721,8 @@ router.post('/manual-payment/apply-arrears-first', [
       details: {
         summary: summaryMsg, student: `${student.first_name} ${student.last_name}`,
         student_number: student.student_number, amount: parseFloat(amount),
-        invoices_updated: allocations.length, arrears_invoices: arrearsAllocations.length,
+        invoices_updated: allocations.filter((allocation) => allocation.invoiceId != null).length,
+        arrears_invoices: arrearsAllocations.length,
         current_invoices: currentAllocations.length
       },
       ipAddress: getIp(req)
@@ -1859,7 +1742,7 @@ router.post('/manual-payment/apply-arrears-first', [
       allocations,
       arrearsCount:  arrearsAllocations.length,
       currentCount:  currentAllocations.length,
-      totalApplied:  Math.round((parseFloat(amount) - remaining) * 100) / 100,
+      totalApplied,
       student: { id: student.id, name: `${student.first_name} ${student.last_name}`, studentNumber: student.student_number }
     });
 
@@ -1910,61 +1793,46 @@ router.post('/allocate-unmatched', [
     }
     const student = studentResult.rows[0];
     const adminId = req.user.id;
-    let remaining = parseFloat(amount);
-
-    // Apply to oldest unpaid/partial invoices first
-    const invoices = await db.query(`
-      SELECT id, amount_due, amount_paid, outstanding_balance
-      FROM invoices
-      WHERE student_id = $1 AND status IN ('Unpaid', 'Partial')
-      ORDER BY due_date ASC
-    `, [student_id]);
-
-    const txIds = [];
-    for (const inv of invoices.rows) {
-      if (remaining <= 0) break;
-      const outstanding = parseFloat(inv.outstanding_balance);
-      const toApply = Math.min(remaining, outstanding);
-      const newPaid = parseFloat(inv.amount_paid) + toApply;
-      const newStatus = newPaid >= parseFloat(inv.amount_due)
-        ? (newPaid > parseFloat(inv.amount_due) ? 'Overpaid' : 'Paid')
-        : 'Partial';
-
-      await db.query(
-        'UPDATE invoices SET amount_paid=$1, status=$2, updated_at=CURRENT_TIMESTAMP WHERE id=$3',
-        [newPaid.toFixed(2), newStatus, inv.id]
-      );
-
-      const tx = await db.query(`
-        INSERT INTO payment_transactions
-          (invoice_id, student_id, amount, payment_date, transaction_date, payment_method, description, status, recorded_by, student_number)
-        VALUES ($1, $2, $3, $4, $4, 'bank_statement', $5, 'Matched', $6, $7)
-        RETURNING id
-      `, [
-        inv.id, student_id, toApply.toFixed(2),
-        date || new Date().toISOString().split('T')[0],
-        description || 'Allocated from unmatched bank statement payment',
-        adminId, student.student_number || ''
-      ]);
-      txIds.push({ id: tx.rows[0].id, amount: toApply });
-      remaining -= toApply;
+    const client = await db.pool.connect();
+    let allocation;
+    try {
+      await client.query('BEGIN');
+      allocation = await allocatePayment(client, {
+        studentId: student_id,
+        amount,
+        paymentDate: date || new Date().toISOString().split('T')[0],
+        paymentMethod: 'bank_statement',
+        description: description || 'Allocated from unmatched bank statement payment',
+        recordedBy: adminId,
+      });
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
-
-    // Any remaining amount — unmatched overpayment
-    if (remaining > 0.009) {
-      await db.query(`
-        INSERT INTO payment_transactions
-          (student_id, amount, payment_date, transaction_date, payment_method, description, status, recorded_by, student_number)
-        VALUES ($1, $2, $3, $3, 'bank_statement', $4, 'Unmatched', $5, $6)
-      `, [
-        student_id, remaining.toFixed(2),
-        date || new Date().toISOString().split('T')[0],
-        description || 'Overpayment from unmatched bank statement payment',
-        adminId, student.student_number || ''
-      ]);
-    }
+    const txIds = allocation.allocations.map((item) => ({
+      id: item.transactionId,
+      amount: item.amount,
+    }));
 
     console.log(`✅ Unmatched payment allocated: R${amount} → ${student.first_name} ${student.last_name}`);
+    await logAudit({
+      userId: adminId,
+      userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role,
+      action: 'unmatched_payment_allocated',
+      entityType: 'payment',
+      entityId: txIds[0]?.id || null,
+      details: {
+        student_id: student.id,
+        student_number: student.student_number,
+        amount: parseFloat(amount),
+        allocations: txIds,
+      },
+      ipAddress: getIp(req),
+    });
     await Promise.allSettled(txIds.map((transaction) => notifyPayment({
       kind: 'applied',
       paymentId: transaction.id,

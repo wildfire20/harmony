@@ -1,0 +1,281 @@
+We completed live Parent Portal testing and found several issues that must be resolved before the controlled parent rollout.
+
+This is Phase 4.5 — Parent Portal Launch Blockers & Communication Targeting.
+
+Do not send parent invitations.
+Do not start full Phase 5 rollout.
+Do not deploy automatically.
+Do not run migrations automatically.
+
+Preserve all Phase 1–4 security, authentication, notification and learner-isolation behavior.
+
+1. Fix “Keep me signed in”
+
+Production testing showed:
+
+Parent checks Keep me signed in on this device
+login succeeds
+Parent closes the browser
+reopening Harmony requires login again
+
+Audit the real persistent-session flow end-to-end.
+
+Check:
+
+remember-me flag propagation
+refresh-cookie creation
+cookie expiry/max-age
+cookie domain/path
+Secure
+HttpOnly
+SameSite
+production HTTPS behavior
+browser-close persistence
+refresh endpoint
+startup identity restoration
+whether the frontend incorrectly clears authentication when the browser closes
+
+Do not weaken the Phase 2 security architecture.
+
+The target behavior is:
+
+normal login without remember-me = shorter session
+remember-me = secure remembered session for up to 30 days
+browser close/reopen should restore the parent session when the refresh session is still valid
+logout/password reset/Admin disable must still revoke it
+
+Add real integration tests for browser restart/session restoration where practical.
+
+2. Fix mobile login checkbox
+
+On mobile, the Keep me signed in control currently appears as a large black/blank box.
+
+Replace/fix it with a clearly visible accessible checkbox or switch.
+
+It must show:
+
+checked state
+unchecked state
+readable label
+large but reasonable mobile tap target
+proper Harmony styling
+3. Parent Portal mobile redesign
+
+Desktop Parent Portal currently looks professional, but the mobile layout does not visually match it.
+
+Improve the mobile UI without changing functionality.
+
+Use the same Harmony design language as desktop:
+
+navy
+white/light backgrounds
+restrained Harmony accent colors
+clean cards
+consistent spacing
+rounded but not oversized components
+
+Remove the current oversized bright-blue menu-card appearance.
+
+Mobile navigation should feel like a mobile version of the desktop Parent Portal, not a separate application.
+
+Preserve:
+
+clear touch targets
+learner switching
+notification bell
+Home
+Attendance
+Fees
+Documents
+Notices/Notifications
+Account
+
+Use the correct Harmony Learning Institute logo consistently on login and authenticated Parent Portal screens.
+
+Verify common Android and iPhone widths.
+
+4. Temporarily hide Grades from Parent Portal
+
+Grades currently returns a server error in live testing, and Harmony is not yet ready to require teachers to capture academic marks through this system.
+
+For this rollout:
+
+remove Grades/Academic Progress from Parent Portal navigation
+do not delete academic data or backend functionality
+do not remove teacher functionality
+preserve it so it can be restored in a future academic phase
+
+Dashboard must not display broken grade/result widgets while the feature is disabled.
+
+Do not silently fix or redesign the academic workflow in this phase.
+
+5. Fix financial source-of-truth discrepancy
+
+This is a critical launch blocker.
+
+Production testing for the same learner showed different financial values in Admin versus Parent Portal.
+
+Example observed:
+
+Admin:
+
+Total due: R21,150
+Total paid: R28,200
+Outstanding: R0
+
+Parent Portal:
+
+Total billed: R21,150
+Total paid: R14,100
+Outstanding: R7,050
+
+Audit exactly why these disagree.
+
+Determine:
+
+which database tables Admin uses
+which tables Parent Portal uses
+invoice source
+payment transaction source
+payment allocations
+arrears/carry-forward logic
+manual payment handling
+bank-statement payments
+proof-of-payment approvals
+whether either view counts unallocated/overpayments differently
+
+Do not cosmetically change one screen to match the other.
+
+Establish one authoritative ledger/calculation model and make Admin and Parent Portal derive financial totals from the same source of truth.
+
+Preserve transaction safety and payment audit history.
+
+Add reconciliation tests proving Admin and Parent Portal return identical billed, paid and outstanding totals for the same learner.
+
+6. Boarding, transport and aftercare
+
+Parents must be able to understand what they are paying for.
+
+Where a learner has services such as:
+
+Boarding
+Transport
+Aftercare
+
+show them as clearly separated invoice/service components.
+
+Example:
+
+Tuition — amount
+Boarding — amount
+Transport — amount
+Total — amount
+
+Do not double-charge bundled services.
+
+Preserve the actual configured school fee/service rules.
+
+Admin and Parent Portal must use the same service-enrollment and charge information.
+
+7. Improve announcement targeting
+
+Current Admin announcement targeting is too limited.
+
+Add safe targeting such as:
+
+All parents
+Parents of a specific grade
+Parents of a specific class
+Specific parent(s)
+Staff
+Everyone where appropriate
+
+Remove/hide Students Only from normal publishing controls because Student Portal access remains retired, unless an existing non-portal workflow genuinely requires it.
+
+Targeting must always be resolved server-side using current parent/learner links.
+
+Never trust client-supplied parent membership.
+
+8. Important announcement notifications + email
+
+For announcements marked important/high priority:
+
+create Parent Portal notification
+send parent email after the announcement commits
+
+Email should contain:
+
+Harmony branding
+announcement title
+announcement message/content
+relevant learner/grade context where safe
+View in Parent Portal
+
+Preserve:
+
+Gmail API/OAuth
+Harmony Reply-To
+Powered by AutoM8 footer
+
+Email failure must not roll back announcement creation.
+
+Grade/class targeting must ensure only eligible parents receive the email.
+
+9. Document targeting
+
+Apply equivalent targeting capabilities to general school documents:
+
+all parents
+grade
+class
+specific parent(s)
+staff
+everyone where appropriate
+
+Parent document access must continue using the secured Phase 1 download architecture.
+
+Important newly published parent documents should create appropriate Parent Portal notifications and optionally email alerts.
+
+10. Tests
+
+Add/extend tests for:
+
+remembered session survives browser restart
+logout still revokes remembered session
+password reset revokes remembered sessions
+Admin disable revokes remembered sessions
+mobile checkbox accessibility
+financial Admin/Parent reconciliation
+boarding/transport/aftercare calculation
+announcement all-parent targeting
+grade targeting
+class targeting
+specific-parent targeting
+unauthorized parent excluded
+important announcement email fan-out
+document targeting
+Student Portal remains retired
+multi-learner isolation remains intact
+
+Rerun all Phase 1–4 Parent Portal tests, payment security tests, notification tests, admissions regressions, security tests and production build.
+
+Perform independent security/correctness review.
+
+Return:
+
+Persistent-login root cause and fix
+Financial discrepancy root cause
+Authoritative finance model after correction
+Service-charge presentation
+Mobile UI changes
+Grades-disable behavior
+Announcement targeting design
+Document targeting design
+Email behavior
+Files changed
+Migration required, if any
+Tests passed
+Independent review findings
+Any remaining blocker before Phase 5 rollout
+
+Do not deploy or run migrations automatically.

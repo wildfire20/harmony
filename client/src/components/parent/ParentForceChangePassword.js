@@ -12,11 +12,12 @@ const ParentForceChangePassword = () => {
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
 
-  const storage = sessionStorage.getItem('parentToken') ? sessionStorage : localStorage;
-  const user = JSON.parse(storage.getItem('parentUser') || 'null');
+  const storage = sessionStorage;
+  let user = null;
+  try { user = JSON.parse(storage.getItem('parentUser') || 'null'); } catch (_) {}
 
   useEffect(() => {
-    if (!sessionStorage.getItem('parentToken') && !localStorage.getItem('parentToken')) {
+    if (!sessionStorage.getItem('parentToken')) {
       navigate('/parent/login');
     }
   }, [navigate]);
@@ -42,7 +43,7 @@ const ParentForceChangePassword = () => {
 
       // Update stored user
       if (user) {
-        localStorage.setItem('parentUser', JSON.stringify({ ...user, must_change_password: false }));
+        sessionStorage.setItem('parentUser', JSON.stringify({ ...user, must_change_password: false }));
       }
       setDone(true);
     } catch (err) {

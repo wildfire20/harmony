@@ -5,6 +5,14 @@ const { authenticate, authorize, authorizeResourceAccess, authorizeTeacherAssign
 const { notifyAnnouncement } = require('../services/parentNotificationService');
 
 const router = express.Router();
+const ANNOUNCEMENT_AUDIENCES = [
+  'everyone', 'staff', 'students', 'parents', 'all_parents',
+  'grade', 'class', 'specific_parents',
+];
+const toIdArray = (value) => {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(Number).filter(id => Number.isSafeInteger(id) && id > 0))];
+};
 
 // Get announcements for current user
 router.get('/', authenticate, async (req, res) => {
@@ -44,8 +52,8 @@ router.get('/', authenticate, async (req, res) => {
       params.push(user.id, 'everyone', 'staff');
     } else if (user.role === 'admin' || user.role === 'super_admin') {
       // Admins see all announcements
-      query += ' AND a.target_audience IN ($1, $2, $3)';
-      params.push('everyone', 'staff', 'students');
+      query += ` AND a.target_audience = ANY($1::text[])`;
+      params.push(ANNOUNCEMENT_AUDIENCES);
     }
     
     query += ' ORDER BY a.priority DESC, a.created_at DESC';
@@ -109,8 +117,8 @@ router.get('/grade/:gradeId/class/:classId', [
       params.push('everyone', 'staff');
     } else if (req.user.role === 'admin' || req.user.role === 'super_admin') {
       // Admins can see all announcements
-      query += ' AND a.target_audience IN ($3, $4, $5)';
-      params.push('everyone', 'staff', 'students');
+      query += ' AND a.target_audience = ANY($3::text[])';
+      params.push(ANNOUNCEMENT_AUDIENCES);
     }
     
     query += ' ORDER BY a.priority DESC, a.created_at DESC';
@@ -171,7 +179,10 @@ router.post('/', [
   body('title').notEmpty().withMessage('Title is required'),
   body('content').notEmpty().withMessage('Content is required'),
   body('priority').optional().isIn(['low', 'normal', 'high', 'urgent']).withMessage('Invalid priority'),
-  body('target_audience').optional().isIn(['everyone', 'staff', 'students']).withMessage('Invalid target audience')
+  body('target_audience').optional().isIn(ANNOUNCEMENT_AUDIENCES).withMessage('Invalid target audience'),
+  body('grade_id').optional().isInt({ min: 1 }).withMessage('Invalid grade'),
+  body('class_id').optional().isInt({ min: 1 }).withMessage('Invalid class'),
+  body('parent_ids').optional().isArray().withMessage('parent_ids must be an array')
 ], async (req, res) => {
   try {
     console.log('📝 Creating announcement with data:', req.body);
@@ -186,14 +197,22 @@ router.post('/', [
       });
     }
 
-    const { title, content, priority, target_audience } = req.body;
+    const {
+      title, content, priority, target_audience, grade_id, class_id,
+    } = req.body;
     const user = req.user;
+    const audience = String(target_audience || (user?.role === 'teacher' ? 'staff' : 'everyone')).toLowerCase();
+    let targetParentIds = toIdArray(req.body.parent_ids);
 
     let gradeId = null;
     let classId = null;
 
-    // For teachers, use their assigned grade/class
+    // For teachers, use their assigned grade/class.  The client cannot move a
+    // teacher's audience outside the assignment.
     if (user.role === 'teacher') {
+      if (!['staff', 'students'].includes(audience)) {
+        return res.status(403).json({ success: false, message: 'Teachers can only publish to staff or students' });
+      }
       console.log('🏫 Processing teacher announcement...');
       // Get teacher's assignment
       const assignment = await db.query(`
@@ -213,23 +232,57 @@ router.post('/', [
       classId = assignment.rows[0].class_id;
       console.log('✅ Teacher assignment found:', { gradeId, classId });
     }
-    // For admins, announcements are global (no specific grade/class)
+    // Admins may choose global, grade, class, or selected-parent scope.
     else if (user.role === 'admin' || user.role === 'super_admin') {
       console.log('👑 Processing admin announcement...');
-      // Admin announcements are global, so grade_id and class_id can be null
-      gradeId = null;
-      classId = null;
+      gradeId = grade_id == null || grade_id === '' ? null : Number(grade_id);
+      classId = class_id == null || class_id === '' ? null : Number(class_id);
+
+      if (audience === 'grade' && gradeId == null) {
+        return res.status(400).json({ success: false, message: 'A grade is required for grade targeting' });
+      }
+      if (audience === 'class' && (gradeId == null || classId == null)) {
+        return res.status(400).json({ success: false, message: 'A grade and class are required for class targeting' });
+      }
+      if (audience === 'specific_parents' && !targetParentIds.length) {
+        return res.status(400).json({ success: false, message: 'Select at least one parent' });
+      }
+      if (!['grade', 'class'].includes(audience)) {
+        gradeId = null;
+        classId = null;
+      }
+    }
+
+    // Resolve the selected parent IDs against current, active parent links.
+    // IDs are a requested scope, never proof of membership.
+    if (audience === 'specific_parents') {
+      const eligible = await db.query(`
+        SELECT DISTINCT p.id
+        FROM users p
+        JOIN parent_students ps ON ps.parent_id = p.id
+        JOIN users s ON s.id = ps.student_id AND s.role = 'student' AND s.is_active = true
+        WHERE p.role = 'parent' AND p.is_active = true AND p.id = ANY($1::int[])
+      `, [targetParentIds]);
+      targetParentIds = eligible.rows.map(row => Number(row.id));
+      if (!targetParentIds.length) {
+        return res.status(400).json({ success: false, message: 'No selected parents have an active linked student' });
+      }
+    } else {
+      targetParentIds = [];
     }
 
     console.log('💾 Inserting announcement with params:', {
-      title, content, priority: priority || 'normal', gradeId, classId, target_audience: target_audience || 'everyone', created_by: user.id
+      title, content, priority: priority || 'normal', gradeId, classId, target_audience: audience, created_by: user.id
     });
 
     const result = await db.query(`
-      INSERT INTO announcements (title, content, priority, grade_id, class_id, target_audience, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, title, content, priority, grade_id, class_id, target_audience, created_at, updated_at
-    `, [title, content, priority || 'normal', gradeId, classId, target_audience || 'everyone', user.id]);
+      INSERT INTO announcements
+        (title, content, priority, grade_id, class_id, target_audience, target_parent_ids, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+      RETURNING id, title, content, priority, grade_id, class_id, target_audience,
+                target_parent_ids, created_at, updated_at
+    `, [title, content, priority || 'normal', gradeId, classId, audience,
+      JSON.stringify(targetParentIds), user.id]);
 
     console.log('✅ Announcement created successfully:', result.rows[0]);
 
@@ -259,7 +312,10 @@ router.put('/:id', [
   body('title').optional().notEmpty().withMessage('Title cannot be empty'),
   body('content').optional().notEmpty().withMessage('Content cannot be empty'),
   body('priority').optional().isIn(['low', 'normal', 'high', 'urgent']).withMessage('Invalid priority'),
-  body('target_audience').optional().isIn(['everyone', 'staff', 'students']).withMessage('Invalid target audience')
+  body('target_audience').optional().isIn(ANNOUNCEMENT_AUDIENCES).withMessage('Invalid target audience'),
+  body('grade_id').optional().isInt({ min: 1 }).withMessage('Invalid grade'),
+  body('class_id').optional().isInt({ min: 1 }).withMessage('Invalid class'),
+  body('parent_ids').optional().isArray().withMessage('parent_ids must be an array')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -268,7 +324,20 @@ router.put('/:id', [
     }
 
     const { id } = req.params;
-    const { title, content, priority, target_audience } = req.body;
+    const { title, content, priority, target_audience, grade_id, class_id } = req.body;
+
+    // Keep update-time authorization identical to creation.  In particular,
+    // a teacher may not turn a staff/student announcement into a parent,
+    // school-wide, grade, class, or selected-parent publication.
+    if (req.user.role === 'teacher') {
+      if (target_audience !== undefined && !['staff', 'students'].includes(target_audience)) {
+        return res.status(403).json({ message: 'Teachers can only publish to staff or students' });
+      }
+      if (grade_id !== undefined || class_id !== undefined ||
+          req.body.parent_ids !== undefined || req.body.target_parent_ids !== undefined) {
+        return res.status(403).json({ message: 'Teachers cannot change announcement targeting scope' });
+      }
+    }
 
     const updateFields = [];
     const params = [];
@@ -298,6 +367,41 @@ router.put('/:id', [
       params.push(target_audience);
     }
 
+    if (grade_id !== undefined) {
+      paramCount++;
+      updateFields.push(`grade_id = $${paramCount}`);
+      params.push(grade_id == null || grade_id === '' ? null : Number(grade_id));
+    }
+    if (class_id !== undefined) {
+      paramCount++;
+      updateFields.push(`class_id = $${paramCount}`);
+      params.push(class_id == null || class_id === '' ? null : Number(class_id));
+    }
+    if (Array.isArray(req.body.parent_ids)) {
+      const requestedParentIds = toIdArray(req.body.parent_ids);
+      if (!requestedParentIds.length) {
+        return res.status(400).json({ message: 'Select at least one parent' });
+      }
+      const eligible = await db.query(`
+        SELECT DISTINCT p.id
+        FROM users p
+        JOIN parent_students ps ON ps.parent_id = p.id
+        JOIN users s ON s.id = ps.student_id AND s.role = 'student' AND s.is_active = true
+        WHERE p.role = 'parent' AND p.is_active = true AND p.id = ANY($1::int[])
+      `, [requestedParentIds]);
+      const eligibleIds = eligible.rows.map(row => Number(row.id));
+      if (!eligibleIds.length) return res.status(400).json({ message: 'No selected parents have an active linked student' });
+      paramCount++;
+      updateFields.push(`target_parent_ids = $${paramCount}::jsonb`);
+      params.push(JSON.stringify(eligibleIds));
+    } else if (target_audience !== undefined && target_audience !== 'specific_parents') {
+      // Changing away from a selected-parent scope must not retain the old
+      // recipient list and accidentally narrow the new audience.
+      paramCount++;
+      updateFields.push(`target_parent_ids = $${paramCount}::jsonb`);
+      params.push('[]');
+    }
+
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'No fields to update' });
     }
@@ -311,7 +415,7 @@ router.put('/:id', [
       SET ${updateFields.join(', ')}
       WHERE id = $${paramCount}
       RETURNING id, title, content, priority, target_audience,
-                grade_id, class_id, updated_at, created_at
+                grade_id, class_id, target_parent_ids, updated_at, created_at
     `, params);
 
     if (result.rows.length === 0) {
@@ -398,8 +502,8 @@ router.get('/recent/:limit?', authenticate, async (req, res) => {
       params.push(user.id, 'everyone', 'staff');
     } else if (user.role === 'admin' || user.role === 'super_admin') {
       // Admins can see all announcements
-      query += ' AND a.target_audience IN ($1, $2, $3)';
-      params.push('everyone', 'staff', 'students');
+      query += ' AND a.target_audience = ANY($1::text[])';
+      params.push(ANNOUNCEMENT_AUDIENCES);
     }
 
     query += ' ORDER BY a.priority DESC, a.created_at DESC LIMIT $' + (params.length + 1);

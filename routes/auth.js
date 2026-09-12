@@ -8,7 +8,7 @@ const { authenticate } = require('../middleware/auth');
 const { isStudentPortalEnabled } = require('../config/features');
 const {
   hashToken, randomToken, accessToken, setRefreshCookie, authenticateSession, revokeUserSessions,
-  withTransaction,
+  withTransaction, NORMAL_DAYS, REMEMBERED_DAYS,
 } = require('../services/parentAuth');
 
 const router = express.Router();
@@ -355,6 +355,8 @@ router.post('/refresh', async (req, res) => {
     await client.query('BEGIN');
     const found = await client.query(`SELECT s.id AS session_id, s.user_id AS session_user_id,
       s.refresh_token_hash, s.family_id, s.family_expires_at, s.expires_at, s.revoked_at, s.replaced_by_hash, s.created_at,
+      (SELECT MIN(origin.created_at) FROM parent_sessions origin
+       WHERE origin.family_id=s.family_id) AS family_created_at,
       u.id AS user_id, u.email, u.role, u.student_number, u.is_active, u.auth_revoked_at
       FROM parent_sessions s JOIN users u ON u.id=s.user_id
       WHERE s.refresh_token_hash=$1 AND u.role='parent' AND u.is_active=true
@@ -372,12 +374,19 @@ router.post('/refresh', async (req, res) => {
       await client.query('COMMIT'); client.release();
       return res.status(401).json({ message: 'Session expired' });
     }
-    const remember = (new Date(old.expires_at) - Date.now()) > 3 * 86400000;
+    // Do not infer persistence from the remaining token TTL. A remembered
+    // family can be near its 30-day boundary and a normal family can be
+    // freshly rotated. The family origin is selected from the immutable
+    // earliest row, rather than inferred from this row's rotation timestamp.
+    const familyLifetime = new Date(old.family_expires_at).getTime() - new Date(old.family_created_at).getTime();
+    const remember = familyLifetime > (NORMAL_DAYS + 1) * 86400000;
     const successor = randomToken();
     const inserted = await client.query(`INSERT INTO parent_sessions
       (user_id,refresh_token_hash,family_id,family_expires_at,expires_at,user_agent,ip_address)
       VALUES ($1,$2,$3,$4,LEAST($4,NOW()+($5 * INTERVAL '1 day')),$6,$7) RETURNING id`,
-      [old.user_id, hashToken(successor), old.family_id, old.family_expires_at, remember ? 30 : 1, req.get('user-agent') || null, req.ip || null]);
+      [old.user_id, hashToken(successor), old.family_id, old.family_expires_at,
+        remember ? REMEMBERED_DAYS : NORMAL_DAYS,
+        req.get('user-agent') || null, req.ip || null]);
     const consumed = await client.query(`UPDATE parent_sessions SET revoked_at=NOW(),last_used_at=NOW(),replaced_by_hash=$1
       WHERE id=$2 AND revoked_at IS NULL AND replaced_by_hash IS NULL RETURNING id`,
       [hashToken(successor), old.session_id]);
@@ -387,7 +396,8 @@ router.post('/refresh', async (req, res) => {
       return res.status(401).json({ message: 'Session expired' });
     }
     await client.query('COMMIT'); client.release(); client = null;
-    setRefreshCookie(req, res, successor, Math.max(1, Math.ceil(familyRemaining / 1000)));
+    setRefreshCookie(req, res, successor,
+      remember ? Math.max(1, Math.ceil(familyRemaining / 1000)) : undefined);
     res.json({ token: accessToken(old, inserted.rows[0].id) });
   } catch (error) {
     if (client) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); }

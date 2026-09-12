@@ -51,17 +51,20 @@ const db = {
       state.sessions.push({ id, user_id: params[0], hash: params[1],
         family_id: params[2], family_expires_at: familyExpires,
         days: params[4], revoked_at: null, replaced_by_hash: null,
-        created_at: new Date(),
+        created_at: new Date(Date.now()),
         expires_at: new Date(Math.min(familyExpires.getTime(), Date.now() + Number(params[4]) * 86400000)) });
       return row([{ id }]);
     }
     if (/SELECT s\.\*, u\.id/.test(sql) || /SELECT s\.id AS session_id/.test(sql)) {
       const found = state.sessions.find(s => s.hash === params[0] && s.expires_at > new Date());
+      const familyCreatedAt = found && state.sessions
+        .filter(s => s.family_id === found.family_id)
+        .reduce((earliest, session) => session.created_at < earliest ? session.created_at : earliest, found.created_at);
       return row(found ? [{ ...found, id: state.user.id, session_id: found.id,
         session_user_id: found.user_id, user_id: state.user.id, email: state.user.email,
         role: 'parent', is_active: true, auth_revoked_at: null,
         refresh_token_hash: found.hash, family_expires_at: found.family_expires_at,
-        created_at: found.created_at }] : []);
+        created_at: found.created_at, family_created_at: familyCreatedAt }] : []);
     }
     if (/UPDATE parent_sessions SET revoked_at=NOW\(\) WHERE refresh_token_hash/.test(sql)) {
       const found = state.sessions.find(s => s.hash === params[0]); if (found) found.revoked_at = new Date(); return row([]);
@@ -202,9 +205,15 @@ test('parent login accepts legacy phone forms, rejects invalid/inactive users, a
 test('refresh cookies have secure flags and remembered/normal TTLs are distinct', async () => {
   state.sessions = []; state.children = [{ id: 101, first_name: 'Kid' }];
   const normal = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1' }) });
-  const remembered = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1', remember: true }) });
+  const normalCookie = normal.response.headers.get('set-cookie').split(';')[0];
   assert.match(normal.response.headers.get('set-cookie'), /HttpOnly/); assert.match(normal.response.headers.get('set-cookie'), /Secure/);
-  assert.match(normal.response.headers.get('set-cookie'), /Max-Age=86400/);
+  assert.doesNotMatch(normal.response.headers.get('set-cookie'), /Max-Age=/,
+    'normal sessions use a browser-session cookie');
+  const rotatedNormal = await json('/api/auth/refresh', { method: 'POST', headers: { cookie: normalCookie } });
+  assert.equal(rotatedNormal.response.status, 200);
+  assert.doesNotMatch(rotatedNormal.response.headers.get('set-cookie'), /Max-Age=/,
+    'rotating a normal session must not make it persistent');
+  const remembered = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1', remember: true }) });
   assert.match(remembered.response.headers.get('set-cookie'), /Max-Age=2592000/);
   assert.ok(state.sessions.every(s => s.family_expires_at instanceof Date));
   const family = state.sessions[0].family_expires_at.getTime();
@@ -226,6 +235,43 @@ test('parent access tokens carry session identity and auth-token issuance locks 
   assert.match(middleware, /s\.revoked_at IS NULL/);
   assert.match(middleware, /s\.expires_at>NOW\(\)/);
   assert.match(middleware, /s\.family_expires_at>NOW\(\)/);
+});
+
+test('remembered mode survives late-family rotations while normal families stay session cookies', async () => {
+  const login = await json('/api/auth/login/parent', {
+    method: 'POST',
+    body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1', remember: true }),
+  });
+  assert.equal(login.response.status, 200);
+  const originalNow = Date.now;
+  const familyOrigin = originalNow();
+  const lateFamilyNow = familyOrigin + 29 * 86400000;
+  Date.now = () => lateFamilyNow;
+  try {
+    let cookie = login.response.headers.get('set-cookie').split(';')[0];
+    const lateRotation = await json('/api/auth/refresh', { method: 'POST', headers: { cookie } });
+    assert.equal(lateRotation.response.status, 200);
+    assert.match(lateRotation.response.headers.get('set-cookie'), /Max-Age=\d+/,
+      'remembered mode remains persistent near family expiry');
+    cookie = lateRotation.response.headers.get('set-cookie').split(';')[0];
+
+    // The successor row is now a late-created rotation. Its cookie must still
+    // be persistent because SQL derives mode from the family origin.
+    const secondLateRotation = await json('/api/auth/refresh', { method: 'POST', headers: { cookie } });
+    assert.equal(secondLateRotation.response.status, 200);
+    assert.match(secondLateRotation.response.headers.get('set-cookie'), /Max-Age=\d+/,
+      'every remembered rotation preserves persistence');
+  } finally {
+    Date.now = originalNow;
+  }
+
+  const normal = await json('/api/auth/login/parent', {
+    method: 'POST',
+    body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1' }),
+  });
+  assert.equal(normal.response.status, 200);
+  assert.doesNotMatch(normal.response.headers.get('set-cookie'), /Max-Age=/,
+    'normal families remain browser-session cookies');
 });
 
 test('forgot password is enumeration-safe and reset is expiring, one-use, and revokes sessions', async () => {
@@ -293,7 +339,7 @@ test('auth email escapes recipient data and migration remains manual/idempotent'
 });
 
 test('logout, refresh replay, password change, and admin disable revoke sessions', async () => {
-  const login = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1' }) });
+  const login = await json('/api/auth/login/parent', { method: 'POST', body: JSON.stringify({ phone_number: '0821234567', password: 'CorrectPassword1', remember: true }) });
   const cookie = login.response.headers.get('set-cookie').split(';')[0];
   state.queries = [];
   const first = await json('/api/auth/refresh', { method: 'POST', headers: { cookie } });

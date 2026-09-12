@@ -17,7 +17,12 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
     description: '',
     document_type: '',
     file: null,
-    target_audience: 'everyone' // For admin uploads
+    target_audience: 'everyone', // For admin uploads
+    grade_id: '',
+    class_id: '',
+    parent_ids: '',
+    important: false,
+    notify_email: false
   });
   const [viewingDocument, setViewingDocument] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -136,6 +141,16 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
       alert('Please select a target audience for the document');
       return;
     }
+    if ((user.role === 'admin' || user.role === 'super_admin') &&
+        ['grade', 'class'].includes(uploadForm.target_audience) && !uploadForm.grade_id) {
+      alert('A grade is required for grade/class targeting');
+      return;
+    }
+    if ((user.role === 'admin' || user.role === 'super_admin') &&
+        uploadForm.target_audience === 'class' && !uploadForm.class_id) {
+      alert('A class is required for class targeting');
+      return;
+    }
 
     // Validate teacher access to this grade/class
     if (user.role === 'teacher') {
@@ -159,6 +174,15 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
     // For admin uploads, use target_audience instead of grade/class
     if (user.role === 'admin' || user.role === 'super_admin') {
       formData.append('target_audience', uploadForm.target_audience);
+      if (uploadForm.grade_id) formData.append('grade_id', uploadForm.grade_id);
+      if (uploadForm.class_id) formData.append('class_id', uploadForm.class_id);
+      if (uploadForm.target_audience === 'specific_parents') {
+        uploadForm.parent_ids.split(',').map(value => Number(value.trim()))
+          .filter(id => Number.isSafeInteger(id) && id > 0)
+          .forEach(id => formData.append('parent_ids[]', id));
+      }
+      formData.append('important', String(uploadForm.important));
+      formData.append('notify_email', String(uploadForm.notify_email));
     } else {
       formData.append('grade_id', activeGradeId);
       formData.append('class_id', activeClassId);
@@ -181,7 +205,12 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
           description: '', 
           document_type: '', 
           file: null, 
-          target_audience: 'everyone' 
+          target_audience: 'everyone',
+          grade_id: '',
+          class_id: '',
+          parent_ids: '',
+          important: false,
+          notify_email: false
         });
       } else {
         const error = await response.json();
@@ -420,7 +449,12 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
                   description: '', 
                   document_type: '', 
                   file: null, 
-                  target_audience: 'everyone' 
+                  target_audience: 'everyone',
+                  grade_id: '',
+                  class_id: '',
+                  parent_ids: '',
+                  important: false,
+                  notify_email: false
                 });
               }}
               className="text-gray-400 hover:text-gray-600"
@@ -506,13 +540,72 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
                 >
                   <option value="">Select target audience</option>
                   <option value="everyone">Everyone (All Users)</option>
-                  <option value="student">Students Only</option>
                   <option value="staff">Staff Only (Teachers & Admins)</option>
-                  <option value="parents">Parents Only</option>
+                  <option value="parents">All Parents</option>
+                  <option value="grade">Grade</option>
+                  <option value="class">Class</option>
+                  <option value="specific_parents">Specific Parents</option>
                 </select>
                 <p className="text-xs text-gray-500 mt-1">
                   Choose who can access this document
                 </p>
+              </div>
+            )}
+            {(user.role === 'admin' || user.role === 'super_admin') &&
+              ['grade', 'class'].includes(uploadForm.target_audience) && (
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Grade ID"
+                  value={uploadForm.grade_id}
+                  onChange={(e) => setUploadForm({ ...uploadForm, grade_id: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                />
+                {uploadForm.target_audience === 'class' && (
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Class ID"
+                    value={uploadForm.class_id}
+                    onChange={(e) => setUploadForm({ ...uploadForm, class_id: e.target.value })}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  />
+                )}
+              </div>
+            )}
+            {(user.role === 'admin' || user.role === 'super_admin') &&
+              uploadForm.target_audience === 'specific_parents' && (
+              <input
+                type="text"
+                placeholder="Parent IDs (comma-separated)"
+                value={uploadForm.parent_ids}
+                onChange={(e) => setUploadForm({ ...uploadForm, parent_ids: e.target.value })}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              />
+            )}
+            {(user.role === 'admin' || user.role === 'super_admin') &&
+              ['parents', 'all_parents', 'grade', 'class', 'specific_parents'].includes(uploadForm.target_audience) && (
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={uploadForm.important}
+                    onChange={(e) => setUploadForm({ ...uploadForm, important: e.target.checked })}
+                  />
+                  Important parent document
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={uploadForm.notify_email}
+                    onChange={(e) => setUploadForm({ ...uploadForm, notify_email: e.target.checked })}
+                  />
+                  Send an email alert after publishing
+                </label>
               </div>
             )}
 
@@ -564,7 +657,12 @@ const DocumentLibrary = ({ gradeId = null, classId = null }) => {
                     description: '', 
                     document_type: '', 
                     file: null, 
-                    target_audience: 'everyone' 
+                    target_audience: 'everyone',
+                    grade_id: '',
+                    class_id: '',
+                    parent_ids: '',
+                    important: false,
+                    notify_email: false
                   });
                 }}
                 className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400 transition-colors"

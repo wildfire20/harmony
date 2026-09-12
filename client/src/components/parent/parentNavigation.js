@@ -1,7 +1,6 @@
 const PARENT_DESTINATIONS = new Set([
   '/parent/dashboard',
   '/parent/attendance',
-  '/parent/grades',
   '/parent/invoices',
   '/parent/payment-proof',
   '/parent/documents',

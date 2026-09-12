@@ -8,7 +8,6 @@ import { parentApi, useSelectedChild } from './ParentPortal';
 
 const ACTIONS = {
   attendance: { label: 'View attendance', path: '/parent/attendance' },
-  grades: { label: 'View grades', path: '/parent/grades' },
   payments: { label: 'View fees', path: '/parent/invoices' },
   invoices: { label: 'View fees', path: '/parent/invoices' },
   documents: { label: 'View documents', path: '/parent/documents' },

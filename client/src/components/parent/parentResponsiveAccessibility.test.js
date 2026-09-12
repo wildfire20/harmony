@@ -1,0 +1,32 @@
+import fs from 'fs';
+import path from 'path';
+
+const source = (name) => fs.readFileSync(path.join(__dirname, name), 'utf8');
+
+test('parent navigation keeps grades out of visible navigation', () => {
+  const portal = source('ParentPortal.js');
+  expect(portal).not.toMatch(/\{ path: ['"]\/parent\/grades['"]/);
+  expect(portal).toMatch(/label: 'Attendance'/);
+  expect(portal).toMatch(/label: 'Account'/);
+});
+
+test('parent login remember control exposes a visible accessible state', () => {
+  const login = source('ParentLogin.js');
+  expect(login).toMatch(/aria-label="Keep me signed in on this device"/);
+  expect(login).toMatch(/className="parent-remember"/);
+  expect(source('ParentPortal.css')).toMatch(/\.parent-remember:checked/);
+});
+
+test('parent surfaces include a narrow viewport layout and original logo asset', () => {
+  expect(source('ParentPortal.css')).toMatch(/@media \(max-width: 639px\)/);
+  expect(source('ParentLogin.js')).toMatch(/\/images\/harmony-logo\.png/);
+  expect(source('ParentPortal.js')).toMatch(/\/images\/harmony-logo\.png/);
+});
+
+test('legacy Grades URLs redirect without changing startup session hydration', () => {
+  const portal = source('ParentPortal.js');
+  expect(portal).toMatch(/<Route path="grades"\s+element={<Navigate to="\/parent\/dashboard" replace \/>} \/>/);
+  expect(portal).toMatch(/refreshParentAccess\(\)\.catch/);
+  expect(portal).toMatch(/setAuthVersion\(version => version \+ 1\)/);
+  expect(portal).toMatch(/fetch\('\/api\/parent\/me', \{ credentials: 'include'/);
+});

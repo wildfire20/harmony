@@ -78,8 +78,13 @@ function portalUrl(destination) {
 async function parentRecipients({ learnerId, parentIds, gradeId, classId, audience = 'linked' }) {
   const params = [];
   const predicates = [`p.role = 'parent'`, `p.is_active = true`];
-  if (Array.isArray(parentIds) && parentIds.length) {
-    params.push(parentIds.map(Number).filter(Number.isSafeInteger));
+  // An explicitly empty selection means nobody, not everybody.  This is
+  // important for "specific parents" controls and also prevents a malformed
+  // client payload from broadening a notification to the whole school.
+  if (Array.isArray(parentIds)) {
+    const safeParentIds = parentIds.map(Number).filter(Number.isSafeInteger);
+    if (!safeParentIds.length) return [];
+    params.push(safeParentIds);
     predicates.push(`p.id = ANY($${params.length}::int[])`);
   }
   if (learnerId != null) {
@@ -161,6 +166,7 @@ async function createParentNotifications({
   classId,
   audience = 'linked',
   important = false,
+  email = important,
   recipients,
 }) {
   try {
@@ -194,7 +200,10 @@ async function createParentNotifications({
         // Delivery is intentionally after the durable insert and can never
         // reject/rollback the source transaction.
         await Promise.allSettled([
-          deliverOptional({ parent: recipient, title: safeTitle, summary: safeSummary, destination: safeDestination, important }),
+          deliverOptional({
+            parent: recipient, title: safeTitle, summary: safeSummary,
+            destination: safeDestination, important: Boolean(important && email),
+          }),
           deliverPush({
             parentId: recipient.parent_id,
             title: safeTitle,
@@ -301,12 +310,22 @@ async function notifyInvoice({ invoiceId, learnerId, amount }) {
 }
 
 async function notifyAnnouncement(announcement) {
-  if (!['everyone', 'students'].includes(String(announcement.target_audience || '').toLowerCase())) {
+  const audience = String(announcement.target_audience || '').toLowerCase();
+  const parentAudiences = new Set([
+    'everyone', 'parents', 'all_parents', 'grade', 'class',
+    'specific_parents',
+  ]);
+  if (!parentAudiences.has(audience)) {
     return { created: 0 };
   }
   try {
-    const targeted = announcement.grade_id != null || announcement.class_id != null;
+    const selectedParents = audience === 'specific_parents'
+      ? (announcement.target_parent_ids ?? announcement.parent_ids)
+      : undefined;
+    const targeted = announcement.grade_id != null || announcement.class_id != null ||
+      Array.isArray(selectedParents);
     const rows = await parentRecipients({
+      parentIds: Array.isArray(selectedParents) ? selectedParents : undefined,
       gradeId: announcement.grade_id,
       classId: announcement.class_id,
       audience: 'all',
@@ -320,11 +339,12 @@ async function notifyAnnouncement(announcement) {
       eventType: EVENT.ANNOUNCEMENT,
       title: clean(announcement.title, 180),
       summary: announcement.priority === 'high' || announcement.priority === 'urgent'
-        ? 'An important school announcement is available in the Parent Portal.'
-        : 'A new school announcement is available in the Parent Portal.',
+        ? `Important announcement: ${clean(announcement.content, 430)}`
+        : `New school announcement: ${clean(announcement.content, 430)}`,
       destination: 'announcements',
       dedupeKey: `announcement:${announcement.id}:${announcement.updated_at || announcement.created_at || 'published'}`,
       important: ['high', 'urgent'].includes(announcement.priority),
+      email: true,
       recipients,
     });
   } catch (error) {
@@ -334,11 +354,16 @@ async function notifyAnnouncement(announcement) {
 }
 
 async function notifyDocument(document) {
-  if (!['parents', 'everyone'].includes(String(document.target_audience || '').toLowerCase())) {
+  const audience = String(document.target_audience || '').toLowerCase();
+  if (!['parents', 'everyone', 'all_parents', 'grade', 'class', 'specific_parents'].includes(audience)) {
     return { created: 0 };
   }
   try {
+    const selectedParents = audience === 'specific_parents'
+      ? (document.target_parent_ids ?? document.parent_ids)
+      : undefined;
     const rows = await parentRecipients({
+      parentIds: Array.isArray(selectedParents) ? selectedParents : undefined,
       gradeId: document.grade_id,
       classId: document.class_id,
       audience: 'all',
@@ -349,11 +374,16 @@ async function notifyDocument(document) {
       .map((row) => ({ ...row, learner_id: null }));
     return createParentNotifications({
       eventType: EVENT.DOCUMENT,
-      title: 'New document available',
-      summary: 'A document authorised for your Parent Portal is available.',
+      title: clean(document.title || 'New document available', 180),
+      summary: `A document authorised for your Parent Portal is available: ${clean(document.title || 'school document', 220)}.`,
       destination: 'documents',
       dedupeKey: `document:${document.id}`,
       recipients,
+      // Durable inbox creation is always performed for parent documents;
+      // email is opt-in for routine documents and automatic for important
+      // documents.
+      important: Boolean(document.important || document.priority === 'high' || document.priority === 'urgent'),
+      email: Boolean(document.notify_email),
     });
   } catch (error) {
     console.warn('Parent document notification skipped:', error.message);

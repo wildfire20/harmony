@@ -7,3 +7,4 @@
 - [Parent learner isolation](parent-learner-isolation.md) — require explicit verified learner IDs; never infer, silently fall back, or relink parent relationships by name.
 - [Parent authentication lifecycle](parent-auth-lifecycle.md) — one-time hash-only links and fixed-lifetime revocable sessions must never alter learner relationships.
 - [Parent notification integrity](parent-notification-integrity.md) — durable parent-owned alerts require current learner access, stable dedupe, and allowlisted internal destinations.
+- [Finance ledger integrity](finance-ledger-integrity.md) — Admin and Parent totals share one ledger; carry-forward and reversals require explicit lineage and immutable events.

@@ -343,7 +343,10 @@ const initializeInvoiceSystem = async () => {
             WHEN amount_paid > amount_due THEN 'Overpaid'
           END,
           updated_at = CURRENT_TIMESTAMP
-        WHERE id = NEW.invoice_id;
+        WHERE id = CASE WHEN TG_OP = 'DELETE' THEN OLD.invoice_id ELSE NEW.invoice_id END;
+        IF TG_OP = 'DELETE' THEN
+          RETURN OLD;
+        END IF;
         RETURN NEW;
       END;
       $$ LANGUAGE plpgsql;

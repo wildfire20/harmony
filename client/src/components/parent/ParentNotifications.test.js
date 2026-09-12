@@ -23,6 +23,8 @@ describe('parent notification safe actions', () => {
     });
     expect(getNotificationAction({ type: 'payment_approved' })).toBeNull();
     expect(getNotificationAction({ category: 'documents' }).path).toBe('/parent/documents');
+    expect(getNotificationAction({ category: 'grades' })).toBeNull();
+    expect(getNotificationAction({ action: 'grades' })).toBeNull();
   });
 
   test('never forwards a server-provided arbitrary URL', () => {

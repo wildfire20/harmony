@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import { Eye, EyeOff, BookOpen, ArrowLeft, Phone } from 'lucide-react';
+import { Eye, EyeOff, ArrowLeft, Phone } from 'lucide-react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 import { useAppConfig } from '../../contexts/AppConfigContext';
 import { getReturnDestination } from './parentNavigation';
+import './ParentPortal.css';
 
 const ParentLogin = () => {
   const { studentPortalEnabled } = useAppConfig();
@@ -34,7 +35,7 @@ const ParentLogin = () => {
       storage.setItem('parentChild', JSON.stringify(child || children?.[0] || null));
 
       if (must_change_password) {
-        toast('Please set a new password to continue.', { icon: '🔐' });
+        toast('Please set a new password to continue.');
         navigate('/parent/change-password');
       } else {
         toast.success(`Welcome, ${user.first_name}!`);
@@ -48,11 +49,11 @@ const ParentLogin = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-red-700 flex flex-col">
+    <div className="parent-login min-h-[100dvh] flex flex-col">
       <div className="p-4">
         <button
           onClick={() => navigate('/')}
-          className="flex items-center gap-2 text-white/80 hover:text-white transition-colors text-sm"
+          className="flex min-h-[44px] items-center gap-2 text-white/80 hover:text-white transition-colors text-sm"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Home
@@ -62,16 +63,16 @@ const ParentLogin = () => {
       <div className="flex-1 flex items-center justify-center p-4">
         <div className="w-full max-w-md">
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-white/10 backdrop-blur-sm rounded-2xl mb-4">
-              <BookOpen className="h-8 w-8 text-white" />
-            </div>
-            <h1 className="text-3xl font-bold text-white">Parent Portal</h1>
-            <p className="text-blue-200 mt-2">Harmony Learning Institute</p>
+             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-white p-2 shadow-lg">
+               <img src="/images/harmony-logo.png" alt="Harmony Learning Institute" className="max-h-full max-w-full object-contain" />
+             </div>
+             <h1 className="text-3xl font-bold text-white">Parent Portal</h1>
+             <p className="text-[#c9dddf] mt-2">Harmony Learning Institute</p>
             <p className="text-white/60 text-sm mt-1">Stay connected with your child's education</p>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-2xl p-8">
-            <h2 className="text-xl font-semibold text-gray-800 mb-6">Sign in to your account</h2>
+           <div className="parent-login-card rounded-2xl bg-[#fbfcfb] p-6 sm:p-8">
+             <h2 className="text-xl font-semibold text-[#19324a] mb-6">Sign in to your account</h2>
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -84,7 +85,7 @@ const ParentLogin = () => {
                     value={form.phone_number}
                     onChange={(e) => setForm({ ...form, phone_number: e.target.value })}
                     placeholder="e.g. 071 167 9620"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm transition-all"
+                     className="w-full pl-10 pr-4 py-3 border border-[#cbd9df] rounded-xl focus:ring-2 focus:ring-[#2c7475] focus:border-transparent outline-none text-sm transition-all"
                     required
                     autoComplete="tel"
                   />
@@ -108,7 +109,7 @@ const ParentLogin = () => {
                     value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
                     placeholder="Your password"
-                    className="w-full px-4 py-3 pr-12 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm transition-all"
+                     className="w-full px-4 py-3 pr-12 border border-[#cbd9df] rounded-xl focus:ring-2 focus:ring-[#2c7475] focus:border-transparent outline-none text-sm transition-all"
                     required
                     autoComplete="current-password"
                   />
@@ -121,12 +122,12 @@ const ParentLogin = () => {
                   </button>
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" /> Keep me signed in on this device</label>
+               <label className="flex min-h-[44px] cursor-pointer items-center gap-3 text-sm text-[#526879]"><input type="checkbox" aria-label="Keep me signed in on this device" checked={remember} onChange={e => setRemember(e.target.checked)} className="parent-remember" /> Keep me signed in on this device</label>
 
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg shadow-blue-500/25 disabled:opacity-60 disabled:cursor-not-allowed text-base"
+                 className="w-full py-3.5 bg-[#2c7475] text-white font-semibold rounded-xl hover:bg-[#245f61] transition-all shadow-md shadow-[#2c7475]/20 disabled:opacity-60 disabled:cursor-not-allowed text-base"
               >
                 {loading ? 'Signing in…' : 'Sign In'}
               </button>

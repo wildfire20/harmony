@@ -9,6 +9,7 @@ const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { notifyInvoice, notifyPayment } = require('../services/parentNotificationService');
 const { logAudit, getIp } = require('../utils/auditLogger');
+const { getStudentLedger, getFinanceSummary, allocatePayment } = require('../services/financeLedger');
 
 const router = express.Router();
 
@@ -352,15 +353,20 @@ router.post('/carry-forward', [
         ]);
         created.push(invoiceResult.rows[0]);
 
-        // Mark the original unpaid invoices from that year as Carried Forward
+        // Mark every source invoice in this aggregate as Carried Forward and
+        // persist the lineage in the same transaction. Exclude the newly
+        // created successor because its due date may share fromYear.
         await client.query(`
           UPDATE invoices
-          SET status = 'Carried Forward', updated_at = NOW()
-          WHERE student_id = $1
-            AND EXTRACT(YEAR FROM due_date) = $2
+          SET status = 'Carried Forward',
+              carried_forward_to_invoice_id = $1,
+              updated_at = NOW()
+          WHERE student_id = $2
+            AND EXTRACT(YEAR FROM due_date) = $3
+            AND id <> $1
             AND status NOT IN ('Paid', 'Overpaid', 'Carried Forward')
             AND outstanding_balance > 0
-        `, [s.student_id, parseInt(fromYear)]);
+        `, [invoiceResult.rows[0].id, s.student_id, parseInt(fromYear)]);
       }
 
       await client.query('COMMIT');
@@ -467,6 +473,26 @@ router.put('/:id/arrears', [
 });
 
 // Get all invoices with filtering and pagination
+// Per-learner finance view.  This intentionally delegates to the same ledger
+// model as the Parent Portal instead of re-summing payment_transactions.
+router.get('/ledger/:studentId', [
+  authenticate,
+  authorize('admin', 'super_admin')
+], async (req, res) => {
+  try {
+    const studentId = Number.parseInt(req.params.studentId, 10);
+    if (!Number.isSafeInteger(studentId) || studentId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid student ID' });
+    }
+    const ledger = await getStudentLedger(studentId);
+    if (!ledger) return res.status(404).json({ success: false, message: 'Student not found' });
+    res.json({ success: true, ...ledger });
+  } catch (error) {
+    console.error('Get finance ledger error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch finance ledger' });
+  }
+});
+
 router.get('/', [
   authenticate,
   authorize('admin', 'super_admin')
@@ -482,6 +508,15 @@ router.get('/', [
       sortBy = 'due_date',
       sortOrder = 'DESC'
     } = req.query;
+    const allowedStatuses = ['Unpaid', 'Partial', 'Paid', 'Overpaid', 'Carried Forward'];
+    if (status && !allowedStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid invoice status filter' });
+    }
+    if ((month && !year) || (!month && year) ||
+        (month && (!Number.isInteger(Number(month)) || Number(month) < 1 || Number(month) > 12)) ||
+        (year && (!Number.isInteger(Number(year)) || Number(year) < 1900 || Number(year) > 2200))) {
+      return res.status(400).json({ success: false, message: 'Invalid invoice period filter' });
+    }
 
     // First, let's get the total count of active students
     const studentCountQuery = `
@@ -591,27 +626,15 @@ router.get('/', [
     const countResult = await db.query(countQuery, countParams);
     const totalInvoices = parseInt(countResult.rows[0].total);
 
-    // Calculate summary statistics
-    const summaryQuery = `
-      SELECT 
-        COUNT(*) as total_invoices,
-        SUM(CASE WHEN status = 'Paid' THEN 1 ELSE 0 END) as paid_count,
-        SUM(CASE WHEN status = 'Unpaid' THEN 1 ELSE 0 END) as unpaid_count,
-        SUM(CASE WHEN status = 'Partial' THEN 1 ELSE 0 END) as partial_count,
-        SUM(CASE WHEN status = 'Overpaid' THEN 1 ELSE 0 END) as overpaid_count,
-        SUM(amount_due) as total_amount_due,
-        SUM(amount_paid) as total_amount_paid,
-        SUM(outstanding_balance) as total_outstanding
-      FROM invoices i
-      LEFT JOIN users u ON i.student_id = u.id
-      WHERE 1=1
-      ${status ? `AND i.status = '${status}'` : ''}
-      ${month && year ? `AND EXTRACT(MONTH FROM i.due_date) = ${month} AND EXTRACT(YEAR FROM i.due_date) = ${year}` : ''}
-      ${studentNumber ? `AND i.student_number ILIKE '%${studentNumber}%'` : ''}
-    `;
-
-    const summaryResult = await db.query(summaryQuery);
-    const summary = summaryResult.rows[0];
+    // Derive dashboard totals from the same authoritative finance model used
+    // by Parent and the per-student ledger. This also excludes carry-forward
+    // source invoices while retaining them in the history list.
+    const financeSummary = await getFinanceSummary({
+      status,
+      month: month && year ? parseInt(month, 10) : undefined,
+      year: month && year ? parseInt(year, 10) : undefined,
+      studentNumber,
+    });
 
     res.json({
       success: true,
@@ -624,14 +647,19 @@ router.get('/', [
       },
       summary: {
         totalStudents, // Add total students count here
-        totalInvoices: parseInt(summary.total_invoices),
-        paidCount: parseInt(summary.paid_count),
-        unpaidCount: parseInt(summary.unpaid_count),
-        partialCount: parseInt(summary.partial_count),
-        overpaidCount: parseInt(summary.overpaid_count),
-        totalAmountDue: parseFloat(summary.total_amount_due) || 0,
-        totalAmountPaid: parseFloat(summary.total_amount_paid) || 0,
-        totalOutstanding: parseFloat(summary.total_outstanding) || 0
+        totalInvoices: financeSummary.totalInvoices,
+        paidCount: financeSummary.paidCount,
+        unpaidCount: financeSummary.unpaidCount,
+        partialCount: financeSummary.partialCount,
+        overpaidCount: financeSummary.overpaidCount,
+        totalAmountDue: financeSummary.totalAmountDue,
+        totalAmountPaid: financeSummary.totalAmountPaid,
+        totalOutstanding: financeSummary.totalOutstanding,
+        totalOverpaid: financeSummary.totalOverpaid,
+        overpaid: financeSummary.totalOverpaid,
+        unallocated: financeSummary.unallocated,
+        credit: financeSummary.credit,
+        netOutstanding: financeSummary.netOutstanding
       }
     });
 
@@ -961,98 +989,41 @@ router.post('/process-bank-statement', [
         }
 
         const invoice = invoiceResult.rows[0];
-        const outstandingAmount = invoice.outstanding_balance || invoice.amount_due;
 
         console.log(`Invoice found: ${invoice.reference_number}`);
-        console.log(`Invoice amount_due: ${invoice.amount_due}, amount_paid: ${invoice.amount_paid || 0}`);
-        console.log(`Outstanding amount: ${outstandingAmount}`);
-        console.log(`Transaction amount: ${transaction.amount} (type: ${typeof transaction.amount})`);
 
-        // Determine payment status
-        let newStatus, amountPaid, newOutstanding, overpaidAmount;
-        let resultCategory = null;
-
-        // Ensure numeric values for calculations
-        const currentAmountPaid = parseFloat(invoice.amount_paid || 0);
-        const transactionAmount = parseFloat(transaction.amount);
-        const outstandingAmountNum = parseFloat(outstandingAmount);
-
-        if (transactionAmount >= outstandingAmountNum) {
-          // Full payment or overpayment
-          if (transactionAmount === outstandingAmountNum) {
-            newStatus = 'Paid';
-            amountPaid = currentAmountPaid + transactionAmount;
-            newOutstanding = 0;
-            overpaidAmount = 0;
-            console.log(`MATCHED: Exact payment of ${transactionAmount} for invoice ${invoice.reference_number}, new amount_paid: ${amountPaid}`);
-            resultCategory = 'matched';
-          } else {
-            newStatus = 'Overpaid';
-            amountPaid = currentAmountPaid + transactionAmount;
-            newOutstanding = 0;
-            // FIXED: Calculate overpaid amount based on total amount paid vs total amount due
-            overpaidAmount = amountPaid - parseFloat(invoice.amount_due);
-            console.log(`OVERPAID: Total payment of ${amountPaid} exceeds amount due ${invoice.amount_due} by ${overpaidAmount} for invoice ${invoice.reference_number}`);
-            resultCategory = 'overpaid';
-          }
-        } else {
-          // Partial payment
-          newStatus = 'Partial';
-          amountPaid = currentAmountPaid + transactionAmount;
-          newOutstanding = outstandingAmountNum - transactionAmount;
-          overpaidAmount = 0;
-          console.log(`PARTIAL: Payment of ${transactionAmount} is less than outstanding ${outstandingAmountNum}, remaining: ${newOutstanding} for invoice ${invoice.reference_number}`);
-          resultCategory = 'partial';
-        }
-
-        // Update invoice - only update fields we can modify (not computed columns)
-        console.log(`Updating invoice ${invoice.id} with status: ${newStatus}, amount_paid: ${amountPaid} (type: ${typeof amountPaid})`);
-        
-        // Ensure amountPaid is a proper number with 2 decimal places
-        const properAmountPaid = Math.round(amountPaid * 100) / 100;
-        console.log(`Properly formatted values - amount_paid: ${properAmountPaid}`);
-        
-        const updateResult = await client.query(`
-          UPDATE invoices SET 
-            status = $1, 
-            amount_paid = $2::DECIMAL(10,2),
-            updated_at = NOW()
-          WHERE id = $3
-          RETURNING id, status, amount_paid, outstanding_balance, overpaid_amount
-        `, [newStatus, properAmountPaid, invoice.id]);
-        
-        console.log('Invoice update result:', updateResult.rows[0]);
-
-        // Record transaction
-        console.log(`Recording transaction for invoice ${invoice.id}`);
-        
-        const transactionResult = await client.query(`
-          INSERT INTO payment_transactions (
-            invoice_id, student_id, student_number, reference_number, amount, payment_date,
-            description
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-          RETURNING id
-        `, [
-          invoice.id,
-          invoice.student_id,
-          invoice.student_number,
-          transaction.reference,
-          transaction.amount,
-          transaction.date,
-          transaction.description
-        ]);
-        
-        console.log('Transaction recorded with ID:', transactionResult.rows[0].id);
+        const allocation = await allocatePayment(client, {
+          studentId: invoice.student_id,
+          amount: transaction.amount,
+          paymentDate: transaction.date,
+          paymentMethod: 'bank_transfer',
+          reference: transaction.reference,
+          description: transaction.description,
+          recordedBy: req.user.id,
+        });
+        const overpayment = allocation.allocations.find((item) => item.invoiceId == null);
+        const applied = allocation.allocations
+          .filter((item) => item.invoiceId != null)
+          .reduce((sum, item) => sum + item.amount, 0);
+        const resultCategory = overpayment
+          ? 'overpaid'
+          : allocation.allocations.some((item) => item.status === 'Partial')
+            ? 'partial'
+            : 'matched';
+        const updatedInvoice = await client.query(
+          'SELECT outstanding_balance FROM invoices WHERE id = $1',
+          [invoice.id],
+        );
         
         // Commit the transaction
         await client.query('COMMIT');
         console.log(`Successfully processed transaction for ${transaction.reference}`);
-        await notifyPayment({
+        await Promise.allSettled(allocation.allocations.map((item) => notifyPayment({
           kind: 'applied',
-          paymentId: transactionResult.rows[0].id,
+          paymentId: item.transactionId,
           learnerId: invoice.student_id,
-          amount: transaction.amount,
-        });
+          amount: item.amount,
+        })));
 
         // Add to results AFTER successful commit
         if (resultCategory === 'matched') {
@@ -1061,13 +1032,14 @@ router.post('/process-bank-statement', [
           results.overpaid.push({ 
             ...transaction, 
             invoice: invoice.reference_number,
-            overpaidAmount 
+            overpaidAmount: overpayment?.amount || 0,
           });
         } else if (resultCategory === 'partial') {
           results.partial.push({ 
             ...transaction, 
             invoice: invoice.reference_number,
-            remainingBalance: newOutstanding 
+            remainingBalance: parseFloat(updatedInvoice.rows[0]?.outstanding_balance) || 0,
+            appliedAmount: applied,
           });
         }
 

@@ -8,7 +8,14 @@ const REMEMBERED_DAYS = 30;
 const NORMAL_DAYS = 1;
 const hashToken = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const randomToken = () => crypto.randomBytes(32).toString('base64url');
-const secureCookie = (req) => process.env.NODE_ENV === 'production' || req.secure || req.headers['x-forwarded-proto'] === 'https';
+// Express' `req.secure` is proxy-aware when trust proxy is configured. Keep the
+// production fallback as a defence-in-depth measure, while accepting the first
+// forwarded protocol value used by common load balancers.
+const secureCookie = (req) => {
+  const forwardedProtocol = String(req.headers?.['x-forwarded-proto'] || '')
+    .split(',')[0].trim().toLowerCase();
+  return process.env.NODE_ENV === 'production' || req.secure === true || forwardedProtocol === 'https';
+};
 
 function accessToken(user, sessionId) {
   return jwt.sign({ id: user.id, email: user.email, role: user.role, session_id: sessionId },
@@ -28,15 +35,20 @@ async function issueRefresh(req, user, remember = false, familyId = crypto.rando
 }
 
 function setRefreshCookie(req, res, raw, maxAge) {
-  res.cookie('parent_refresh', raw, {
+  const options = {
     httpOnly: true, secure: secureCookie(req), sameSite: 'lax',
-    maxAge: maxAge * 1000, path: '/api/auth',
-  });
+    path: '/api/auth',
+  };
+  // A normal login deliberately gets a browser-session cookie. The database
+  // expiry still bounds the session, but closing the browser must not restore
+  // it. Remembered logins pass their remaining family lifetime here.
+  if (Number.isFinite(maxAge) && maxAge > 0) options.maxAge = Math.floor(maxAge * 1000);
+  res.cookie('parent_refresh', raw, options);
 }
 
 async function authenticateSession(req, res, user, remember = false, familyId) {
   const refresh = await issueRefresh(req, user, remember, familyId);
-  setRefreshCookie(req, res, refresh.raw, refresh.expiresIn);
+  setRefreshCookie(req, res, refresh.raw, remember ? refresh.expiresIn : undefined);
   return { token: accessToken(user, refresh.id), refresh };
 }
 
@@ -85,6 +97,6 @@ async function sendParentAuthEmail(email, token, type, name = '') {
 }
 
 module.exports = {
-  ACCESS_SECONDS, hashToken, randomToken, accessToken, authenticateSession, withTransaction,
+  ACCESS_SECONDS, REMEMBERED_DAYS, NORMAL_DAYS, hashToken, randomToken, accessToken, authenticateSession, withTransaction,
   setRefreshCookie, revokeUserSessions, issueAuthToken, sendParentAuthEmail, secureCookie,
 };

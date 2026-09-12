@@ -7,6 +7,7 @@ const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const s3Service = require('../services/s3Service');
 const { logAudit, getIp } = require('../utils/auditLogger');
+const { allocatePayment } = require('../services/financeLedger');
 const { detectType } = require('../services/admissionsDocumentService');
 const { notifyPayment } = require('../services/parentNotificationService');
 
@@ -94,56 +95,15 @@ const resolveChild = async (parentId, childId) => {
 };
 
 const applyPaymentToInvoices = async (executor, studentId, amount, proofId, adminId) => {
-  let remaining = parseFloat(amount);
-  const txIds = [];
-
-  // Get oldest unpaid/partial invoices first
-  const invoices = await executor.query(`
-    SELECT id, amount_due, amount_paid, outstanding_balance, reference_number
-    FROM invoices
-    WHERE student_id = $1 AND status IN ('Unpaid', 'Partial')
-    ORDER BY due_date ASC
-    FOR UPDATE
-  `, [studentId]);
-
-  for (const inv of invoices.rows) {
-    if (remaining <= 0) break;
-    const outstanding = parseFloat(inv.outstanding_balance);
-    const toApply = Math.min(remaining, outstanding);
-    const newPaid = parseFloat(inv.amount_paid) + toApply;
-    const newStatus = newPaid >= parseFloat(inv.amount_due)
-      ? (newPaid > parseFloat(inv.amount_due) ? 'Overpaid' : 'Paid')
-      : 'Partial';
-
-    await executor.query(`
-      UPDATE invoices SET amount_paid = $1, status = $2, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $3
-    `, [newPaid.toFixed(2), newStatus, inv.id]);
-
-    const tx = await executor.query(`
-      INSERT INTO payment_transactions
-        (invoice_id, student_id, amount, payment_date, payment_method, description, status, recorded_by)
-      VALUES ($1, $2, $3, CURRENT_DATE, 'proof_of_payment', $4, 'Matched', $5)
-      RETURNING id
-    `, [inv.id, studentId, toApply.toFixed(2),
-        `Approved proof of payment (Ref #${proofId})`, adminId]);
-
-    txIds.push(tx.rows[0].id);
-    remaining -= toApply;
-  }
-
-  // If there's still remaining amount (paid more than all outstanding), record as unmatched
-  if (remaining > 0.009) {
-    const tx = await executor.query(`
-      INSERT INTO payment_transactions
-        (student_id, amount, payment_date, payment_method, description, status, recorded_by)
-      VALUES ($1, $2, CURRENT_DATE, 'proof_of_payment', $3, 'Unmatched', $4)
-      RETURNING id
-    `, [studentId, remaining.toFixed(2), `Overpayment from proof #${proofId}`, adminId]);
-    txIds.push(tx.rows[0].id);
-  }
-
-  return txIds;
+  const result = await allocatePayment(executor, {
+    studentId,
+    amount,
+    paymentMethod: 'proof_of_payment',
+    reference: `PROOF-${proofId}`,
+    description: `Approved proof of payment (Ref #${proofId})`,
+    recordedBy: adminId,
+  });
+  return result.allocations.map((allocation) => allocation.transactionId);
 };
 
 // ─── POST /api/payment-proofs  (parent submits proof) ────────────────────────

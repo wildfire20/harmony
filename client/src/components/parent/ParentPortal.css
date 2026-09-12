@@ -1,0 +1,68 @@
+.parent-portal {
+  --parent-navy: #17324d;
+  --parent-navy-deep: #10283e;
+  --parent-ink: #263f53;
+  --parent-muted: #6b7e8e;
+  --parent-line: #dce6ea;
+  --parent-surface: #ffffff;
+  --parent-wash: #f4f7f8;
+  --parent-teal: #2c7475;
+  --parent-coral: #c96858;
+  background: var(--parent-wash);
+}
+
+.parent-portal button:focus-visible,
+.parent-login button:focus-visible,
+.parent-login input:focus-visible {
+  outline: 3px solid rgba(201, 104, 88, .38);
+  outline-offset: 2px;
+}
+
+.parent-portal .parent-mobile-menu {
+  background: var(--parent-navy-deep);
+}
+
+.parent-login {
+  --parent-navy: #17324d;
+  --parent-teal: #2c7475;
+  background:
+    radial-gradient(circle at 12% 15%, rgba(201, 104, 88, .16), transparent 30%),
+    var(--parent-navy);
+}
+
+.parent-login-card {
+  box-shadow: 0 20px 55px rgba(16, 40, 62, .18);
+}
+
+.parent-remember {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.25rem !important;
+  height: 1.25rem !important;
+  min-height: 1.25rem !important;
+  min-width: 1.25rem !important;
+  flex: 0 0 1.25rem;
+  padding: 0 !important;
+  border: 1.5px solid #8ea1ad;
+  border-radius: .35rem;
+  background: #fff !important;
+  cursor: pointer;
+}
+
+.parent-remember:checked {
+  border-color: var(--parent-teal);
+  background-color: var(--parent-teal) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='m4 10 4 4 8-8'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: .85rem;
+}
+
+@media (max-width: 639px) {
+  .parent-portal main {
+    padding: 1rem .875rem 5.5rem;
+  }
+  .parent-portal header {
+    box-shadow: 0 4px 18px rgba(16, 40, 62, .15);
+  }
+}

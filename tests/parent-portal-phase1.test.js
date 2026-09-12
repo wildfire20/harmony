@@ -58,6 +58,10 @@ const db = {
       return row([proof]);
     }
     if (/INSERT INTO payment_transactions/.test(sql)) return row([{ id: 9001 }]);
+    if (/SELECT id, student_number FROM users WHERE id = \$1 AND role = 'student' FOR SHARE/.test(sql)) {
+      const learner = Object.values(parentChildren).flat().find(({ id }) => id === Number(params[0]));
+      return row(learner ? [{ id: learner.id, student_number: learner.student_number }] : []);
+    }
     if (/SELECT id, first_name, last_name, student_number FROM users/.test(sql)) {
       return row((params[0] || []).map(id => ({ id, first_name: 'Learner', last_name: String(id), student_number: `S${id}` })));
     }
@@ -153,12 +157,15 @@ test('selected child_id is propagated and unauthorized children are rejected', a
 });
 
 test('all-child parent endpoints have safe zero-child responses', async () => {
-  const endpoints = ['/me', '/dashboard', '/attendance', '/grades', '/announcements', '/invoices', '/documents'];
+  const endpoints = ['/me', '/dashboard', '/attendance', '/announcements', '/invoices', '/documents'];
   for (const endpoint of endpoints) {
     const result = await json(`/api/parent${endpoint}`, { headers: { 'x-parent-id': '30' } });
     assert.equal(result.response.status, 200, endpoint);
     assert.equal(result.body.child, null, endpoint);
   }
+  const grades = await json('/api/parent/grades', { headers: { 'x-parent-id': '30' } });
+  assert.equal(grades.response.status, 410);
+  assert.equal(grades.body.code, 'PARENT_GRADES_DISABLED');
   const docs = await json('/api/parent/documents', { headers: { 'x-parent-id': '30' } });
   assert.deepEqual(docs.body, { documents: [], child: null, children: [] });
 });

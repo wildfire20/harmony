@@ -421,7 +421,7 @@ test('attendance, academic, payment, and invoice notification contracts include 
   assert.doesNotMatch(bounded, /https?:|private\.example|parent@example|123456789/);
 });
 
-test('announcement and document targeting honours audience and grade/class recipients', async () => {
+test('announcement and document targeting honours parent-safe audience and grade/class recipients', async () => {
   const staff = await notificationService.notifyAnnouncement({
     id: 1, title: 'Staff only', target_audience: 'staff', grade_id: null, class_id: null,
   });
@@ -429,8 +429,8 @@ test('announcement and document targeting honours audience and grade/class recip
   const targetedAnnouncement = await notificationService.notifyAnnouncement({
     id: 2, title: 'Grade one notice', target_audience: 'students', grade_id: 1, class_id: null,
   });
-  assert.equal(targetedAnnouncement.created, 2);
-  assert.deepEqual(state.notifications.map((n) => [n.parent_id, n.learner_id]), [[10, 101], [20, 201]]);
+  assert.equal(targetedAnnouncement.created, 0);
+  assert.deepEqual(state.notifications, []);
 
   resetState();
   const globalAnnouncement = await notificationService.notifyAnnouncement({

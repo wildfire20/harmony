@@ -9,6 +9,7 @@ const { generateKidFriendlyPassword } = require('../utils/passwordGenerator');
 const BANKING_DETAILS = require('../config/bankingDetails');
 const { logAudit, getIp } = require('../utils/auditLogger');
 const { issueAuthToken, sendParentAuthEmail, hashToken, revokeUserSessions, withTransaction, authenticateSession } = require('../services/parentAuth');
+const { getStudentLedger } = require('../services/financeLedger');
 
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin  = [authenticate, authorize('admin', 'super_admin')];
@@ -129,7 +130,7 @@ router.get('/dashboard', requireParent, async (req, res) => {
       return res.json({ children, child: null, weekAttendance: {}, recentGrades: [], outstandingBalance: 0, recentAnnouncements: [] });
     }
 
-    const [attendanceRes, gradesRes, invoiceRes, announcementsRes] = await Promise.all([
+    const [attendanceRes, ledger, announcementsRes] = await Promise.all([
       db.query(`
         SELECT
           COUNT(*) FILTER (WHERE status = 'present') AS present,
@@ -143,29 +144,20 @@ router.get('/dashboard', requireParent, async (req, res) => {
           AND date <= CURRENT_DATE
       `, [child.id]),
 
-      db.query(`
-        SELECT s.id, s.score, s.max_score, s.status, s.submitted_at,
-               t.title AS task_title, t.task_type
-        FROM submissions s
-        JOIN tasks t ON s.task_id = t.id
-        WHERE s.student_id = $1 AND s.score IS NOT NULL
-        ORDER BY s.submitted_at DESC LIMIT 5
-      `, [child.id]),
-
-      db.query(`
-        SELECT COALESCE(SUM(outstanding_balance), 0) AS total_outstanding
-        FROM invoices
-        WHERE student_id = $1 AND status IN ('Unpaid','Partial')
-      `, [child.id]),
+      getStudentLedger(child.id),
 
       db.query(`
         SELECT id, title, content, created_at
         FROM announcements
         WHERE is_active = true
-          AND target_audience IN ('everyone', 'students')
-          AND (grade_id IS NULL OR grade_id = $1)
+          AND (
+            target_audience IN ('everyone', 'parents', 'all_parents')
+            OR (target_audience = 'grade' AND grade_id = $1)
+            OR (target_audience = 'class' AND grade_id = $1 AND class_id = $2)
+            OR (target_audience = 'specific_parents' AND target_parent_ids @> to_jsonb($3::int))
+          )
         ORDER BY created_at DESC LIMIT 3
-      `, [child.grade_id]),
+      `, [child.grade_id, child.class_id, req.user.id]),
     ]);
 
     const wa = attendanceRes.rows[0];
@@ -177,8 +169,10 @@ router.get('/dashboard', requireParent, async (req, res) => {
         late: parseInt(wa.late),       excused: parseInt(wa.excused),
         total: parseInt(wa.total),
       },
-      recentGrades: gradesRes.rows,
-      outstandingBalance: parseFloat(invoiceRes.rows[0].total_outstanding),
+      // Parent academic/grade widgets are intentionally disabled.  Staff
+      // academic APIs remain available; this endpoint never queries them.
+      recentGrades: [],
+      outstandingBalance: ledger.totals.outstanding,
       recentAnnouncements: announcementsRes.rows,
     });
   } catch (err) {
@@ -214,40 +208,11 @@ router.get('/attendance', requireParent, async (req, res) => {
 
 // ─── GET /api/parent/grades ───────────────────────────────────────────────────
 router.get('/grades', requireParent, async (req, res) => {
-  try {
-    const child = await resolveChild(req.user.id, req.query.child_id);
-    const children = await getChildren(req.user.id);
-    if (!child) return res.json({ submissions: [], pendingTasks: [], child: null, children });
-
-    const [submissionsRes, childInfoRes] = await Promise.all([
-      db.query(`
-        SELECT s.id, s.score, s.max_score, s.status, s.submitted_at, s.feedback,
-               t.id AS task_id, t.title AS task_title, t.task_type, t.due_date, t.max_score AS task_max_score
-        FROM submissions s
-        JOIN tasks t ON s.task_id = t.id
-        WHERE s.student_id = $1
-        ORDER BY s.submitted_at DESC
-      `, [child.id]),
-      db.query(`SELECT grade_id, class_id FROM users WHERE id = $1`, [child.id]),
-    ]);
-
-    let pending = [];
-    const { grade_id, class_id } = childInfoRes.rows[0] || {};
-    if (grade_id && class_id) {
-      const pendingRes = await db.query(`
-        SELECT t.id, t.title, t.task_type, t.due_date, t.max_score
-        FROM tasks t
-        WHERE t.grade_id=$1 AND t.class_id=$2 AND t.is_active=true
-          AND t.id NOT IN (SELECT task_id FROM submissions WHERE student_id=$3)
-        ORDER BY t.due_date ASC LIMIT 10
-      `, [grade_id, class_id, child.id]);
-      pending = pendingRes.rows;
-    }
-    res.json({ submissions: submissionsRes.rows, pendingTasks: pending, child, children });
-  } catch (err) {
-    if (err.status) return res.status(err.status).json({ message: err.message });
-    res.status(500).json({ message: 'Server error' });
-  }
+  return res.status(410).json({
+    success: false,
+    code: 'PARENT_GRADES_DISABLED',
+    message: 'Parent grades are currently unavailable.',
+  });
 });
 
 // ─── GET /api/parent/announcements ───────────────────────────────────────────
@@ -263,10 +228,14 @@ router.get('/announcements', requireParent, async (req, res) => {
       JOIN users u ON a.created_by = u.id
       LEFT JOIN grades g ON a.grade_id = g.id
       WHERE a.is_active = true
-        AND a.target_audience IN ('everyone', 'students')
-        AND (a.grade_id IS NULL OR a.grade_id = $1)
+        AND (
+          a.target_audience IN ('everyone', 'parents', 'all_parents')
+          OR (a.target_audience = 'grade' AND a.grade_id = $1)
+          OR (a.target_audience = 'class' AND a.grade_id = $1 AND a.class_id = $2)
+          OR (a.target_audience = 'specific_parents' AND a.target_parent_ids @> to_jsonb($3::int))
+        )
       ORDER BY a.created_at DESC LIMIT 50
-    `, [child.grade_id]);
+    `, [child.grade_id, child.class_id, req.user.id]);
     res.json({ announcements: result.rows, child, children });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ message: err.message });
@@ -279,22 +248,26 @@ router.get('/invoices', requireParent, async (req, res) => {
   try {
     const child = await resolveChild(req.user.id, req.query.child_id);
     const children = await getChildren(req.user.id);
-    if (!child) return res.json({ invoices: [], totals: { totalDue: 0, totalPaid: 0, outstanding: 0 }, child: null, children });
-    const result = await db.query(`
-      SELECT id, amount_due, amount_paid, outstanding_balance, status, due_date,
-             COALESCE(description, '') AS description, reference_number
-      FROM invoices
-      WHERE student_id=$1
-        AND due_date >= DATE_TRUNC('month', (SELECT created_at FROM users WHERE id=$1))
-      ORDER BY due_date DESC
-    `, [child.id]);
-    const totals = result.rows.reduce((acc, inv) => {
-      acc.totalDue    += parseFloat(inv.amount_due)           || 0;
-      acc.totalPaid   += parseFloat(inv.amount_paid)          || 0;
-      acc.outstanding += parseFloat(inv.outstanding_balance)  || 0;
-      return acc;
-    }, { totalDue: 0, totalPaid: 0, outstanding: 0 });
-    res.json({ invoices: result.rows, totals, child, children });
+    if (!child) return res.json({
+      invoices: [],
+      transactions: [],
+      serviceComponents: [],
+      totals: { totalDue: 0, totalPaid: 0, outstanding: 0, overpaid: 0, unallocated: 0, credit: 0, netOutstanding: 0 },
+      child: null,
+      children,
+    });
+    const ledger = await getStudentLedger(child.id);
+    // The same ledger read model is used by Admin finance endpoints.  In
+    // particular, do not apply an enrollment-date filter here: carried-forward
+    // arrears are real ledger entries and must reconcile with Admin.
+    res.json({
+      invoices: ledger.invoices,
+      transactions: ledger.transactions,
+      serviceComponents: ledger.service_components,
+      totals: ledger.totals,
+      child,
+      children,
+    });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ message: err.message });
     res.status(500).json({ message: 'Server error' });
@@ -493,7 +466,6 @@ router.get('/documents', requireParent, async (req, res) => {
       FROM documents d
       JOIN users u ON d.uploaded_by = u.id
       WHERE d.is_active = true
-        AND d.target_audience IN ('everyone', 'parents')
         AND EXISTS (
           SELECT 1 FROM parent_students ps
           JOIN users child_user ON child_user.id = ps.student_id
@@ -501,6 +473,12 @@ router.get('/documents', requireParent, async (req, res) => {
             AND (d.grade_id IS NULL OR child_user.grade_id = d.grade_id)
             AND (d.class_id IS NULL OR child_user.class_id = d.class_id)
             AND child_user.id = $2
+            AND (
+              d.target_audience IN ('everyone', 'parents', 'all_parents')
+              OR (d.target_audience = 'grade' AND d.grade_id = child_user.grade_id)
+              OR (d.target_audience = 'class' AND d.grade_id = child_user.grade_id AND d.class_id = child_user.class_id)
+              OR (d.target_audience = 'specific_parents' AND d.target_parent_ids @> to_jsonb($1::int))
+            )
         )
       ORDER BY d.uploaded_at DESC
     `, [req.user.id, child.id]);
@@ -519,13 +497,18 @@ async function getParentDocument(parentId, documentId, childId) {
     SELECT d.id, d.title, d.original_file_name, d.file_name, d.s3_key, d.file_path
     FROM documents d
     WHERE d.id = $1 AND d.is_active = true
-      AND d.target_audience IN ('everyone', 'parents')
       AND EXISTS (
         SELECT 1 FROM parent_students ps
         JOIN users child_user ON child_user.id = ps.student_id
           WHERE ps.parent_id = $2 AND ps.student_id = $3
           AND (d.grade_id IS NULL OR child_user.grade_id = d.grade_id)
           AND (d.class_id IS NULL OR child_user.class_id = d.class_id)
+          AND (
+            d.target_audience IN ('everyone', 'parents', 'all_parents')
+            OR (d.target_audience = 'grade' AND d.grade_id = child_user.grade_id)
+            OR (d.target_audience = 'class' AND d.grade_id = child_user.grade_id AND d.class_id = child_user.class_id)
+            OR (d.target_audience = 'specific_parents' AND d.target_parent_ids @> to_jsonb($2::int))
+          )
       )
   `, [documentId, parentId, childId]);
   return result.rows[0];
