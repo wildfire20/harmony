@@ -15,6 +15,104 @@ const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const nonNegative = (value) => Math.max(0, money(value));
 const INVOICE_STATUSES = ['Unpaid', 'Partial', 'Paid', 'Overpaid', 'Carried Forward'];
 
+function invoiceStatus(amountDue, amountPaid, originalStatus) {
+  if (originalStatus === 'Carried Forward') return originalStatus;
+  const due = money(amountDue);
+  const paid = money(amountPaid);
+  if (paid > due) return 'Overpaid';
+  if (due > 0 && paid >= due) return 'Paid';
+  if (paid > 0) return 'Partial';
+  return due === 0 ? 'Paid' : 'Unpaid';
+}
+
+function isMissingOptionalFinanceSchema(error) {
+  return error && (
+    error.code === '42P01' ||
+    error.code === '42703' ||
+    (!error.code && /^Unexpected .*query:/.test(error.message || ''))
+  );
+}
+
+function lineAmount(row) {
+  return money(row.amount ?? row.line_amount ?? row.total_amount ?? row.unit_amount);
+}
+
+function normaliseInvoiceLines(rows) {
+  return rows.map((row) => {
+    const type = String(row.line_type || row.type || 'charge').toLowerCase();
+    const amount = lineAmount(row);
+    return {
+      id: row.id,
+      line_type: type === 'discount' || type === 'adjustment' ? 'discount' : 'charge',
+      service_key: row.service_key || null,
+      bundle_key: row.bundle_key || null,
+      label: row.label || row.description || row.service_key || 'Charge',
+      description: row.description || null,
+      quantity: Number(row.quantity || 1),
+      unit_amount: money(row.unit_amount ?? amount),
+      amount,
+      included: Boolean(row.is_included || row.included),
+      discount_assignment_id: row.discount_assignment_id || null,
+      metadata: row.metadata || null,
+    };
+  });
+}
+
+function invoiceStatusExpression(alias = 'i') {
+  return `(CASE
+    WHEN ${alias}.status = 'Carried Forward' THEN 'Carried Forward'
+    WHEN COALESCE(${alias}.amount_paid, 0) > COALESCE(${alias}.amount_due, 0) THEN 'Overpaid'
+    WHEN COALESCE(${alias}.amount_due, 0) = 0 THEN 'Paid'
+    WHEN COALESCE(${alias}.amount_paid, 0) >= COALESCE(${alias}.amount_due, 0) THEN 'Paid'
+    WHEN COALESCE(${alias}.amount_paid, 0) > 0 THEN 'Partial'
+    ELSE 'Unpaid'
+  END)`;
+}
+
+async function loadInvoiceLineItems(executor, invoiceIds) {
+  if (!invoiceIds.length) return { available: true, rows: [] };
+  try {
+    const result = await executor.query(`
+      SELECT id, invoice_id, line_type, service_key, bundle_key, label,
+             description, quantity, unit_amount, amount, is_included,
+             discount_assignment_id, metadata
+      FROM invoice_line_items
+      WHERE invoice_id = ANY($1::integer[])
+      ORDER BY invoice_id, id
+    `, [invoiceIds.map((id) => Number(id))]);
+    return { available: true, rows: result.rows };
+  } catch (error) {
+    if (!isMissingOptionalFinanceSchema(error)) throw error;
+    return { available: false, rows: [] };
+  }
+}
+
+function buildInvoiceBreakdown(invoice, rawLines = [], reviewFlags = []) {
+  const lines = normaliseInvoiceLines(rawLines);
+  const charges = lines.filter((line) => line.line_type === 'charge');
+  const discounts = lines.filter((line) => line.line_type === 'discount');
+  const amountDue = money(invoice.amount_due);
+  const amountPaid = money(invoice.amount_paid);
+  return {
+    ...invoice,
+    status: invoiceStatus(amountDue, amountPaid, invoice.status),
+    amount_due: amountDue,
+    amount_paid: amountPaid,
+    gross_charges: lines.length ? money(charges.reduce((sum, line) => sum + line.amount, 0)) : amountDue,
+    discount_lines: discounts,
+    discount_total: money(discounts.reduce((sum, line) => sum + line.amount, 0)),
+    net_due: amountDue,
+    allocated_effective_payments: amountPaid,
+    outstanding_balance: nonNegative(amountDue - amountPaid),
+    overpaid_amount: nonNegative(amountPaid - amountDue),
+    credit: nonNegative(amountPaid - amountDue),
+    line_items: lines,
+    snapshot_available: lines.length > 0,
+    payment_review_flags: reviewFlags,
+    review_required: reviewFlags.length > 0,
+  };
+}
+
 function configuredComponents(student, prices) {
   const byKey = new Map(prices.map((price) => [price.service_key, price]));
   const enabled = [
@@ -40,23 +138,167 @@ function configuredComponents(student, prices) {
       };
     });
 
-  // Discounts are part of the configured charge, not another charge line.
-  let discount = 0;
-  let discountLabel = null;
-  if (student.has_teacher_discount) {
-    discount = money(subtotal * 0.5);
-    discountLabel = "Teacher's child discount";
-  } else if (student.has_sibling_discount) {
-    discount = Math.min(150, subtotal);
-    discountLabel = 'Sibling discount';
-  }
+  // Legacy flags are retained on the student read model for compatibility
+  // display only. They never change a financial amount; new discounts require
+  // an explicit approved learner_discount_assignments row.
+  const discount = 0;
+  const discountLabel = null;
   return {
     components,
     subtotal: money(subtotal),
     discount: money(discount),
     discountLabel,
-    configuredTotal: money(subtotal - discount),
+    configuredTotal: subtotal,
   };
+}
+
+/*
+ * New invoice generation uses this explicit billing configuration. Enrollment
+ * flags select services; they never select discounts. A configured bundle is
+ * represented by one charge and its included services are informational zero
+ * lines, preventing tuition/aftercare from being charged twice while leaving
+ * standalone transport billable.
+ */
+function configuredBillableLines(student, prices) {
+  const enabled = new Map([
+    ['tuition', true],
+    ['boarding', Boolean(student.is_boarder)],
+    ['transport', Boolean(student.uses_transport)],
+    ['aftercare', Boolean(student.uses_aftercare)],
+  ]);
+  const includedByBundle = new Set();
+  const lines = [];
+  const eligiblePrices = prices.filter((price) =>
+    enabled.get(price.service_key) && price.billing_mode !== 'informational');
+  const bundleIncludedKeys = new Set(
+    eligiblePrices.flatMap((price) => Array.isArray(price.included_service_keys)
+      ? price.included_service_keys : []),
+  );
+  // Bundle owners are evaluated first regardless of display order. This
+  // prevents a tuition row appearing before a boarding package from being
+  // charged twice.
+  eligiblePrices.sort((left, right) =>
+    Number(Array.isArray(right.included_service_keys) && right.included_service_keys.length > 0) -
+    Number(Array.isArray(left.included_service_keys) && left.included_service_keys.length > 0));
+  for (const price of eligiblePrices) {
+    if (bundleIncludedKeys.has(price.service_key) &&
+        !(Array.isArray(price.included_service_keys) && price.included_service_keys.length > 0)) continue;
+    const included = Array.isArray(price.included_service_keys)
+      ? price.included_service_keys : [];
+    if (includedByBundle.has(price.service_key)) continue;
+    if (price.billing_mode === 'bundle_component' && price.bundle_key &&
+        lines.some((line) => line.bundle_key === price.bundle_key)) continue;
+    const amount = money(price.amount);
+    lines.push({
+      line_type: 'charge',
+      service_key: price.service_key,
+      bundle_key: price.bundle_key || null,
+      label: price.label,
+      description: price.description || null,
+      quantity: 1,
+      unit_amount: amount,
+      amount,
+      is_included: false,
+      metadata: { billing_mode: price.billing_mode || 'standalone' },
+    });
+    if (price.bundle_key) includedByBundle.add(price.service_key);
+    included.forEach((serviceKey) => {
+      includedByBundle.add(serviceKey);
+      const includedPrice = eligiblePrices.find((candidate) => candidate.service_key === serviceKey);
+      if (includedPrice) {
+        lines.push({
+          line_type: 'charge',
+          service_key: serviceKey,
+          bundle_key: price.bundle_key,
+          label: includedPrice.label,
+          description: includedPrice.description || null,
+          quantity: 1,
+          unit_amount: 0,
+          amount: 0,
+          is_included: true,
+          metadata: {
+            billing_mode: 'bundle_component',
+            included_in: price.service_key,
+          },
+        });
+      }
+    });
+  }
+  return lines;
+}
+
+function calculateApprovedDiscounts(assignments, chargeLines) {
+  const discounts = [];
+  const discountedByService = new Map();
+  const chargeGross = money(chargeLines.reduce((sum, line) => sum + line.amount, 0));
+  let discountedTotal = 0;
+  for (const assignment of assignments) {
+    const targets = assignment.applicable_service_key
+      ? chargeLines.filter((line) => line.service_key === assignment.applicable_service_key)
+      : chargeLines;
+    const targetGross = money(targets.reduce((sum, line) => sum + line.amount, 0));
+    const targetDiscounted = money(targets.reduce((sum, line) =>
+      sum + (discountedByService.get(line.service_key) || 0), 0));
+    const remainingInvoice = money(chargeGross - discountedTotal);
+    const remainingTarget = money(targetGross - targetDiscounted);
+    const available = assignment.applicable_service_key
+      ? remainingTarget : remainingInvoice;
+    if (available <= 0) continue;
+    const requested = assignment.calculation_method === 'percentage'
+      // Each assignment is calculated against its target gross amount; the
+      // remaining target/invoice cap prevents cumulative discounts exceeding
+      // the charge.
+      ? money(targetGross * Number(assignment.percentage || 0) / 100)
+      : money(assignment.amount);
+    const amount = Math.min(available, requested);
+    if (amount <= 0) continue;
+    discounts.push({
+      line_type: 'discount',
+      service_key: assignment.applicable_service_key || null,
+      label: {
+        staff: 'Staff discount',
+        sibling: 'Sibling discount',
+        custom: 'Custom approved discount',
+      }[assignment.discount_type] || 'Approved discount',
+      description: assignment.reason,
+      quantity: 1,
+      unit_amount: amount,
+      amount,
+      is_included: false,
+      discount_assignment_id: assignment.id,
+      metadata: {
+        discount_type: assignment.discount_type,
+        calculation_method: assignment.calculation_method,
+      },
+    });
+    if (assignment.applicable_service_key) {
+      discountedByService.set(
+        assignment.applicable_service_key,
+        money((discountedByService.get(assignment.applicable_service_key) || 0) + amount),
+      );
+    } else if (targetGross > 0) {
+      // A non-scoped discount consumes the remaining invoice gross. Track its
+      // proportional service allocation so later scoped assignments cannot
+      // discount a service below zero.
+      let allocated = 0;
+      targets.forEach((line, index) => {
+        const share = index === targets.length - 1
+          ? money(amount - allocated)
+          : money(amount * line.amount / targetGross);
+        allocated = money(allocated + share);
+        discountedByService.set(line.service_key, money(
+          (discountedByService.get(line.service_key) || 0) + share,
+        ));
+      });
+    }
+    discountedTotal = money(discountedTotal + amount);
+  }
+  return discounts;
+}
+
+function buildInvoiceSnapshotLines(student, prices, assignments = []) {
+  const charges = configuredBillableLines(student, prices);
+  return [...charges, ...calculateApprovedDiscounts(assignments, charges)];
 }
 
 // Kept separate so tests and future write paths can use the exact same
@@ -114,29 +356,103 @@ async function getStudentLedger(studentId, executor = db) {
     ...row,
     amount: money(row.amount),
     allocated: row.invoice_id != null,
+    review_flags: row.invoice_id == null ? ['unallocated_payment'] : [],
   }));
+
+  // Invoice line items are immutable snapshots. They may not exist on older
+  // installations, so this read-only probe falls back to invoice balances.
+  // Historical invoices are never rebuilt from today's prices or flags.
+  let lineRows = [];
+  if (invoiceResult.rows.length) {
+    try {
+      const lineResult = await executor.query(`
+        SELECT id, invoice_id, line_type, service_key, bundle_key, label,
+               description, quantity, unit_amount, amount, is_included,
+               discount_assignment_id, metadata
+        FROM invoice_line_items
+        WHERE invoice_id = ANY($1::integer[])
+        ORDER BY invoice_id, id
+      `, [invoiceResult.rows.map((row) => Number(row.id))]);
+      lineRows = lineResult.rows;
+    } catch (error) {
+      if (!isMissingOptionalFinanceSchema(error)) throw error;
+    }
+  }
+  const linesByInvoice = new Map();
+  normaliseInvoiceLines(lineRows).forEach((line, index) => {
+    const invoiceId = Number(lineRows[index].invoice_id);
+    if (!linesByInvoice.has(invoiceId)) linesByInvoice.set(invoiceId, []);
+    linesByInvoice.get(invoiceId).push(line);
+  });
+  const paymentRowsByInvoice = new Map();
+  transactions.forEach((transaction) => {
+    if (transaction.invoice_id == null) return;
+    const invoiceId = Number(transaction.invoice_id);
+    if (!paymentRowsByInvoice.has(invoiceId)) paymentRowsByInvoice.set(invoiceId, []);
+    paymentRowsByInvoice.get(invoiceId).push(transaction);
+  });
 
   const invoices = invoiceResult.rows.map((row) => {
     const amountDue = money(row.amount_due);
     const amountPaid = money(row.amount_paid);
     const outstanding = nonNegative(amountDue - amountPaid);
     const overpaid = nonNegative(amountPaid - amountDue);
+    const lines = linesByInvoice.get(row.id) || [];
+    const charges = lines.filter((line) => line.line_type === 'charge');
+    const discounts = lines.filter((line) => line.line_type === 'discount');
+    const grossCharges = money(charges.reduce((sum, line) => sum + line.amount, 0));
+    const discountTotal = money(discounts.reduce((sum, line) => sum + line.amount, 0));
+    const paymentReviewFlags = [];
+    const invoiceDate = row.due_date ? new Date(row.due_date) : null;
+    const invoiceMonth = invoiceDate && invoiceDate.getUTCMonth() + 1;
+    const invoiceYear = invoiceDate && invoiceDate.getUTCFullYear();
+    for (const transaction of paymentRowsByInvoice.get(row.id) || []) {
+      if (transaction.month != null && transaction.year != null &&
+          invoiceDate &&
+          (Number(transaction.month) !== invoiceMonth || Number(transaction.year) !== invoiceYear)) {
+        paymentReviewFlags.push({
+          type: 'transaction_month_mismatch',
+          transaction_id: transaction.id,
+          transaction_month: Number(transaction.month),
+          transaction_year: Number(transaction.year),
+          invoice_month: invoiceMonth,
+          invoice_year: invoiceYear,
+        });
+      }
+    }
+    const status = invoiceStatus(amountDue, amountPaid, row.status);
     return {
       ...row,
-      counted_in_totals: row.status !== 'Carried Forward',
+      status,
+      counted_in_totals: status !== 'Carried Forward',
       amount_due: amountDue,
       amount_paid: amountPaid,
       outstanding_balance: outstanding,
       overpaid_amount: overpaid,
-      // Components describe the configured bundle; the invoice total remains
-      // authoritative, so a bundle is never added a second time.
-      service_components: charge.components,
-      configured_charge: charge.configuredTotal,
-      configured_discount: charge.discount,
+       gross_charges: lines.length ? grossCharges : amountDue,
+      discount_lines: discounts,
+      discount_total: discountTotal,
+      net_due: amountDue,
+      allocated_effective_payments: amountPaid,
+      credit: overpaid,
+      payment_review_flags: paymentReviewFlags,
+      review_required: paymentReviewFlags.length > 0,
+      line_items: lines,
+       // Enrollment information is not historical billing evidence. Billed
+       // and bundled truth comes only from this invoice's immutable lines.
+       service_components: charge.components.map(({ key, label, description, enrolled }) => ({
+         key, label, description, enrolled: Boolean(enrolled),
+       })),
     };
   });
 
   const countedInvoices = invoices.filter((invoice) => invoice.status !== 'Carried Forward');
+  transactions.forEach((transaction) => {
+    if (transaction.invoice_id == null) transaction.review_required = true;
+  });
+  const serviceComponents = charge.components.map(({ key, label, description, enrolled }) => ({
+    key, label, description, enrolled: Boolean(enrolled),
+  }));
   const totalDue = money(countedInvoices.reduce((sum, invoice) => sum + invoice.amount_due, 0));
   const totalPaid = money(countedInvoices.reduce((sum, invoice) => sum + invoice.amount_paid, 0));
   const outstanding = money(countedInvoices.reduce((sum, invoice) => sum + invoice.outstanding_balance, 0));
@@ -149,11 +465,7 @@ async function getStudentLedger(studentId, executor = db) {
     student,
     invoices,
     transactions,
-    service_components: charge.components,
-    configured_charge: charge.configuredTotal,
-    configured_subtotal: charge.subtotal,
-    configured_discount: charge.discount,
-    configured_discount_label: charge.discountLabel,
+    service_components: serviceComponents,
     totals: {
       totalDue,
       totalPaid,
@@ -176,11 +488,11 @@ async function getStudentLedger(studentId, executor = db) {
  */
 async function getFinanceSummary(filters = {}, executor = db) {
   const params = [];
-  const clauses = [`i.status <> 'Carried Forward'`];
+  const clauses = [];
   if (filters.status) {
     if (!INVOICE_STATUSES.includes(filters.status)) throw new Error('Invalid invoice status filter');
     params.push(filters.status);
-    clauses.push(`i.status = $${params.length}`);
+    clauses.push(`${invoiceStatusExpression('i')} = $${params.length}`);
   }
   appendPeriodFilters(clauses, params, 'i.due_date', filters);
   if (filters.studentNumber) {
@@ -191,7 +503,7 @@ async function getFinanceSummary(filters = {}, executor = db) {
     SELECT i.id, i.status, i.amount_due, i.amount_paid, i.outstanding_balance,
            i.overpaid_amount, i.student_id
     FROM invoices i
-    WHERE ${clauses.join(' AND ')}
+     WHERE ${clauses.length ? clauses.join(' AND ') : 'TRUE'}
   `, params);
 
   const transactionParams = [];
@@ -214,7 +526,9 @@ async function getFinanceSummary(filters = {}, executor = db) {
 
   // Keep the invariant in the model as well as SQL so mocked/read-replica
   // results cannot accidentally reintroduce carry-forward double counting.
-  const rows = invoiceResult.rows.filter((row) => row.status !== 'Carried Forward');
+  const rows = invoiceResult.rows
+    .map((row) => ({ ...row, status: invoiceStatus(row.amount_due, row.amount_paid, row.status) }))
+    .filter((row) => row.status !== 'Carried Forward');
   const summary = {
     totalInvoices: rows.length,
     paidCount: rows.filter((row) => row.status === 'Paid').length,
@@ -283,7 +597,7 @@ async function allocatePayment(executor, {
     if (toApply <= 0) continue;
     const newPaid = money(invoice.amount_paid) + toApply;
     const due = money(invoice.amount_due);
-    const status = newPaid >= due ? 'Paid' : 'Partial';
+    const status = newPaid > due ? 'Overpaid' : due === 0 ? 'Paid' : newPaid >= due ? 'Paid' : 'Partial';
     await executor.query(`
       UPDATE invoices
       SET amount_paid = $1, status = $2, updated_at = CURRENT_TIMESTAMP
@@ -432,7 +746,9 @@ async function reversePayment(executor, { transactionId, recordedBy, description
       }
       const successorDue = money(successor.amount_due) + amount;
       const successorPaid = money(successor.amount_paid);
-      const successorStatus = successorPaid >= successorDue ? 'Paid' : successorPaid > 0 ? 'Partial' : 'Unpaid';
+       const successorStatus = successorPaid > successorDue ? 'Overpaid' :
+         successorDue === 0 ? 'Paid' : successorPaid >= successorDue ? 'Paid' :
+           successorPaid > 0 ? 'Partial' : 'Unpaid';
       await executor.query(`
         UPDATE invoices
         SET amount_due = $1, status = $2, updated_at = CURRENT_TIMESTAMP
@@ -442,7 +758,9 @@ async function reversePayment(executor, { transactionId, recordedBy, description
     } else {
       const amountPaid = nonNegative(money(invoice.amount_paid) - amount);
       const amountDue = money(invoice.amount_due);
-      const status = amountPaid >= amountDue ? 'Paid' : amountPaid > 0 ? 'Partial' : 'Unpaid';
+       const status = amountPaid > amountDue ? 'Overpaid' :
+         amountDue === 0 ? 'Paid' : amountPaid >= amountDue ? 'Paid' :
+           amountPaid > 0 ? 'Partial' : 'Unpaid';
       await executor.query(`
         UPDATE invoices
         SET amount_paid = $1, status = $2, updated_at = CURRENT_TIMESTAMP
@@ -494,7 +812,14 @@ async function reversePayment(executor, { transactionId, recordedBy, description
 
 module.exports = {
   money,
+  invoiceStatus,
+  invoiceStatusExpression,
+  loadInvoiceLineItems,
+  buildInvoiceBreakdown,
   configuredComponents,
+  configuredBillableLines,
+  calculateApprovedDiscounts,
+  buildInvoiceSnapshotLines,
   getStudentLedger,
   getFinanceSummary,
   allocatePayment,

@@ -12,6 +12,169 @@ const { isStudentPortalEnabled } = require('../config/features');
 
 const router = express.Router();
 
+// Explicit learner discount assignments. These endpoints are additive and
+// intentionally separate from the legacy user boolean flags: generation must
+// never infer a new discount from a name, relationship, or compatibility flag.
+router.get('/discount-assignments', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+], async (req, res) => {
+  try {
+    const params = [];
+    const clauses = ['1 = 1'];
+    if (req.query.student_id) {
+      params.push(Number(req.query.student_id));
+      clauses.push(`d.student_id = $${params.length}`);
+    }
+    if (req.query.include_inactive !== 'true') clauses.push('d.is_active = TRUE');
+    const result = await db.query(`
+      SELECT d.*, s.first_name, s.last_name, s.student_number,
+             approver.first_name AS approved_by_first_name,
+             approver.last_name AS approved_by_last_name
+      FROM learner_discount_assignments d
+      JOIN users s ON s.id = d.student_id
+      LEFT JOIN users approver ON approver.id = d.approved_by
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY d.created_at DESC, d.id DESC
+    `, params);
+    res.json({ success: true, assignments: result.rows });
+  } catch (error) {
+    if (error.code === '42P01') {
+      return res.status(503).json({
+        success: false,
+        message: 'Discount assignments are unavailable until the Mini Phase 1 finance migration is applied',
+      });
+    }
+    console.error('List discount assignments error:', error);
+    res.status(500).json({ success: false, message: 'Failed to list discount assignments' });
+  }
+});
+
+router.post('/discount-assignments', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+], async (req, res) => {
+  try {
+    const {
+      student_id: studentId, discount_type: discountType,
+      calculation_method: calculationMethod, amount, percentage,
+      applicable_service_key: serviceKey, starts_on: startsOn,
+      ends_on: endsOn, reason,
+    } = req.body;
+    if (!Number.isInteger(Number(studentId)) || !['staff', 'sibling', 'custom'].includes(discountType) ||
+        !['fixed', 'percentage'].includes(calculationMethod) || !startsOn ||
+        !String(reason || '').trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'student_id, discount_type, calculation_method, starts_on and reason are required',
+      });
+    }
+    const numericAmount = calculationMethod === 'fixed' ? Number(amount) : null;
+    const numericPercentage = calculationMethod === 'percentage' ? Number(percentage) : null;
+    if ((calculationMethod === 'fixed' && (!Number.isFinite(numericAmount) || numericAmount < 0)) ||
+        (calculationMethod === 'percentage' &&
+          (!Number.isFinite(numericPercentage) || numericPercentage < 0 || numericPercentage > 100))) {
+      return res.status(400).json({ success: false, message: 'Invalid discount value' });
+    }
+    const client = await db.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      result = await client.query(`
+      INSERT INTO learner_discount_assignments
+        (student_id, discount_type, calculation_method, amount, percentage,
+         applicable_service_key, starts_on, ends_on, reason, approved_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *
+      `, [
+      Number(studentId), discountType, calculationMethod,
+      numericAmount, numericPercentage, serviceKey || null,
+      startsOn, endsOn || null, String(reason).trim(), req.user.id,
+      ]);
+      await logAudit({
+      userId: req.user.id,
+      userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role,
+      action: 'discount_assignment_created',
+      entityType: 'learner_discount_assignment',
+      entityId: result.rows[0].id,
+      details: { student_id: Number(studentId), discount_type: discountType, calculation_method: calculationMethod },
+      ipAddress: getIp(req),
+        executor: client,
+        required: true,
+      });
+      await client.query('COMMIT');
+    } catch (transactionError) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw transactionError;
+    } finally {
+      client.release();
+    }
+    res.status(201).json({ success: true, assignment: result.rows[0] });
+  } catch (error) {
+    if (error.code === '42P01') {
+      return res.status(503).json({
+        success: false,
+        message: 'Discount assignments are unavailable until the Mini Phase 1 finance migration is applied',
+      });
+    }
+    console.error('Create discount assignment error:', error);
+    res.status(500).json({ success: false, message: 'Failed to create discount assignment' });
+  }
+});
+
+router.post('/discount-assignments/:id/deactivate', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+], async (req, res) => {
+  try {
+    const client = await db.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      result = await client.query(`
+      UPDATE learner_discount_assignments
+      SET is_active = FALSE, deactivated_at = CURRENT_TIMESTAMP,
+          deactivated_by = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2 AND is_active = TRUE
+      RETURNING *
+      `, [req.user.id, Number(req.params.id)]);
+    if (!result.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Active assignment not found' });
+    }
+      await logAudit({
+      userId: req.user.id,
+      userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role,
+      action: 'discount_assignment_deactivated',
+      entityType: 'learner_discount_assignment',
+      entityId: result.rows[0].id,
+      details: { student_id: result.rows[0].student_id },
+      ipAddress: getIp(req),
+        executor: client,
+        required: true,
+      });
+      await client.query('COMMIT');
+    } catch (transactionError) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw transactionError;
+    } finally {
+      client.release();
+    }
+    res.json({ success: true, assignment: result.rows[0] });
+  } catch (error) {
+    if (error.code === '42P01') {
+      return res.status(503).json({
+        success: false,
+        message: 'Discount assignments are unavailable until the Mini Phase 1 finance migration is applied',
+      });
+    }
+    console.error('Deactivate discount assignment error:', error);
+    res.status(500).json({ success: false, message: 'Failed to deactivate discount assignment' });
+  }
+});
+
 // Add student (bulk import via CSV or individual)
 router.post('/students/bulk', [
   authenticate,

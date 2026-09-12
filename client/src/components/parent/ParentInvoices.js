@@ -95,7 +95,8 @@ const ParentInvoices = ({ child }) => {
           {/* Enrolled services */}
           {serviceComponents.length > 0 && (
             <div className="bg-purple-50 border border-purple-100 rounded-2xl p-4">
-              <p className="text-purple-800 font-semibold text-sm mb-2">Enrolled Services</p>
+               <p className="text-purple-800 font-semibold text-sm mb-1">Services &amp; Billing</p>
+               <p className="text-purple-600 text-xs mb-2">Enrollment is separate from what is billed on an invoice.</p>
               <div className="grid grid-cols-2 gap-2">
                 {serviceComponents.map((component) => (
                   <span key={component.key} className="flex items-center justify-between gap-2 bg-white/70 text-purple-700 text-xs font-semibold px-2.5 py-1.5 rounded-lg">
@@ -105,7 +106,7 @@ const ParentInvoices = ({ child }) => {
                       {component.key === 'aftercare' && <Sunset className="h-3.5 w-3.5" />}
                       {component.label}
                     </span>
-                    <span>R {Number(component.amount || 0).toFixed(2)}</span>
+                      <span className="text-right">Enrollment only</span>
                   </span>
                 ))}
               </div>
@@ -165,7 +166,8 @@ const ParentInvoices = ({ child }) => {
                   const cfg = STATUS_CONFIG[inv.status] || STATUS_CONFIG.Unpaid;
                   const dueDate = inv.due_date ? new Date(inv.due_date) : null;
                   return (
-                    <div key={inv.id} className="grid grid-cols-4 items-center px-4 py-3">
+                    <React.Fragment key={inv.id}>
+                    <div className="grid grid-cols-4 items-center px-4 py-3">
                       <div>
                         <p className="text-gray-700 text-sm font-medium">
                           {dueDate ? dueDate.toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' }) : '—'}
@@ -173,9 +175,19 @@ const ParentInvoices = ({ child }) => {
                         {inv.description && (
                           <p className="text-gray-400 text-xs truncate max-w-24">{inv.description}</p>
                         )}
+                        {inv.discount_lines?.length > 0 && (
+                          <p className="text-emerald-600 text-xs">
+                            Discount: {R(inv.discount_total)}
+                          </p>
+                        )}
                       </div>
-                      <p className="text-gray-600 text-sm text-right">{R(inv.amount_due)}</p>
-                      <p className="text-emerald-600 text-sm font-medium text-right">{R(inv.amount_paid)}</p>
+                      <p className="text-gray-600 text-sm text-right">
+                        {R(inv.net_due ?? inv.amount_due)}
+                        {inv.gross_charges != null && inv.discount_total > 0 && (
+                          <span className="block text-[10px] text-gray-400">gross {R(inv.gross_charges)}</span>
+                        )}
+                      </p>
+                      <p className="text-emerald-600 text-sm font-medium text-right">{R(inv.allocated_effective_payments ?? inv.amount_paid)}</p>
                       <div className="text-right">
                         <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${cfg.color}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
@@ -186,6 +198,26 @@ const ParentInvoices = ({ child }) => {
                         )}
                       </div>
                     </div>
+                    <div className="px-4 pb-3 text-xs text-gray-500">
+                      {inv.snapshot_available && inv.line_items?.length > 0 ? (
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {inv.line_items.map((line) => (
+                            <span key={line.id || `${inv.id}-${line.label}`} className={line.line_type === 'discount' ? 'text-emerald-700' : ''}>
+                              {line.is_included ? 'Included · ' : ''}{line.label}: {line.line_type === 'discount' ? '-' : ''}{R(line.amount)}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span>Detailed invoice snapshot unavailable for this legacy invoice.</span>
+                      )}
+                      <span className="ml-3">Credit {R(inv.credit || inv.overpaid_amount || 0)}</span>
+                      {inv.review_required && (
+                        <span className="ml-3 text-amber-700">
+                          Review: {(inv.payment_review_flags || []).map((flag) => flag.type).join(', ')}
+                        </span>
+                      )}
+                    </div>
+                    </React.Fragment>
                   );
                 })}
               </div>

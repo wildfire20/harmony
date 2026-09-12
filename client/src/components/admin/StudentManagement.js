@@ -14,6 +14,19 @@ const StudentManagement = () => {
   const [selectedGrade, setSelectedGrade] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [discountAssignments, setDiscountAssignments] = useState([]);
+  const [discountLoading, setDiscountLoading] = useState(false);
+  const [discountSaving, setDiscountSaving] = useState(false);
+  const [discountForm, setDiscountForm] = useState({
+    discount_type: 'custom',
+    calculation_method: 'fixed',
+    amount: '',
+    percentage: '',
+    applicable_service_key: '',
+    starts_on: new Date().toISOString().slice(0, 10),
+    ends_on: '',
+    reason: '',
+  });
   const queryClient = useQueryClient();
   const formRef = useRef(null);
   const searchInputRef = useRef(null);
@@ -44,6 +57,23 @@ const StudentManagement = () => {
       }, 100);
     }
   }, [editingStudent]);
+
+  useEffect(() => {
+    if (!editingStudent?.id) {
+      setDiscountAssignments([]);
+      return;
+    }
+    setDiscountLoading(true);
+    adminAPI.getDiscountAssignments(editingStudent.id)
+      .then((response) => setDiscountAssignments(response.data?.assignments || []))
+      .catch((error) => {
+        const status = error.response?.status;
+        toast.error(status === 503
+          ? 'Discount assignments require the Mini Phase 1 finance migration.'
+          : (error.response?.data?.message || 'Failed to load discount assignments'));
+      })
+      .finally(() => setDiscountLoading(false));
+  }, [editingStudent?.id]);
 
   // Fetch students with improved query invalidation
   const { data: studentsData, isLoading, refetch } = useQuery(
@@ -230,6 +260,50 @@ const StudentManagement = () => {
     setEditingStudent(null);
     setShowAddForm(false);
     reset();
+  };
+
+  const updateDiscountField = (field, value) => {
+    setDiscountForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const createDiscountAssignment = async (event) => {
+    event.preventDefault();
+    if (!editingStudent) return;
+    setDiscountSaving(true);
+    try {
+      const payload = {
+        student_id: editingStudent.id,
+        ...discountForm,
+        amount: discountForm.calculation_method === 'fixed' ? Number(discountForm.amount) : undefined,
+        percentage: discountForm.calculation_method === 'percentage' ? Number(discountForm.percentage) : undefined,
+        ends_on: discountForm.ends_on || undefined,
+      };
+      const response = await adminAPI.createDiscountAssignment(payload);
+      setDiscountAssignments((current) => [response.data.assignment, ...current]);
+      setDiscountForm((current) => ({ ...current, amount: '', percentage: '', reason: '', ends_on: '' }));
+      toast.success('Explicit discount assignment created');
+    } catch (error) {
+      const status = error.response?.status;
+      toast.error(status === 503
+        ? 'Discount assignments require the Mini Phase 1 finance migration.'
+        : (error.response?.data?.message || 'Failed to create discount assignment'));
+    } finally {
+      setDiscountSaving(false);
+    }
+  };
+
+  const deactivateDiscountAssignment = async (assignment) => {
+    try {
+      await adminAPI.deactivateDiscountAssignment(assignment.id);
+      setDiscountAssignments((current) => current.map((item) =>
+        item.id === assignment.id ? { ...item, is_active: false } : item));
+      toast.success('Discount assignment deactivated');
+    } catch (error) {
+      const status = error.response?.status;
+      toast.error(status === 503
+        ? 'Discount assignments require the Mini Phase 1 finance migration.'
+        : (error.response?.data?.message || 'Failed to deactivate discount assignment'));
+    }
   };
 
   const handleDelete = (id, name) => {
@@ -615,13 +689,14 @@ const StudentManagement = () => {
                             {/* Enrollment Flags */}
                             <div>
                               <p className="text-sm font-semibold text-gray-700 mb-2">Services &amp; Enrollment Flags</p>
+                              <p className="text-xs text-gray-500 mb-2">These flags describe enrollment only. Legacy discount indicators below do not create new financial discounts.</p>
                               <div className="flex flex-wrap gap-4">
                                 {[
                                   { field: 'is_boarder', label: 'Boarding' },
                                   { field: 'uses_transport', label: 'Transport' },
                                   { field: 'uses_aftercare', label: 'Aftercare' },
-                                  { field: 'has_sibling_discount', label: 'Sibling Discount (R150 off)' },
-                                  { field: 'has_teacher_discount', label: "Teacher's Child (50% off)" },
+                                  { field: 'has_sibling_discount', label: 'Legacy sibling indicator (display only)' },
+                                  { field: 'has_teacher_discount', label: "Legacy staff-child indicator (display only)" },
                                 ].map(({ field, label }) => (
                                   <label key={field} className="flex items-center gap-2 cursor-pointer select-none">
                                     <input
@@ -632,6 +707,109 @@ const StudentManagement = () => {
                                     <span className="text-sm text-gray-700">{label}</span>
                                   </label>
                                 ))}
+                              </div>
+                            </div>
+                            <div className="border border-indigo-100 bg-indigo-50 rounded-md p-3">
+                              <p className="text-sm font-semibold text-indigo-800">Approved discount assignments</p>
+                              <p className="text-xs text-indigo-700 mt-1 mb-3">Only assignments approved here affect newly generated invoices.</p>
+                              {discountLoading ? (
+                                <p className="text-xs text-gray-500">Loading assignments…</p>
+                              ) : (
+                                <div className="space-y-2 mb-3">
+                                  {discountAssignments.length === 0 && (
+                                    <p className="text-xs text-gray-500">No explicit assignments.</p>
+                                  )}
+                                  {discountAssignments.map((assignment) => (
+                                    <div key={assignment.id} className="flex items-center justify-between bg-white rounded px-2 py-1.5 text-xs">
+                                      <span>
+                                        <strong>{assignment.discount_type}</strong>{' '}
+                                        {assignment.calculation_method === 'fixed'
+                                          ? `R ${Number(assignment.amount || 0).toFixed(2)}`
+                                          : `${Number(assignment.percentage || 0)}%`}
+                                        {assignment.applicable_service_key ? ` on ${assignment.applicable_service_key}` : ' on all charges'}
+                                        {!assignment.is_active && ' (inactive)'}
+                                      </span>
+                                      {assignment.is_active && (
+                                        <button
+                                          type="button"
+                                          onClick={() => deactivateDiscountAssignment(assignment)}
+                                          className="text-red-600 hover:text-red-800 ml-2"
+                                        >
+                                          Deactivate
+                                        </button>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                                <select
+                                  value={discountForm.discount_type}
+                                  onChange={(event) => updateDiscountField('discount_type', event.target.value)}
+                                  className="px-2 py-1.5 border rounded text-sm"
+                                >
+                                  <option value="staff">Staff</option>
+                                  <option value="sibling">Sibling</option>
+                                  <option value="custom">Custom</option>
+                                </select>
+                                <select
+                                  value={discountForm.calculation_method}
+                                  onChange={(event) => updateDiscountField('calculation_method', event.target.value)}
+                                  className="px-2 py-1.5 border rounded text-sm"
+                                >
+                                  <option value="fixed">Fixed amount</option>
+                                  <option value="percentage">Percentage</option>
+                                </select>
+                                {discountForm.calculation_method === 'fixed' ? (
+                                  <input
+                                    type="number" min="0" step="0.01" required
+                                    placeholder="Amount"
+                                    value={discountForm.amount}
+                                    onChange={(event) => updateDiscountField('amount', event.target.value)}
+                                    className="px-2 py-1.5 border rounded text-sm"
+                                  />
+                                ) : (
+                                  <input
+                                    type="number" min="0" max="100" step="0.01" required
+                                    placeholder="Percentage"
+                                    value={discountForm.percentage}
+                                    onChange={(event) => updateDiscountField('percentage', event.target.value)}
+                                    className="px-2 py-1.5 border rounded text-sm"
+                                  />
+                                )}
+                                <select
+                                  value={discountForm.applicable_service_key}
+                                  onChange={(event) => updateDiscountField('applicable_service_key', event.target.value)}
+                                  className="px-2 py-1.5 border rounded text-sm"
+                                >
+                                  <option value="">All billed services</option>
+                                  <option value="tuition">Tuition</option>
+                                  <option value="boarding">Boarding</option>
+                                  <option value="transport">Transport</option>
+                                  <option value="aftercare">Aftercare</option>
+                                </select>
+                                <input
+                                  type="date" required value={discountForm.starts_on}
+                                  onChange={(event) => updateDiscountField('starts_on', event.target.value)}
+                                  className="px-2 py-1.5 border rounded text-sm"
+                                />
+                                <input
+                                  type="date" value={discountForm.ends_on}
+                                  onChange={(event) => updateDiscountField('ends_on', event.target.value)}
+                                  className="px-2 py-1.5 border rounded text-sm"
+                                />
+                                <input
+                                  required placeholder="Reason / approval note"
+                                  value={discountForm.reason}
+                                  onChange={(event) => updateDiscountField('reason', event.target.value)}
+                                  className="px-2 py-1.5 border rounded text-sm lg:col-span-2"
+                                />
+                                <button
+                                  type="button" onClick={createDiscountAssignment} disabled={discountSaving}
+                                  className="bg-indigo-600 text-white px-3 py-1.5 rounded text-sm hover:bg-indigo-700 disabled:opacity-50"
+                                >
+                                  {discountSaving ? 'Saving…' : 'Add approved assignment'}
+                                </button>
                               </div>
                             </div>
                             <div className="flex space-x-3">

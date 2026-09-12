@@ -773,169 +773,70 @@ router.get('/student-payment-history/:studentNumber', [
     
     const student = studentResult.rows[0];
 
-    // Fetch service prices so we can show boarding/transport/aftercare amounts in the export
-    const servicePricesResult = await db.query(
-      `SELECT service_key, label, amount FROM service_prices ORDER BY display_order`
-    );
-    const servicePrices = {};
-    servicePricesResult.rows.forEach(r => {
-      servicePrices[r.service_key] = { label: r.label, amount: parseFloat(r.amount) || 0 };
-    });
-    
-    // Get all invoices for this student (match by student_id OR student_number for compatibility)
-    const invoicesResult = await db.query(`
-      SELECT 
-        i.id,
-        i.reference_number,
-        i.amount_due,
-        i.amount_paid,
-        i.outstanding_balance,
-        i.overpaid_amount,
-        i.due_date,
-        i.status,
-        i.created_at,
-        i.updated_at
-      FROM invoices i
-      WHERE i.student_id = $1 OR i.student_number = $2
-      ORDER BY i.due_date ASC
-    `, [student.id, student.student_number]);
-    
-    const invoices = invoicesResult.rows;
-
-    // ALSO fetch all payment_transactions for this student grouped by month/year
-    // This catches manual payments for months that have no invoice
-    const ptResult = await db.query(`
-      SELECT 
-        month, year,
-        SUM(amount) as total_paid,
-        MIN(payment_date::text) as earliest_date,
-        STRING_AGG(COALESCE(reference, reference_number, 'Manual'), ', ') as refs
-      FROM payment_transactions
-      WHERE (student_id = $1 OR student_number = $2)
-        AND month IS NOT NULL AND year IS NOT NULL
-      GROUP BY month, year
-      ORDER BY year ASC, month ASC
-    `, [student.id, student.student_number]);
-
-    // Build a map: "year-month" → total paid from payment_transactions
-    const ptByMonth = {};
-    ptResult.rows.forEach(pt => {
-      const key = `${pt.year}-${String(pt.month).padStart(2,'0')}`;
-      ptByMonth[key] = {
-        totalPaid: parseFloat(pt.total_paid) || 0,
-        refs: pt.refs || 'Manual Entry'
-      };
-    });
-    
-    // Build monthly payment history from invoices, merging payment_transactions data
+    // Every history row and total comes from the authoritative ledger. Raw
+    // payment month aggregation is intentionally not used: a transaction's
+    // month can disagree with the invoice it was allocated to (HAR049).
+    const authoritativeLedger = await getStudentLedger(student.id);
     const monthlyHistory = [];
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 
                     'July', 'August', 'September', 'October', 'November', 'December'];
-    const invoiceMonthKeys = new Set();
-    
-    invoices.forEach(inv => {
+    authoritativeLedger.invoices.forEach(inv => {
+      if (!inv.counted_in_totals) return;
       if (!inv.due_date) return;
-      
       const date = new Date(inv.due_date);
-      const year = date.getFullYear();
-      const monthIndex = date.getMonth();
+      const year = date.getUTCFullYear();
+      const monthIndex = date.getUTCMonth();
       const monthNum = monthIndex + 1;
-      const key = `${year}-${String(monthNum).padStart(2,'0')}`;
-      invoiceMonthKeys.add(key);
-
-      // Use the larger of invoice.amount_paid vs sum from payment_transactions
-      // (handles edge case where invoice wasn't updated but payment_transactions was)
-      const ptPaid = ptByMonth[key]?.totalPaid || 0;
-      const invoicePaid = parseFloat(inv.amount_paid) || 0;
-      const effectivePaid = Math.max(invoicePaid, ptPaid);
-      const amountDue = parseFloat(inv.amount_due) || 0;
-      const effectiveOutstanding = Math.max(amountDue - effectivePaid, 0);
-
       const normalStatus = (inv.status || '').toLowerCase();
-      
       monthlyHistory.push({
+        invoiceId: inv.id,
         year,
         month: months[monthIndex],
         monthNumber: monthNum,
-        amountDue,
-        amountPaid: effectivePaid,
-        outstanding: effectiveOutstanding,
+        amountDue: inv.net_due,
+        amountPaid: inv.allocated_effective_payments,
+        outstanding: inv.outstanding_balance,
+        credit: inv.credit,
+        grossCharges: inv.gross_charges,
+        discountLines: inv.discount_lines,
+        discountTotal: inv.discount_total,
+        netDue: inv.net_due,
+        allocatedPayments: inv.allocated_effective_payments,
+        reviewFlags: inv.payment_review_flags,
+        reviewRequired: inv.review_required,
         status: inv.status,
         paymentStatus: 
-          normalStatus === 'paid' || normalStatus === 'overpaid' ? 'Paid' :
-          effectivePaid >= amountDue && amountDue > 0 ? 'Paid' :
-          effectivePaid > 0 ? 'Partial Payment' : 'Missed Payment',
+          normalStatus === 'overpaid' ? 'Overpaid' :
+          normalStatus === 'paid' ? 'Paid' :
+          normalStatus === 'partial' ? 'Partial Payment' :
+          normalStatus === 'carried forward' ? 'Carried Forward' : 'Missed Payment',
         reference: inv.reference_number || '-'
       });
     });
-
-    // Add months that only exist in payment_transactions (no invoice for that month)
-    // e.g. manual payment entered for December 2025 when invoices start from January 2026
-    Object.entries(ptByMonth).forEach(([key, pt]) => {
-      if (!invoiceMonthKeys.has(key)) {
-        const [yr, mo] = key.split('-').map(Number);
-        monthlyHistory.push({
-          year: yr,
-          month: months[mo - 1],
-          monthNumber: mo,
-          amountDue: 0,
-          amountPaid: pt.totalPaid,
-          outstanding: 0,
-          status: 'Paid',
-          paymentStatus: 'Paid',
-          reference: pt.refs
-        });
-      }
-    });
     
-    // Filter out months before the student's enrollment date
-    // A student enrolled in April should not show Jan/Feb/Mar as "Unpaid"
-    if (student.created_at) {
-      const enrollDate = new Date(student.created_at);
-      const enrollYear = enrollDate.getFullYear();
-      const enrollMonth = enrollDate.getMonth() + 1; // 1-based
-      monthlyHistory.splice(0, monthlyHistory.length,
-        ...monthlyHistory.filter(m =>
-          m.year > enrollYear || (m.year === enrollYear && m.monthNumber >= enrollMonth)
-        )
-      );
-    }
-
     // Sort by year and month
     monthlyHistory.sort((a, b) => {
       if (a.year !== b.year) return a.year - b.year;
       return a.monthNumber - b.monthNumber;
     });
     
-    // Calculate summary — "Total Amount Due" is strictly month-to-month for the CURRENT year only,
-    // from the student's first invoice month this year (or January if enrolled before this year)
-    // up to and including the current month.  Prior-year arrears are excluded from this figure.
-    const now = new Date();
-    const currentYear  = now.getFullYear();
-    const currentMonth = now.getMonth() + 1; // 1-based
-
-    const monthsUpToNow = monthlyHistory.filter(m =>
-      m.year === currentYear && m.monthNumber <= currentMonth
-    );
-
-    let totalDue = monthsUpToNow.reduce((sum, m) => sum + m.amountDue, 0);
-    let totalPaid = monthlyHistory.reduce((sum, m) => sum + m.amountPaid, 0);
-    let totalOutstanding = Math.max(0, totalDue - totalPaid);
-    let missedCount = monthsUpToNow.filter(m => m.paymentStatus === 'Missed Payment').length;
-    let paidCount = monthsUpToNow.filter(m => m.paymentStatus === 'Paid' || m.paymentStatus === 'Overpaid').length;
-
-    // Summary values must be byte-for-byte reconcilable with the Parent
-    // Portal.  The legacy monthly view remains available for exports, but its
-    // current-year presentation is not a ledger calculation.
-    const authoritativeLedger = await getStudentLedger(student.id);
-    totalDue = authoritativeLedger.totals.totalDue;
-    totalPaid = authoritativeLedger.totals.totalPaid;
-    totalOutstanding = authoritativeLedger.totals.outstanding;
-    missedCount = authoritativeLedger.invoices.filter((invoice) =>
+    const totalDue = authoritativeLedger.totals.totalDue;
+    const totalPaid = authoritativeLedger.totals.totalPaid;
+    const totalOutstanding = authoritativeLedger.totals.outstanding;
+    const activeInvoices = authoritativeLedger.invoices.filter((invoice) => invoice.counted_in_totals);
+    const missedCount = activeInvoices.filter((invoice) =>
       invoice.outstanding_balance > 0 && invoice.amount_paid <= 0).length;
-    paidCount = authoritativeLedger.invoices.filter((invoice) =>
+    const paidCount = activeInvoices.filter((invoice) =>
       invoice.status === 'Paid' || invoice.status === 'Overpaid').length;
-    
+    const historicalPaymentReview = authoritativeLedger.transactions
+      .filter((transaction) => transaction.review_required)
+      .map((transaction) => ({
+        transactionId: transaction.id,
+        amount: transaction.amount,
+        invoiceId: transaction.invoice_id,
+        flags: transaction.review_flags || [],
+        paymentDate: transaction.payment_date,
+      }));
     const responseData = {
       success: true,
       student: {
@@ -954,11 +855,16 @@ router.get('/student-payment-history/:studentNumber', [
         unallocated: authoritativeLedger.totals.unallocated,
         missedPayments: missedCount,
         completedPayments: paidCount,
-        totalMonths: monthlyHistory.filter(m => m.amountDue > 0).length
+        totalMonths: monthlyHistory.filter(m => m.amountDue > 0).length,
+        credit: authoritativeLedger.totals.credit,
+        netOutstanding: authoritativeLedger.totals.netOutstanding,
       },
       monthlyHistory,
       serviceComponents: authoritativeLedger.service_components,
       paymentTransactions: authoritativeLedger.transactions,
+      historicalPaymentReview,
+      reviewRequired: historicalPaymentReview.length > 0 ||
+        monthlyHistory.some((month) => month.reviewRequired),
     };
     
     if (format === 'excel') {
@@ -1016,68 +922,13 @@ router.get('/student-payment-history/:studentNumber', [
       worksheet.mergeCells(`A${studentInfoRow + 2}:G${studentInfoRow + 2}`);
       worksheet.getCell(`A${studentInfoRow + 2}`).value = `Report Generated: ${new Date().toLocaleDateString('en-ZA')}`;
 
-      // --- Fee Structure section ---
-      // Build list of applicable services for this student
-      const applicableServices = [];
-      if (servicePrices['tuition']) {
-        applicableServices.push({ label: servicePrices['tuition'].label || 'Monthly Tuition', amount: servicePrices['tuition'].amount });
-      }
-      if (student.is_boarder && servicePrices['boarding']) {
-        applicableServices.push({ label: servicePrices['boarding'].label || 'Boarding Fee', amount: servicePrices['boarding'].amount });
-      }
-      if (student.uses_transport && servicePrices['transport']) {
-        applicableServices.push({ label: servicePrices['transport'].label || 'Transport Fee', amount: servicePrices['transport'].amount });
-      }
-      if (student.uses_aftercare && servicePrices['aftercare']) {
-        applicableServices.push({ label: servicePrices['aftercare'].label || 'Aftercare Fee', amount: servicePrices['aftercare'].amount });
-      }
-      const subtotal = applicableServices.reduce((s, f) => s + f.amount, 0);
-
-      // Determine discount
-      let discountLabel = null;
-      let discountAmount = 0;
-      if (student.has_teacher_discount) {
-        discountAmount = subtotal * 0.5;
-        discountLabel = "Teacher's Child Discount (50% off):";
-      } else if (student.has_sibling_discount) {
-        discountAmount = 150;
-        discountLabel = 'Sibling Discount:';
-      }
-      const monthlyTotal = Math.max(0, subtotal - discountAmount);
-
       const feeStructureRow = studentInfoRow + 4;
-      worksheet.getCell(`A${feeStructureRow}`).value = 'FEE STRUCTURE';
+      worksheet.getCell(`A${feeStructureRow}`).value = 'INVOICE BREAKDOWN';
       worksheet.getCell(`A${feeStructureRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
-
-      applicableServices.forEach((svc, i) => {
-        const r = feeStructureRow + 1 + i;
-        worksheet.getCell(`A${r}`).value = `${svc.label}:`;
-        worksheet.getCell(`B${r}`).value = svc.amount;
-        worksheet.getCell(`B${r}`).numFmt = 'R #,##0.00';
-      });
-
-      let feeRowOffset = applicableServices.length;
-
-      // Show discount row if applicable
-      if (discountLabel) {
-        const discountRow = feeStructureRow + 1 + feeRowOffset;
-        worksheet.getCell(`A${discountRow}`).value = discountLabel;
-        worksheet.getCell(`A${discountRow}`).font = { italic: true, color: { argb: 'FF16A34A' } };
-        worksheet.getCell(`B${discountRow}`).value = -discountAmount;
-        worksheet.getCell(`B${discountRow}`).numFmt = 'R #,##0.00';
-        worksheet.getCell(`B${discountRow}`).font = { italic: true, color: { argb: 'FF16A34A' } };
-        feeRowOffset += 1;
-      }
-
-      const totalFeeRow = feeStructureRow + 1 + feeRowOffset;
-      worksheet.getCell(`A${totalFeeRow}`).value = 'Monthly Total:';
-      worksheet.getCell(`A${totalFeeRow}`).font = { bold: true };
-      worksheet.getCell(`B${totalFeeRow}`).value = monthlyTotal;
-      worksheet.getCell(`B${totalFeeRow}`).numFmt = 'R #,##0.00';
-      worksheet.getCell(`B${totalFeeRow}`).font = { bold: true, color: { argb: 'FF1E40AF' } };
-
-      // Gap before summary
-      const feeStructureHeight = 1 + feeRowOffset + 1; // header + service rows (+ optional discount) + total row
+      worksheet.getCell(`A${feeStructureRow + 1}`).value =
+        'Persisted invoice charge and discount lines are provided on the Invoice Breakdown worksheet. Legacy invoices are marked snapshot unavailable.';
+      worksheet.mergeCells(`A${feeStructureRow + 1}:G${feeStructureRow + 1}`);
+      const feeStructureHeight = 2;
 
       // Summary section
       const summaryRow = feeStructureRow + feeStructureHeight + 2;
@@ -1096,15 +947,19 @@ router.get('/student-payment-history/:studentNumber', [
       worksheet.getCell(`B${summaryRow + 3}`).value = totalOutstanding;
       worksheet.getCell(`B${summaryRow + 3}`).numFmt = 'R #,##0.00';
       worksheet.getCell(`B${summaryRow + 3}`).font = { bold: true, color: totalOutstanding > 0 ? { argb: 'FFDC2626' } : { argb: 'FF16A34A' } };
+
+      worksheet.getCell(`A${summaryRow + 4}`).value = 'Credit / Overpaid:';
+      worksheet.getCell(`B${summaryRow + 4}`).value = authoritativeLedger.totals.credit;
+      worksheet.getCell(`B${summaryRow + 4}`).numFmt = 'R #,##0.00';
       
-      worksheet.getCell(`A${summaryRow + 4}`).value = 'Missed Payments:';
-      worksheet.getCell(`B${summaryRow + 4}`).value = missedCount;
+      worksheet.getCell(`A${summaryRow + 5}`).value = 'Missed Payments:';
+      worksheet.getCell(`B${summaryRow + 5}`).value = missedCount;
       
-      worksheet.getCell(`A${summaryRow + 5}`).value = 'Completed Payments:';
-      worksheet.getCell(`B${summaryRow + 5}`).value = paidCount;
+      worksheet.getCell(`A${summaryRow + 6}`).value = 'Completed Payments:';
+      worksheet.getCell(`B${summaryRow + 6}`).value = paidCount;
       
       // Banking Details Section
-      const bankingRow = summaryRow + 7;
+      const bankingRow = summaryRow + 8;
       worksheet.getCell(`A${bankingRow}`).value = 'BANKING DETAILS';
       worksheet.getCell(`A${bankingRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
       
@@ -1139,7 +994,10 @@ router.get('/student-payment-history/:studentNumber', [
       // Table headers
       const headerRowNum = historyTitleRow + 1;
       const headerRow = worksheet.getRow(headerRowNum);
-      headerRow.values = ['Year', 'Month', 'Amount Due', 'Amount Paid', 'Outstanding', 'Status', 'Reference'];
+      headerRow.values = [
+        'Year', 'Month', 'Gross Charges', 'Discounts', 'Net Due',
+        'Allocated Payments', 'Outstanding', 'Credit', 'Status', 'Review Flags', 'Reference',
+      ];
       headerRow.font = { bold: true };
       headerRow.eachCell((cell) => {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
@@ -1154,15 +1012,35 @@ router.get('/student-payment-history/:studentNumber', [
       
       // Add data rows
       let rowNum = headerRowNum + 1;
-      monthlyHistory.filter(m => m.amountDue > 0 || m.paymentStatus !== 'No Invoice').forEach(month => {
+      const exportRows = [...monthlyHistory];
+      if (authoritativeLedger.totals.unallocated > 0) {
+        exportRows.push({
+          year: '',
+          month: 'Unallocated payment (review)',
+          grossCharges: 0,
+          discountLines: [],
+          amountDue: 0,
+          amountPaid: 0,
+          outstanding: 0,
+          credit: authoritativeLedger.totals.unallocated,
+          paymentStatus: 'Review',
+          reviewFlags: [{ type: 'unallocated_payment' }],
+          reference: 'Admin review required',
+        });
+      }
+      exportRows.forEach(month => {
         const row = worksheet.getRow(rowNum);
         row.values = [
           month.year,
           month.month,
+          month.grossCharges,
+          -(month.discountLines || []).reduce((sum, line) => sum + Number(line.amount || 0), 0),
           month.amountDue,
           month.amountPaid,
           month.outstanding,
+          month.credit,
           month.paymentStatus,
+          (month.reviewFlags || []).map((flag) => flag.type).join(', '),
           month.reference
         ];
         
@@ -1170,14 +1048,17 @@ router.get('/student-payment-history/:studentNumber', [
         row.getCell(3).numFmt = 'R #,##0.00';
         row.getCell(4).numFmt = 'R #,##0.00';
         row.getCell(5).numFmt = 'R #,##0.00';
+        row.getCell(6).numFmt = 'R #,##0.00';
+        row.getCell(7).numFmt = 'R #,##0.00';
+        row.getCell(8).numFmt = 'R #,##0.00';
         
         // Color status
-        const statusCell = row.getCell(6);
+        const statusCell = row.getCell(9);
         if (month.paymentStatus === 'Paid' || month.paymentStatus === 'Overpaid') {
           statusCell.font = { color: { argb: 'FF16A34A' } };
         } else if (month.paymentStatus === 'Missed Payment') {
           statusCell.font = { bold: true, color: { argb: 'FFDC2626' } };
-          row.getCell(5).font = { bold: true, color: { argb: 'FFDC2626' } };
+          row.getCell(7).font = { bold: true, color: { argb: 'FFDC2626' } };
         } else if (month.paymentStatus === 'Partial Payment') {
           statusCell.font = { color: { argb: 'FFEA580C' } };
         }
@@ -1199,11 +1080,15 @@ router.get('/student-payment-history/:studentNumber', [
       worksheet.columns = [
         { width: 22 },  // A: labels ("Outstanding Balance:", "Reference Number:", …)
         { width: 22 },  // B: values ("HARMONY LEARNING INSTITUTE", amounts, …)
-        { width: 13 },  // C: Amount Due
-        { width: 13 },  // D: Amount Paid
-        { width: 13 },  // E: Outstanding
-        { width: 14 },  // F: Status ("Missed Payment")
-        { width: 20 },  // G: Reference number
+        { width: 13 },  // C: Gross charges
+        { width: 13 },  // D: Discounts
+        { width: 13 },  // E: Net due
+        { width: 13 },  // F: Allocated payments
+        { width: 13 },  // G: Outstanding
+        { width: 11 },  // H: Credit
+        { width: 14 },  // I: Status
+        { width: 24 },  // J: Review flags
+        { width: 20 },  // K: Reference number
       ];
 
       // Page setup — A4 landscape, always fit to one page width
@@ -1218,6 +1103,62 @@ router.get('/student-payment-history/:studentNumber', [
           header: 0.3, footer: 0.3
         }
       };
+
+      const breakdownSheet = workbook.addWorksheet('Invoice Breakdown');
+      breakdownSheet.columns = [
+        { header: 'Invoice ID', key: 'invoiceId', width: 12 },
+        { header: 'Due Date', key: 'dueDate', width: 14 },
+        { header: 'Line Type', key: 'lineType', width: 14 },
+        { header: 'Service Key', key: 'serviceKey', width: 18 },
+        { header: 'Label', key: 'label', width: 28 },
+        { header: 'Included Bundle Line', key: 'included', width: 18 },
+        { header: 'Line Amount', key: 'lineAmount', width: 14 },
+        { header: 'Gross Charges', key: 'gross', width: 14 },
+        { header: 'Discount Total', key: 'discountTotal', width: 14 },
+        { header: 'Net Due', key: 'netDue', width: 14 },
+        { header: 'Allocated Payments', key: 'paid', width: 16 },
+        { header: 'Outstanding', key: 'outstanding', width: 14 },
+        { header: 'Credit', key: 'credit', width: 12 },
+        { header: 'Status', key: 'status', width: 14 },
+        { header: 'Review Flags', key: 'review', width: 28 },
+        { header: 'Snapshot', key: 'snapshot', width: 24 },
+      ];
+      breakdownSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      breakdownSheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
+      authoritativeLedger.invoices.forEach((invoice) => {
+        const lines = invoice.line_items || [];
+        const base = {
+          invoiceId: invoice.id,
+          dueDate: invoice.due_date ? new Date(invoice.due_date).toISOString().slice(0, 10) : '',
+          gross: invoice.gross_charges,
+          discountTotal: invoice.discount_total,
+          netDue: invoice.net_due,
+          paid: invoice.allocated_effective_payments,
+          outstanding: invoice.outstanding_balance,
+          credit: invoice.credit,
+          status: invoice.status,
+          review: (invoice.payment_review_flags || []).map((flag) => flag.type).join(', '),
+          snapshot: lines.length ? 'Persisted snapshot' : 'Snapshot unavailable (legacy invoice)',
+        };
+        if (!lines.length) {
+          breakdownSheet.addRow({ ...base, lineType: 'unavailable', label: 'Detailed snapshot unavailable' });
+        } else {
+          lines.forEach((line) => breakdownSheet.addRow({
+            ...base,
+            lineType: line.line_type,
+            serviceKey: line.service_key || '',
+            label: line.label,
+            included: line.included ? 'Yes' : 'No',
+            lineAmount: line.line_type === 'discount' ? -line.amount : line.amount,
+          }));
+        }
+      });
+      breakdownSheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return;
+        [7, 8, 9, 10, 11, 12, 13].forEach((column) => {
+          row.getCell(column).numFmt = 'R #,##0.00';
+        });
+      });
       
       // Generate buffer
       const buffer = await workbook.xlsx.writeBuffer();

@@ -25,6 +25,8 @@
     "migrate:parent-notifications": "node scripts/run-parent-notifications-migration.js",
     "migrate:parent-targeting": "node scripts/run-parent-targeting-migration.js",
     "migrate:manual-finance-reconciliation": "node scripts/run-manual-finance-reconciliation-migration.js",
+    "migrate:mini-phase1-finance": "node scripts/run-mini-phase1-finance-migration.js",
+    "audit:mini-phase1-finance": "node scripts/run-mini-phase1-finance-migration.js --audit",
     "audit:parent-rollout-preflight": "node scripts/audit-parent-rollout-preflight.js",
     "audit:parent-schema-debug": "node scripts/audit-parent-schema-debug.js",
     "fix:enrollment-status-width": "node scripts/fix-enrollment-status-width.js",

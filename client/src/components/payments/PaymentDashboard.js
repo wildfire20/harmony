@@ -53,8 +53,7 @@ const PaymentDashboard = () => {
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [generateForm, setGenerateForm] = useState({
     month: new Date().getMonth() + 1,
-    year: new Date().getFullYear(),
-    amountDue: ''
+    year: new Date().getFullYear()
   });
 
   // Ghost invoice modal states
@@ -200,8 +199,7 @@ const PaymentDashboard = () => {
         },
         body: JSON.stringify({
           month: parseInt(generateForm.month),
-          year: parseInt(generateForm.year),
-          amountDue: parseFloat(generateForm.amountDue)
+          year: parseInt(generateForm.year)
         })
       });
 
@@ -823,7 +821,8 @@ const PaymentDashboard = () => {
                     ) : invoices.map((invoice) => {
                       const isArrearsInvoice = (invoice.description || '').toLowerCase().includes('arrears');
                       return (
-                        <tr key={invoice.id} className="hover:bg-gray-50">
+                        <React.Fragment key={invoice.id}>
+                        <tr className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div>
                               <div className="text-sm font-medium text-gray-900">
@@ -874,6 +873,30 @@ const PaymentDashboard = () => {
                             )}
                           </td>
                         </tr>
+                        <tr className="bg-gray-50">
+                          <td colSpan="8" className="px-6 py-2 text-xs">
+                            {invoice.snapshot_available && invoice.line_items?.length > 0 ? (
+                              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                {invoice.line_items.map((line) => (
+                                  <span key={line.id || `${invoice.id}-${line.label}`} className={line.line_type === 'discount' ? 'text-emerald-700' : 'text-gray-600'}>
+                                    {line.is_included ? 'Included · ' : ''}{line.label}: {line.line_type === 'discount' ? '-' : ''}{formatCurrency(line.amount)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-gray-500">Detailed invoice snapshot unavailable for this legacy invoice.</span>
+                            )}
+                            <span className="ml-4 text-gray-500">
+                              Net {formatCurrency(invoice.net_due ?? invoice.amount_due)} · Credit {formatCurrency(invoice.credit || invoice.overpaid_amount || 0)}
+                            </span>
+                            {invoice.review_required && (
+                              <span className="ml-4 text-amber-700">
+                                Review: {(invoice.payment_review_flags || []).map((flag) => flag.type).join(', ')}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
@@ -960,17 +983,10 @@ const PaymentDashboard = () => {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Amount Due ($)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={generateForm.amountDue}
-                  onChange={(e) => setGenerateForm(prev => ({ ...prev, amountDue: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter amount due for all students..."
-                />
+              <div className="rounded-md bg-blue-50 border border-blue-100 p-3 text-sm text-blue-800">
+                Amounts are calculated from configured service prices, learner
+                enrollment, configured bundles, and active approved discounts.
+                No manual amount is entered here.
               </div>
 
               <div className="flex justify-end space-x-3 pt-4">
@@ -982,7 +998,7 @@ const PaymentDashboard = () => {
                 </button>
                 <button
                   onClick={handleGenerateInvoices}
-                  disabled={uploadLoading || !generateForm.amountDue}
+                  disabled={uploadLoading}
                   className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
                 >
                   {uploadLoading ? 'Generating...' : 'Generate Invoices'}

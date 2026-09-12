@@ -140,11 +140,55 @@ test('/api/invoices handler returns paginated year-only and fully filtered resul
     assert.equal(response.statusCode, 200);
     const listCall = databaseCalls.find((call) =>
       /SELECT\s+i\.id/i.test(call.sql) && /ORDER BY/i.test(call.sql));
-    assert.match(listCall.sql, /i\.status = \$1/);
+    assert.match(listCall.sql, /CASE\s+WHEN i\.status = 'Carried Forward'/);
+    assert.doesNotMatch(listCall.sql, /i\.status = \$1/);
     assert.match(listCall.sql, /EXTRACT\(MONTH FROM i\.due_date\) = \$2/);
     assert.match(listCall.sql, /EXTRACT\(YEAR FROM i\.due_date\) = \$3/);
     assert.match(listCall.sql, /i\.student_number ILIKE \$4/);
     assert.deepEqual(listCall.params, ['Paid', 2, 2026, '%HAR001%', 10, 10]);
+  } finally {
+    database.query = originalQuery;
+    financeLedger.getFinanceSummary = originalSummary;
+    delete require.cache[routePath];
+  }
+});
+
+test('/api/invoices computes stale zero-net status as Paid in list and filter', async () => {
+  const database = require('../config/database');
+  const financeLedger = require('../services/financeLedger');
+  const routePath = require.resolve('../routes/invoices');
+  const originalQuery = database.query;
+  const originalSummary = financeLedger.getFinanceSummary;
+  database.query = async (sql) => {
+    if (/COUNT\(\*\) as total_students/i.test(sql)) return { rows: [{ total_students: '1' }] };
+    if (/SELECT COUNT\(\*\) as total\s+FROM invoices/i.test(sql)) return { rows: [{ total: '1' }] };
+    if (/SELECT\s+i\.id/i.test(sql) && /ORDER BY/i.test(sql)) {
+      return { rows: [{
+        id: 49, student_number: 'HAR049', amount_due: 0, amount_paid: 0,
+        outstanding_balance: 0, overpaid_amount: 0, due_date: '2026-02-28', status: 'Unpaid',
+      }] };
+    }
+    throw new Error(`Unexpected invoice route query: ${sql}`);
+  };
+  financeLedger.getFinanceSummary = async () => ({
+    totalInvoices: 1, paidCount: 1, unpaidCount: 0, partialCount: 0,
+    overpaidCount: 0, totalAmountDue: 0, totalAmountPaid: 0,
+    totalOutstanding: 0, totalOverpaid: 0, unallocated: 0, credit: 0, netOutstanding: 0,
+  });
+  delete require.cache[routePath];
+  try {
+    const router = require(routePath);
+    const route = router.stack.find((layer) => layer.route?.path === '/' &&
+      layer.route.methods.get);
+    const handler = route.route.stack.at(-1).handle;
+    let payload;
+    const response = await handler(
+      { query: { status: 'Paid', year: '2026', page: '1', limit: '20' }, user: { id: 1, role: 'admin' } },
+      { status() { return this; }, json(value) { payload = value; } },
+    );
+    assert.equal(response, undefined);
+    assert.equal(payload.invoices[0].status, 'Paid');
+    assert.equal(payload.invoices[0].outstanding_balance, 0);
   } finally {
     database.query = originalQuery;
     financeLedger.getFinanceSummary = originalSummary;

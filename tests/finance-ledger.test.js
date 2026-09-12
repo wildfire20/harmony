@@ -28,8 +28,8 @@ test('configured service charges include enrolled services exactly once', () => 
     'tuition', 'boarding', 'transport', 'aftercare',
   ]);
   assert.equal(charge.subtotal, 2150);
-  assert.equal(charge.discount, 150);
-  assert.equal(charge.configuredTotal, 2000);
+  assert.equal(charge.discount, 0);
+  assert.equal(charge.configuredTotal, 2150);
   // The bundle total is a description of one charge, not an additional line.
   assert.equal(charge.components.reduce((sum, component) => sum + component.amount, 0), 2150);
 });

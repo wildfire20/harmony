@@ -244,6 +244,12 @@ const StudentPaymentExport = () => {
                   <p className="text-sm text-orange-600 dark:text-orange-400">Missed Payments</p>
                   <p className="text-xl font-bold text-orange-700 dark:text-orange-400">{paymentHistory.summary.missedPayments}</p>
                 </div>
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                  <p className="text-sm text-blue-600 dark:text-blue-400">Credit / Overpaid</p>
+                  <p className="text-xl font-bold text-blue-700 dark:text-blue-400">
+                    R {(paymentHistory.summary.credit || 0).toFixed(2)}
+                  </p>
+                </div>
               </div>
 
               {paymentHistory.monthlyHistory.length === 0 ? (
@@ -259,8 +265,10 @@ const StudentPaymentExport = () => {
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Year</th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Month</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Amount Due</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Discount</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Amount Paid</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Outstanding</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Credit</th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status</th>
                       </tr>
                     </thead>
@@ -270,10 +278,14 @@ const StudentPaymentExport = () => {
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{month.year}</td>
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{month.month}</td>
                           <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-white">R {month.amountDue.toFixed(2)}</td>
+                          <td className="px-4 py-3 text-sm text-right text-emerald-600 dark:text-emerald-400">
+                            R {((month.discountLines || []).reduce((sum, line) => sum + Number(line.amount || 0), 0)).toFixed(2)}
+                          </td>
                           <td className="px-4 py-3 text-sm text-right text-green-600 dark:text-green-400">R {month.amountPaid.toFixed(2)}</td>
                           <td className={`px-4 py-3 text-sm text-right font-medium ${month.outstanding > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`}>
                             R {month.outstanding.toFixed(2)}
                           </td>
+                          <td className="px-4 py-3 text-sm text-right text-blue-600 dark:text-blue-400">R {(month.credit || 0).toFixed(2)}</td>
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-center gap-1">
                               {getStatusIcon(month.paymentStatus)}

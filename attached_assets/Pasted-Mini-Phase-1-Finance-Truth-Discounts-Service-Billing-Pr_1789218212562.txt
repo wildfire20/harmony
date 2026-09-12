@@ -1,0 +1,243 @@
+Mini Phase 1 — Finance Truth, Discounts & Service Billing
+
+Production schema readiness is now complete:
+
+Parent activation: APPLIED
+Parent notifications: APPLIED
+Parent targeting: APPLIED
+Manual finance reconciliation: APPLIED
+Finance carry-forward audit: 0 rows needing review
+Admin vs Parent sample: 0 mismatches
+
+Mini Phase 0 also fixed the Admin invoice-list HTTP 400 regression through the shared utils/invoiceQuery.js parser.
+
+Preserve that fix.
+Do not reintroduce paired month/year validation.
+Preserve the new “Unavailable instead of false zero” dashboard failure state.
+
+Do not deploy automatically.
+Do not run migrations automatically.
+
+1. One authoritative monthly finance view
+
+Ensure all of these derive from the same authoritative ledger:
+
+Admin finance summary
+Admin invoice table
+Admin student payment history
+Parent Portal finance summary
+Parent Portal monthly history
+Student payment-history Excel export
+
+No screen or export should independently reconstruct finance totals from raw payment transactions.
+
+2. Investigate HAR049 / Milton
+
+Current production summary now agrees between Admin and Parent Portal:
+
+Total billed: R21,150
+Total paid: R14,100
+Outstanding: R7,050
+
+However, the detailed Admin payment-history/export previously showed months as fully paid in a way that did not mathematically reconcile to R14,100 paid.
+
+Audit the exact source of that discrepancy.
+
+Determine whether:
+
+legacy/manual payment transactions
+old payment allocation logic
+month-level aggregation
+unallocated payments
+overpayments/credits
+
+are causing the detailed history to differ from the authoritative invoice ledger.
+
+Do not rewrite historical payment data automatically.
+
+If historical records are ambiguous, flag them for Admin review.
+
+3. Services must be financially real
+
+Learners can have:
+
+Tuition
+Boarding
+Transport
+Aftercare
+
+The Parent Portal currently displays enrolled services such as Boarding and Transport.
+
+Distinguish clearly between:
+
+learner enrolled in service
+service informational only
+service actually billed
+service included inside a bundled package
+
+A service must never be displayed as if it contributes to the amount due unless it actually exists in the invoice calculation.
+
+4. Bundled boarding rules
+
+Harmony’s boarding package can include school fees and other services.
+
+The finance engine must support bundled services so that:
+
+tuition is not added twice
+aftercare is not added twice
+transport remains separate where applicable
+
+Do not hard-code assumptions without using the configured school fee structure.
+
+5. Proper discount model
+
+Add explicit invoice discount/adjustment support for:
+
+Teacher/staff-child discount
+Sibling discount
+Custom approved discount
+
+A discount is not a payment.
+
+Example:
+
+Tuition                R2,350
+Teacher Discount      -R1,175
+Net Amount Due         R1,175
+Paid                   R1,175
+Outstanding                R0
+Status                  Paid
+
+It must not appear as:
+
+R2,350 due
+R1,175 paid
+R1,175 outstanding
+Partial
+
+if the approved discount makes R1,175 the actual amount due.
+
+6. Discount assignment
+
+Support:
+
+discount type
+fixed amount or percentage
+applicable charge/service
+start date
+optional end date
+reason
+approved by
+
+Do not infer discounts automatically from names or relationships.
+
+Admin must explicitly assign/confirm them.
+
+Do not hard-code Harmony’s actual teacher or sibling discount amount until management confirms the rule.
+
+7. Sharon / staff-discount test case
+
+Sharon’s Admin and Parent Portal figures currently agree.
+
+However, her repeated R1,175 payments may represent a staff/teacher discount because her parent works at Harmony.
+
+The system must be capable of representing this correctly as an approved discount rather than treating the unpaid half as arrears.
+
+Do not automatically modify Sharon’s historical account without explicit Admin confirmation.
+
+Report what the current records imply and what would need manual confirmation.
+
+8. Parent and Admin invoice breakdown
+
+Both should be able to show:
+
+Tuition                 R2,350
+Boarding                R1,600
+Transport                 R650
+Discount                 -R500
+-----------------------------
+Net Amount Due          R4,100
+
+Paid                    R4,100
+Outstanding                 R0
+
+Clearly distinguish:
+
+gross charges
+discounts
+net due
+payments
+credit
+outstanding
+9. Invoice status
+
+Status must be calculated against the net amount due after discounts:
+
+Paid
+Partial
+Unpaid
+Credit / Overpaid where appropriate
+10. Excel export
+
+Excel export must mathematically reconcile with the authoritative ledger.
+
+It should include:
+
+invoice charges
+service components
+discounts
+net due
+payments allocated
+outstanding
+credit where applicable
+
+The detailed rows must equal the totals shown in the summary.
+
+11. Preserve finance safety
+
+Preserve:
+
+immutable payment transactions
+reversal relationships
+carry-forward lineage
+payment proof approvals
+manual payments
+bank statement allocations
+audit history
+
+Do not delete or silently rewrite payment history.
+
+12. Tests
+
+Include:
+
+HAR049-style historical/manual payment case
+ordinary fully paid learner
+partial payer
+staff discount
+sibling discount
+fixed discount
+percentage discount
+boarding + transport
+bundled boarding package
+overpayment/credit
+Admin vs Parent reconciliation
+Admin history vs summary reconciliation
+Excel export vs ledger reconciliation
+
+Rerun existing finance, payment proof, Parent Portal and invoice dashboard regressions.
+
+Return:
+
+HAR049 discrepancy root cause
+Shared ledger changes
+Service billing design
+Discount model
+Sharon/current staff-discount findings
+Files changed
+Migration required, if any
+Tests passed
+Historical accounts requiring manual review
+Any remaining finance blocker
+
+Do not deploy or run migrations automatically.

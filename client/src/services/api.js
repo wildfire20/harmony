@@ -154,6 +154,11 @@ export const adminAPI = {
   bulkAddStudents: (students) => api.post('/admin/students/bulk', { students }),
   getStudents: (params) => api.get('/admin/students', { params }),
   updateStudent: (id, data) => api.put(`/admin/students/${id}`, data),
+  getDiscountAssignments: (studentId, params) => api.get('/admin/discount-assignments', {
+    params: { ...params, student_id: studentId },
+  }),
+  createDiscountAssignment: (data) => api.post('/admin/discount-assignments', data),
+  deactivateDiscountAssignment: (id) => api.post(`/admin/discount-assignments/${id}/deactivate`),
   deleteStudent: (id) => api.delete(`/admin/students/${id}`),
   exportCredentials: (params) => api.get('/admin/students/export-credentials', { 
     params, 

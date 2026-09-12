@@ -9,7 +9,11 @@ const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { notifyInvoice, notifyPayment } = require('../services/parentNotificationService');
 const { logAudit, getIp } = require('../utils/auditLogger');
-const { getStudentLedger, getFinanceSummary, allocatePayment } = require('../services/financeLedger');
+const {
+  getStudentLedger, getFinanceSummary, allocatePayment,
+  buildInvoiceSnapshotLines,
+  invoiceStatusExpression, loadInvoiceLineItems, buildInvoiceBreakdown, invoiceStatus,
+} = require('../services/financeLedger');
 const { parseInvoiceListQuery, appendPeriodFilters } = require('../utils/invoiceQuery');
 
 const router = express.Router();
@@ -44,25 +48,48 @@ router.post('/generate-monthly', [
   authenticate,
   authorize('admin', 'super_admin'),
   body('month').isInt({ min: 1, max: 12 }),
-  body('year').isInt({ min: 2020, max: 2030 }),
-  body('amountDue').isFloat({ min: 0 })
+  body('year').isInt({ min: 2020, max: 2030 })
 ], async (req, res) => {
   try {
+    if (Object.prototype.hasOwnProperty.call(req.body, 'amountDue')) {
+      return res.status(400).json({
+        success: false,
+        message: 'amountDue is obsolete; monthly invoices use configured service prices, enrollment, and approved discounts',
+      });
+    }
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { month, year, amountDue } = req.body;
+    const { month, year } = req.body;
     const dueDate = new Date(year, month, 0); // Last day of the month
 
-    console.log('Generating monthly invoices:', { month, year, amountDue });
+    console.log('Generating monthly invoices from configured services:', { month, year });
+
+    // New finance-truth generation is intentionally fail-closed until the
+    // explicit additive schema is installed. Legacy flags must never drive a
+    // new invoice.
+    try {
+      await db.query('SELECT 1 FROM learner_discount_assignments LIMIT 1');
+      await db.query('SELECT 1 FROM invoice_line_items LIMIT 1');
+      await db.query('SELECT billing_mode, bundle_key, included_service_keys FROM service_prices LIMIT 1');
+    } catch (schemaError) {
+      if (schemaError.code === '42P01' || schemaError.code === '42703') {
+        return res.status(503).json({
+          success: false,
+          message: 'Monthly finance-truth generation is unavailable until migrations/mini_phase1_finance_truth.sql is applied',
+        });
+      }
+      throw schemaError;
+    }
 
     // Get ALL active students (no enrollment date filter — include everyone active)
     const studentsResult = await db.query(`
       SELECT u.id, u.student_number, u.first_name, u.last_name, u.grade_id, u.class_id,
-             COALESCE(u.has_sibling_discount, false) AS has_sibling_discount,
-             COALESCE(u.has_teacher_discount, false) AS has_teacher_discount
+             COALESCE(u.is_boarder, false) AS is_boarder,
+             COALESCE(u.uses_transport, false) AS uses_transport,
+             COALESCE(u.uses_aftercare, false) AS uses_aftercare
       FROM users u
       WHERE u.role = 'student' AND u.is_active = true
     `);
@@ -83,7 +110,7 @@ router.post('/generate-monthly', [
     const existingStudentIds = new Set(existingResult.rows.map(r => r.student_id));
 
     const studentsToInvoice = students.filter(s => !existingStudentIds.has(s.id));
-    const skippedCount = existingStudentIds.size;
+    let skippedCount = existingStudentIds.size;
 
     if (studentsToInvoice.length === 0) {
       return res.status(400).json({
@@ -93,50 +120,100 @@ router.post('/generate-monthly', [
 
     console.log(`Creating invoices for ${studentsToInvoice.length} students (${skippedCount} already had invoices)`);
 
-    // Generate invoices — apply R150 sibling discount where applicable
-    const invoicePromises = studentsToInvoice.map(student => {
-      const referenceNumber = student.student_number;
-      // Teacher discount (50% off) takes priority; sibling discount (R150 off) applies otherwise
-      let studentAmountDue = parseFloat(amountDue);
-      if (student.has_teacher_discount) {
-        studentAmountDue = Math.max(0, studentAmountDue * 0.5);
-      } else if (student.has_sibling_discount) {
-        studentAmountDue = Math.max(0, studentAmountDue - 150);
+    const client = await db.pool.connect();
+    const createdInvoices = [];
+    let siblingDiscountCount = 0;
+    let teacherDiscountCount = 0;
+    try {
+      await client.query('BEGIN');
+      // Serialize generation for one calendar period and re-check while the
+      // transaction owns the lock. The preflight check above is only a fast
+      // response; it is not a concurrency guard.
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext('harmony-monthly-invoices'), $1::integer)`,
+        [Number(year) * 100 + Number(month)],
+      );
+      const lockedExistingResult = await client.query(`
+        SELECT student_id FROM invoices
+        WHERE EXTRACT(MONTH FROM due_date) = $1
+          AND EXTRACT(YEAR FROM due_date) = $2
+        FOR SHARE
+      `, [month, year]);
+      const lockedExistingStudentIds = new Set(lockedExistingResult.rows.map((row) => row.student_id));
+      const lockedStudentsToInvoice = students.filter((student) => !lockedExistingStudentIds.has(student.id));
+      skippedCount = lockedExistingStudentIds.size;
+      if (lockedStudentsToInvoice.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          message: `All ${students.length} students already have invoices for ${month}/${year}. No new invoices needed.`,
+        });
       }
-
-      return db.query(`
-        INSERT INTO invoices (
-          student_id, student_number, amount_due, due_date, status, 
-          reference_number, created_by, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-        RETURNING *
-      `, [
-        student.id,
-        student.student_number,
-        studentAmountDue,
-        dueDate,
-        'Unpaid',
-        referenceNumber,
-        req.user.id
-      ]);
-    });
-
-    const invoiceResults = await Promise.all(invoicePromises);
-    const createdInvoices = invoiceResults.map(result => result.rows[0]);
+      const pricesResult = await client.query(`
+        SELECT service_key, label, description, amount, billing_mode,
+               bundle_key, included_service_keys
+        FROM service_prices
+        ORDER BY display_order, service_key
+      `);
+      const periodStart = `${year}-${String(month).padStart(2, '0')}-01`;
+      for (const student of lockedStudentsToInvoice) {
+        const assignmentsResult = await client.query(`
+          SELECT id, discount_type, calculation_method, amount, percentage,
+                 applicable_service_key, reason
+          FROM learner_discount_assignments
+          WHERE student_id = $1 AND is_active = TRUE
+            AND starts_on <= $2::date
+            AND (ends_on IS NULL OR ends_on >= $2::date)
+          ORDER BY id
+        `, [student.id, periodStart]);
+        const lines = buildInvoiceSnapshotLines(student, pricesResult.rows, assignmentsResult.rows);
+        const chargeLines = lines.filter((line) => line.line_type === 'charge' && !line.is_included);
+        const discountLines = lines.filter((line) => line.line_type === 'discount');
+        const gross = chargeLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+        const discountTotal = discountLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+        const netDue = Math.max(0, Math.round((gross - discountTotal) * 100) / 100);
+        const invoiceResult = await client.query(`
+          INSERT INTO invoices (
+            student_id, student_number, amount_due, due_date, status,
+            reference_number, created_by, created_at
+          ) VALUES ($1, $2, $3, $4, 'Unpaid', $5, $6, NOW())
+          RETURNING *
+        `, [student.id, student.student_number, netDue, dueDate, student.student_number, req.user.id]);
+        const invoice = invoiceResult.rows[0];
+        for (const line of lines) {
+          await client.query(`
+            INSERT INTO invoice_line_items
+              (invoice_id, line_type, service_key, bundle_key, label, description,
+               quantity, unit_amount, amount, is_included, discount_assignment_id, metadata)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+          `, [
+            invoice.id, line.line_type, line.service_key, line.bundle_key,
+            line.label, line.description, line.quantity, line.unit_amount,
+            line.amount, line.is_included, line.discount_assignment_id || null,
+            JSON.stringify(line.metadata || {}),
+          ]);
+        }
+        createdInvoices.push(invoice);
+        siblingDiscountCount += discountLines.filter((line) => line.metadata.discount_type === 'sibling').length;
+        teacherDiscountCount += discountLines.filter((line) => line.metadata.discount_type === 'staff').length;
+      }
+      await client.query('COMMIT');
+    } catch (generationError) {
+      await client.query('ROLLBACK');
+      throw generationError;
+    } finally {
+      client.release();
+    }
     await Promise.allSettled(createdInvoices.map((invoice) => notifyInvoice({
       invoiceId: invoice.id,
       learnerId: invoice.student_id,
       amount: invoice.amount_due,
     })));
-    const siblingDiscountCount = studentsToInvoice.filter(s => s.has_sibling_discount && !s.has_teacher_discount).length;
-    const teacherDiscountCount = studentsToInvoice.filter(s => s.has_teacher_discount).length;
-
-    console.log(`Successfully created ${createdInvoices.length} invoices (${siblingDiscountCount} sibling, ${teacherDiscountCount} teacher discounts)`);
+    console.log(`Successfully created ${createdInvoices.length} invoices (${siblingDiscountCount} sibling, ${teacherDiscountCount} staff discounts)`);
 
     const skipMsg = skippedCount > 0 ? ` (${skippedCount} student${skippedCount !== 1 ? 's' : ''} already had invoices — skipped)` : '';
     const parts = [];
-    if (siblingDiscountCount > 0) parts.push(`R150 sibling discount × ${siblingDiscountCount}`);
-    if (teacherDiscountCount > 0) parts.push(`50% teacher discount × ${teacherDiscountCount}`);
+    if (siblingDiscountCount > 0) parts.push(`approved sibling discounts × ${siblingDiscountCount}`);
+    if (teacherDiscountCount > 0) parts.push(`approved staff discounts × ${teacherDiscountCount}`);
     const discountMsg = parts.length > 0 ? ` — ${parts.join(', ')}` : '';
 
     await logAudit({
@@ -186,6 +263,8 @@ router.post('/recalculate-status', [
     const result = await db.query(`
       UPDATE invoices SET
         status = CASE
+          WHEN amount_paid > amount_due THEN 'Overpaid'
+          WHEN amount_due = 0 THEN 'Paid'
           WHEN amount_paid >= amount_due THEN 'Paid'
           WHEN amount_paid > 0            THEN 'Partial'
           ELSE 'Unpaid'
@@ -193,6 +272,8 @@ router.post('/recalculate-status', [
         updated_at = NOW()
       WHERE status IS DISTINCT FROM (
         CASE
+          WHEN amount_paid > amount_due THEN 'Overpaid'
+          WHEN amount_due = 0 THEN 'Paid'
           WHEN amount_paid >= amount_due THEN 'Paid'
           WHEN amount_paid > 0            THEN 'Partial'
           ELSE 'Unpaid'
@@ -539,7 +620,7 @@ router.get('/', [
     // Add filters
     if (status) {
       paramCount++;
-      query += ` AND i.status = $${paramCount}`;
+      query += ` AND ${invoiceStatusExpression('i')} = $${paramCount}`;
       queryParams.push(status);
     }
 
@@ -573,6 +654,57 @@ router.get('/', [
     console.log('Query params:', queryParams);
 
     const result = await db.query(query, queryParams);
+    result.rows = result.rows.map((invoice) => ({
+      ...invoice,
+      status: invoiceStatus(invoice.amount_due, invoice.amount_paid, invoice.status),
+      outstanding_balance: Math.max((Number(invoice.amount_due) || 0) - (Number(invoice.amount_paid) || 0), 0),
+      overpaid_amount: Math.max((Number(invoice.amount_paid) || 0) - (Number(invoice.amount_due) || 0), 0),
+    }));
+    const invoiceIds = result.rows.map((invoice) => invoice.id);
+    const lineData = await loadInvoiceLineItems(db, invoiceIds);
+    const linesByInvoice = new Map();
+    lineData.rows.forEach((line) => {
+      const key = Number(line.invoice_id);
+      if (!linesByInvoice.has(key)) linesByInvoice.set(key, []);
+      linesByInvoice.get(key).push(line);
+    });
+    let paymentRows = [];
+    if (invoiceIds.length) {
+      try {
+        const payments = await db.query(`
+          SELECT id, invoice_id, month, year
+          FROM payment_transactions
+          WHERE invoice_id = ANY($1::integer[])
+        `, [invoiceIds]);
+        paymentRows = payments.rows;
+      } catch (error) {
+        if (!/^Unexpected .*query:/.test(error.message || '') &&
+            error.code !== '42P01' && error.code !== '42703') throw error;
+      }
+    }
+    const flagsByInvoice = new Map();
+    paymentRows.forEach((payment) => {
+      const invoice = result.rows.find((item) => Number(item.id) === Number(payment.invoice_id));
+      if (!invoice || payment.month == null || payment.year == null || !invoice.due_date) return;
+      const date = new Date(invoice.due_date);
+      if (Number(payment.month) === date.getUTCMonth() + 1 &&
+          Number(payment.year) === date.getUTCFullYear()) return;
+      if (!flagsByInvoice.has(Number(invoice.id))) flagsByInvoice.set(Number(invoice.id), []);
+      flagsByInvoice.get(Number(invoice.id)).push({
+        type: 'transaction_month_mismatch',
+        transaction_id: payment.id,
+        transaction_month: Number(payment.month),
+        transaction_year: Number(payment.year),
+      });
+    });
+    result.rows = result.rows.map((invoice) => ({
+      ...buildInvoiceBreakdown(invoice, linesByInvoice.get(Number(invoice.id)) || [],
+        flagsByInvoice.get(Number(invoice.id)) || []),
+      snapshot_available: lineData.available && (linesByInvoice.get(Number(invoice.id)) || []).length > 0,
+      snapshot_unavailable_reason: lineData.available
+        ? ((linesByInvoice.get(Number(invoice.id)) || []).length ? null : 'No persisted invoice line-item snapshot')
+        : 'Invoice line-item schema is not installed',
+    }));
     
     // Get total count for pagination
     let countQuery = `
@@ -587,7 +719,7 @@ router.get('/', [
 
     if (status) {
       countParamIndex++;
-      countQuery += ` AND i.status = $${countParamIndex}`;
+      countQuery += ` AND ${invoiceStatusExpression('i')} = $${countParamIndex}`;
       countParams.push(status);
     }
 
