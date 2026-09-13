@@ -50,7 +50,7 @@ async function sendParentActivationOtp(email, otp, name = '') {
       <p>Dear ${escapeHtml(name)},</p>
       <p>Your Parent Portal verification code is <strong>${escapeHtml(otp)}</strong>.</p>
       <p>This code expires shortly and can only be used once. If you did not request this, you can ignore this email.</p>
-      <hr><p>Harmony Learning Institute</p><p>Powered by AutoM8</p></body></html>`,
+      <hr><p>Harmony Learning Institute</p><p><a href="https://www.auto-m8.co.za/" style="color:#64748b;text-decoration:none">Powered by AutoM8</a></p></body></html>`,
     { fromName: 'Harmony Parent Portal — powered by AutoM8', replyTo: 'harmonylearninginstitute@gmail.com' },
   );
 }
@@ -143,7 +143,7 @@ async function sendParentAuthEmail(email, token, type, name = '') {
   return sendEmail(email, `Harmony Parent Portal — ${title}`, `<!doctype html><html><body>
     <h2>Harmony Parent Portal</h2><p>Dear ${escapeHtml(name)},</p><p>${escapeHtml(title)}.</p>
     <p><a href="${escapeHtml(link)}">Continue securely</a></p><p>This link expires soon and can only be used once. If you did not request this, you can ignore this email.</p>
-    <hr><p>Harmony Learning Institute</p><p>Powered by AutoM8</p></body></html>`,
+    <hr><p>Harmony Learning Institute</p><p><a href="https://www.auto-m8.co.za/" style="color:#64748b;text-decoration:none">Powered by AutoM8</a></p></body></html>`,
     { fromName: 'Harmony Parent Portal — powered by AutoM8', replyTo: 'harmonylearninginstitute@gmail.com' });
 }
 

@@ -539,6 +539,16 @@ const ParentPortal = () => {
               <Route path="account"         element={<ParentAccount user={user} children={children} selectedChild={selectedChild} onSelectChild={handleSelectChild} onLogout={handleLogout} />} />
               <Route path="payment-proof"   element={<Navigate to="/parent/invoices" replace />} />
             </Routes>
+            <footer className="mt-10 border-t border-[#dce7eb] pt-5 text-center">
+              <a
+                href="https://www.auto-m8.co.za/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-medium text-[#617487] transition-colors hover:text-[#176b73]"
+              >
+                Powered by AutoM8
+              </a>
+            </footer>
           </main>
         </div>
 

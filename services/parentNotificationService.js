@@ -129,7 +129,7 @@ async function deliverOptional({ parent, title, summary, destination, important 
       `<p>Dear ${escapeHtml(parent.parent_first_name || 'Parent')},</p>` +
       `<p>${escapeHtml(summary)}</p>` +
       `<p><a href="${escapeHtml(url)}">View in Parent Portal</a></p>` +
-      '<hr><p>Harmony Learning Institute</p><p>Powered by AutoM8</p>',
+      '<hr><p>Harmony Learning Institute</p><p><a href="https://www.auto-m8.co.za/" style="color:#64748b;text-decoration:none">Powered by AutoM8</a></p>',
       { fromName: 'Harmony Learning Institute — powered by AutoM8', replyTo: 'harmonylearninginstitute@gmail.com' },
     );
   } catch (error) {
