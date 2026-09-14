@@ -16,7 +16,7 @@ test('allocation categories distinguish recurring services and one-off obligatio
     { line_type: 'charge', service_key: 'one_off_fee', amount: 1200, is_included: false,
       metadata: { category: 'one_off', fee_id: 44 } },
     { line_type: 'charge', service_key: 'boarding', amount: 0, is_included: true },
-  ]), ['tuition', 'transport', 'one_off:44']);
+  ]), ['tuition', 'transport', 'one_off']);
 });
 
 test('proposed allocations stay category-isolated and leave excess as credit', async () => {
@@ -63,7 +63,7 @@ test('proposed allocations stay category-isolated and leave excess as credit', a
     reference: 'PROOF-TEST',
     allocationProposals: [
       { invoiceId: 1, amount: 2350, category: 'tuition' },
-      { invoiceId: 2, amount: 1200, category: 'one_off:44' },
+      { invoiceId: 2, amount: 1200, category: 'one_off' },
     ],
   });
   assert.deepEqual(result.allocations.map((allocation) => [allocation.invoiceId, allocation.amount]), [
@@ -71,6 +71,133 @@ test('proposed allocations stay category-isolated and leave excess as credit', a
   ]);
   assert.equal(state.paid.get(1), 2350);
   assert.equal(state.paid.get(2), 1200);
+});
+
+test('R4200 proof resolves tuition, transport and one-off selectors to authoritative lines', async () => {
+  const { resolvePaymentProposals } = require('../routes/paymentProofs');
+  const executor = {
+    async query(sql, params) {
+      if (!sql.includes('FROM invoices i')) throw new Error(`Unexpected query: ${sql}`);
+      const selector = String(params.at(-1));
+      if (selector === 'tuition') return { rows: [{
+        id: 10, due_date: '2026-06-30', invoice_line_item_id: 101,
+        service_key: 'tuition', line_amount: 2350, metadata: {},
+      }] };
+      if (selector === 'transport') return { rows: [{
+        id: 10, due_date: '2026-06-30', invoice_line_item_id: 102,
+        service_key: 'transport', line_amount: 650, metadata: {},
+      }] };
+      if (selector === '4') return { rows: [{
+        id: 11, due_date: '2026-09-14', invoice_line_item_id: 103,
+        service_key: 'one_off_fee', line_amount: 1200,
+        metadata: { category: 'one_off', fee_id: 4, assignment_id: 88 },
+      }] };
+      return { rows: [] };
+    },
+  };
+  const proposals = await resolvePaymentProposals(executor, 7, [
+    { service_key: 'tuition', category: 'tuition', amount: 2350 },
+    { service_key: 'transport', category: 'transport', amount: 650 },
+    { fee_id: 4, category: 'one_off:4', amount: 1200 },
+  ]);
+  assert.deepEqual(proposals, [
+    { invoiceId: 10, invoiceLineItemId: 101, obligationId: null, amount: 2350, category: 'tuition' },
+    { invoiceId: 10, invoiceLineItemId: 102, obligationId: null, amount: 650, category: 'transport' },
+    { invoiceId: 11, invoiceLineItemId: 103, obligationId: 4, amount: 1200, category: 'one_off' },
+  ]);
+  assert.equal(proposals.reduce((sum, row) => sum + row.amount, 0), 4200);
+});
+
+test('missing assigned one-off line returns a reconciliation conflict', async () => {
+  const { resolvePaymentProposals } = require('../routes/paymentProofs');
+  const executor = {
+    async query(sql) {
+      if (sql.includes('FROM invoices i')) return { rows: [] };
+      if (sql.includes('FROM student_fee_assignments')) return { rows: [{ id: 88 }] };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+  await assert.rejects(
+    () => resolvePaymentProposals(executor, 7, [{ fee_id: 4, category: 'one_off:4', amount: 1200 }]),
+    (error) => error.status === 409 && /requires reconciliation/.test(error.safeMessage),
+  );
+});
+
+test('receipt validation accepts structurally valid WebP and rejects a spoofed RIFF header', () => {
+  const { detectReceiptType, validateReceiptFile, isAllowedReceiptName } = require('../routes/paymentProofs');
+  const webp = Buffer.alloc(30);
+  webp.write('RIFF', 0, 'ascii');
+  webp.writeUInt32LE(22, 4);
+  webp.write('WEBP', 8, 'ascii');
+  webp.write('VP8X', 12, 'ascii');
+  webp.writeUInt32LE(10, 16);
+  assert.equal(detectReceiptType(webp)?.mime, 'image/webp');
+  assert.equal(validateReceiptFile({ buffer: webp, mimetype: 'image/webp' }).ok, true);
+  assert.equal(isAllowedReceiptName({ originalname: 'proof.webp', mimetype: 'image/webp' }), true);
+  const spoof = Buffer.from(webp);
+  spoof.write('FAKE', 12, 'ascii');
+  assert.equal(detectReceiptType(spoof), null);
+});
+
+test('selected allocation total cannot exceed the proof amount', async () => {
+  const executor = {
+    async query(sql) {
+      if (sql.includes('FROM users')) return { rows: [{ id: 7, student_number: 'TEST-7' }] };
+      throw new Error(`Allocation should fail before invoice mutation: ${sql}`);
+    },
+  };
+  await assert.rejects(
+    () => allocatePayment(executor, {
+      studentId: 7,
+      amount: 2350,
+      allocationProposals: [
+        { invoiceId: 10, category: 'tuition', amount: 2350 },
+        { invoiceId: 10, category: 'transport', amount: 650 },
+      ],
+    }),
+    (error) => error.status === 422 && /exceeds the payment amount/.test(error.safeMessage),
+  );
+});
+
+test('invoice settled between resolution and lock returns a typed conflict', async () => {
+  const executor = {
+    async query(sql) {
+      if (sql.includes('FROM users')) return { rows: [{ id: 7, student_number: 'TEST-7' }] };
+      if (sql.includes('FROM invoices') && sql.includes('FOR UPDATE')) return { rows: [] };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+  await assert.rejects(
+    () => allocatePayment(executor, {
+      studentId: 7,
+      amount: 650,
+      allocationProposals: [{ invoiceId: 10, category: 'transport', amount: 650 }],
+    }),
+    (error) => error.status === 409 && /no longer outstanding/.test(error.safeMessage),
+  );
+});
+
+test('Admin retarget resolution constrains the exact persisted invoice line', async () => {
+  const { resolvePaymentProposals } = require('../routes/paymentProofs');
+  let capturedSql = '';
+  let capturedParams = [];
+  const executor = {
+    async query(sql, params) {
+      capturedSql = sql;
+      capturedParams = params;
+      return { rows: [{
+        id: 11, due_date: '2026-09-14', invoice_line_item_id: 103,
+        service_key: 'one_off_fee', line_amount: 1200,
+        metadata: { category: 'one_off', fee_id: 4, assignment_id: 88 },
+      }] };
+    },
+  };
+  const proposals = await resolvePaymentProposals(executor, 7, [{
+    invoice_id: 11, invoice_line_item_id: 103, fee_id: 4, category: 'one_off', amount: 1200,
+  }]);
+  assert.match(capturedSql, /li\.id = \$3/);
+  assert.deepEqual(capturedParams.slice(0, 3), [7, 11, 103]);
+  assert.equal(proposals[0].invoiceLineItemId, 103);
 });
 
 test('one proof can allocate tuition and transport separately on the same invoice', async () => {

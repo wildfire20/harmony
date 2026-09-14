@@ -1,0 +1,588 @@
+URGENT Harmony Finance Follow-Up — Payment Approval Fails on Obligation Resolution
+
+We now have the exact production server error from Railway logs.
+
+Parent payment submission itself is working and is now reasonably fast.
+
+Admin can:
+
+receive the pending payment
+view the uploaded proof
+see the proposed allocations
+
+But Admin approval fails with:
+
+POST /api/payment-proofs/6/approve
+→ 500 Internal Server Error
+
+Railway production logs show the actual exception:
+
+Approve proof error:
+Error: A selected payment obligation is not an outstanding ledger obligation
+
+at resolvePaymentProposals
+    /app/routes/paymentProofs.js:152
+
+at applyPaymentToInvoices
+    /app/routes/paymentProofs.js:178
+
+at approval route
+    /app/routes/paymentProofs.js:611
+
+Therefore, do not make another speculative frontend fix.
+
+The failure is specifically in the backend obligation-resolution logic.
+
+Do not deploy automatically.
+Do not run migrations automatically.
+Do not modify production payment/proof ID 6 while diagnosing.
+Do not hardcode HAR049 or proof ID 6.
+
+1. Diagnose the exact obligation-resolution failure
+
+Inspect:
+
+routes/paymentProofs.js
+resolvePaymentProposals()
+applyPaymentToInvoices()
+services/financeLedger.js
+
+The current code rejects one of the Parent-selected obligations because it cannot match it to an outstanding authoritative ledger obligation.
+
+Determine exactly which selected obligation is failing.
+
+The test payment is approximately:
+
+Total: R4,200
+
+Tuition       R2,350
+Transport       R650
+One-Off Fee   R1,200
+
+The Admin UI shows categories such as:
+
+transport
+one_off:4
+
+Determine whether the failure is caused by:
+
+Tuition not resolving to the correct outstanding invoice
+Transport not resolving to a persisted outstanding service line
+One-off fee one_off:4 not resolving to its learner assignment/invoice line
+UI obligation identifiers not matching ledger identifiers
+selected obligation already considered paid/non-outstanding
+service charge line not existing in the authoritative ledger
+old invoice/service data pre-dating the new finance model
+one-off assignment existing but its authoritative invoice line missing
+category mismatch
+learner mismatch
+amount mismatch
+
+Return the exact obligation that fails and why.
+
+2. Do not treat frontend labels as ledger identities
+
+The frontend may send identifiers such as:
+
+tuition
+transport
+one_off:4
+
+These are UI-level selectors.
+
+The backend must resolve them into authoritative persisted obligations.
+
+For example:
+
+one_off:4
+
+must resolve to:
+
+one_off_fee ID 4
+↓
+learner assignment
+↓
+persisted invoice / invoice line item
+↓
+outstanding balance
+↓
+allocation_category = one_off
+
+Do not insert arbitrary one_off:4 strings into ledger allocations.
+
+Similarly:
+
+transport
+
+must resolve to the learner's legitimate outstanding Transport obligation.
+
+3. Outstanding obligation matching must be category-aware
+
+The approval resolver must distinguish:
+
+tuition
+transport
+boarding
+aftercare
+one-off fee
+
+Do not simply find "an outstanding invoice" and assume it satisfies every category.
+
+Example:
+
+Invoice contains:
+Tuition line
+Transport line
+
+Parent selected:
+
+Transport R650
+
+The resolver must identify the outstanding Transport charge line, not only the invoice container.
+
+If the current finance architecture tracks outstanding amounts at invoice level while category metadata lives at line-item level, resolve the payment using both:
+
+invoice
++
+authoritative invoice line/category
+
+while preserving the existing ledger model.
+
+4. Tuition allocation
+
+If Parent selected Tuition and no explicit invoice was selected:
+
+preserve Harmony's:
+
+oldest unpaid tuition first
+
+behaviour.
+
+Example:
+
+June tuition outstanding
+September tuition outstanding
+
+Parent pays one tuition amount
+→ propose June first
+
+The tuition resolver must only consume the tuition portion of the payment.
+
+It must NOT consume:
+
+Transport money
+Boarding money
+One-off fee money
+5. Transport allocation
+
+For:
+
+Transport R650
+
+resolve the learner's persisted Transport obligation.
+
+Verify:
+
+learner has Transport enabled
+relevant invoice contains a Transport charge line
+the line has an outstanding amount
+the line belongs to the intended period
+allocation_category = transport
+
+If Transport exists only as a current enrollment flag but no authoritative charge line was ever generated, do NOT fabricate a historical charge.
+
+In that case:
+
+fail safely
+explain the missing obligation clearly to Admin
+identify whether a current-period service invoice needs to be generated through the normal billing workflow
+6. One-off fee allocation
+
+For:
+
+one_off:4
+R1,200
+
+resolve:
+
+fee ID 4
+→ learner assignment
+→ invoice line
+→ amount due
+→ current paid amount
+→ remaining outstanding
+
+Confirm that:
+
+the fee is assigned to this learner
+the one-off obligation is still payable
+the obligation has not already been fully approved
+the correct ledger line exists
+
+If the one-off assignment exists but its ledger snapshot/invoice line does not, return a clear reconciliation condition rather than crashing with 500.
+
+Example safe Admin response:
+
+This one-off fee requires reconciliation before it can be allocated.
+
+Do not silently create historical finance records.
+
+7. Fix resolvePaymentProposals() generically
+
+Refactor the resolver so each proposed allocation:
+
+identifies its category
+resolves the authoritative learner obligation
+verifies outstanding amount
+verifies learner ownership
+verifies requested allocation <= payable amount unless partial/credit rules allow otherwise
+returns a normalized allocation object
+
+Example normalized internal representation:
+
+{
+  category: 'transport',
+  invoiceId: ...,
+  invoiceLineItemId: ...,
+  obligationId: ...,
+  amount: 650
+}
+
+For one-off:
+
+{
+  category: 'one_off',
+  oneOffFeeId: 4,
+  invoiceId: ...,
+  invoiceLineItemId: ...,
+  amount: 1200
+}
+
+Use the existing schema and architecture where possible.
+
+Do not invent a parallel finance model.
+
+8. Allow mixed payments to approve atomically
+
+The following must succeed when all obligations legitimately exist:
+
+Tuition       R2,350
+Transport       R650
+One-Off Fee   R1,200
+--------------------
+Total         R4,200
+
+Approval must:
+
+BEGIN
+
+resolve tuition obligation
+resolve transport obligation
+resolve one-off obligation
+
+validate total allocations = R4,200
+
+create immutable allocation transactions
+
+update authoritative invoice/obligation balances
+
+mark pending payment approved
+
+write audit event
+
+COMMIT
+
+Then:
+
+send Parent notifications/email after commit
+
+If any obligation fails:
+
+ROLLBACK
+
+No partial approval is allowed.
+
+9. Admin manual allocation fallback
+
+The Admin already has:
+
+Save allocation adjustment
+
+Keep this.
+
+Admin must be able to manually retarget:
+
+tuition invoice
+recurring service
+one-off obligation
+allocation amount
+
+Require a reason.
+
+But the manually selected target must still resolve to a valid authoritative obligation before approval.
+
+Manual override must not mean:
+
+bypass finance validation
+
+It means:
+
+Admin chooses a different legitimate target
+10. Return validation errors as 4xx, not 500
+
+The current condition:
+
+A selected payment obligation is not an outstanding ledger obligation
+
+is a business/validation condition.
+
+It should not become a generic internal server error.
+
+Return something like:
+
+409 Conflict
+
+or:
+
+422 Unprocessable Entity
+
+with a safe message:
+
+{
+  "success": false,
+  "message": "One of the selected payment items is no longer available for allocation. Please review the payment allocation before approving."
+}
+
+The server logs may contain the detailed internal reason.
+
+Do not expose database internals to the browser.
+
+11. Proof file support must include images
+
+Payment proof is NOT PDF-only.
+
+Parents may upload:
+
+PDF
+JPG
+JPEG
+PNG
+WebP
+
+Examples:
+
+banking PDF
+screenshot of EFT confirmation
+phone screenshot
+photograph of ATM/deposit slip
+scanned receipt
+
+Use trusted server-side MIME/type validation.
+
+Do not rely only on filename extensions.
+
+12. Proof preview behaviour
+
+For PDFs:
+
+secure inline preview
+Open
+Download
+
+For images:
+
+secure responsive image preview
+Open full size
+Download
+
+Do NOT attempt to render an image inside the PDF iframe.
+
+Detect trusted content type and choose the correct renderer.
+
+Image preview must:
+
+preserve aspect ratio
+fit modal
+work on mobile
+work on desktop
+remain clear enough for Admin verification
+13. Proof access control
+
+Parent may only access proofs belonging to their linked learner/account.
+
+Admin may view authorised proofs.
+
+Unrelated Parent:
+
+403
+
+Do not make S3/storage files public.
+
+14. Preserve current submission performance
+
+Parent submission is now much faster.
+
+Do not undo that.
+
+Preserve:
+
+critical DB receipt/payment save
+→ commit
+→ respond to browser
+→ optional S3 mirroring / Gmail / push after response
+
+Do not move Gmail, push or S3 mirroring back into the blocking request path.
+
+15. Approval retry/idempotency
+
+Admin may click Approve more than once if the request appears slow.
+
+Protect against:
+
+duplicate payment transactions
+duplicate allocations
+duplicate one-off payments
+duplicate notifications
+
+Use row locking and status checks.
+
+If already approved:
+
+return the approved state safely.
+
+Do not allocate twice.
+
+16. Regression test the exact failing case
+
+Create a safe test fixture matching:
+
+Tuition       R2,350
+Transport       R650
+One-Off Fee   R1,200
+Total         R4,200
+
+Verify:
+
+pending payment exists
+selected obligations persist
+proof is accessible
+tuition resolves
+transport resolves
+one-off resolves
+Admin sees normalized allocations
+approval succeeds
+total allocated = R4,200
+unallocated = R0
+payment status becomes Approved
+tuition updates
+transport updates
+one-off reconciliation updates
+one-off becomes Paid
+Parent no longer sees the paid one-off under available fees
+Parent still sees payment history
+audit record exists
+notifications happen after commit
+17. Additional obligation tests
+
+Test:
+
+tuition only
+transport only
+boarding only
+one-off only
+tuition + transport
+tuition + one-off
+tuition + transport + one-off
+partial payment
+overpayment
+manually adjusted allocation
+obligation already paid
+obligation missing authoritative line
+legacy one-off requiring reconciliation
+18. Additional proof tests
+
+Test:
+
+PDF
+JPG
+JPEG
+PNG
+WebP
+incorrect MIME / extension mismatch
+unsupported executable
+oversized upload
+Parent owns proof
+unrelated Parent denied
+Admin allowed
+mobile preview
+desktop preview
+19. Migration status
+
+Inspect whether:
+
+finance_multi_allocation.sql
+
+has already been applied in the target environment.
+
+Verify:
+
+pending_payments.selected_obligations
+payment_transactions.allocation_category
+one-off assignment unique index
+payment transaction immutability trigger
+
+Do NOT run any migration.
+
+If schema is missing, report it clearly.
+
+20. Ignore unrelated deployment warnings
+
+Railway logs also show:
+
+AWS SDK warning:
+Node 20 will eventually need to be upgraded to Node 22 for future AWS SDK releases.
+
+This is NOT the current payment approval failure.
+
+Do not mix that warning into this finance fix.
+
+Also, a previous log shows:
+
+TokenExpiredError: jwt expired
+
+That was a separate expired authentication session.
+
+Do not treat it as the root cause of the payment approval 500.
+
+The confirmed root cause to investigate is:
+
+A selected payment obligation is not an outstanding ledger obligation
+
+in:
+
+resolvePaymentProposals()
+Final report required
+
+Return:
+
+Which exact selected obligation failed
+Why it was not recognized as an outstanding ledger obligation
+Exact fix to resolvePaymentProposals()
+How Tuition now resolves
+How Transport now resolves
+How One-Off fees now resolve
+How mixed-payment approval works
+How Admin manual override works
+HTTP status/error behaviour for stale/invalid obligations
+PDF/image proof support
+Proof access-control behaviour
+Approval idempotency behaviour
+Whether the finance-multi-allocation migration is present
+Files changed
+Tests added
+Test results
+Exact production verification steps
+
+Do not deploy automatically.
+
+Do not run migrations automatically.

@@ -17,9 +17,35 @@ const requireAdmin = [authenticate, authorize('admin', 'super_admin')];
 // ─── Multer setup (memory for S3 or durable database storage) ────────────────
 const storage = multer.memoryStorage();
 const MAX_RECEIPT_SIZE = 10 * 1024 * 1024;
+const detectReceiptType = (buffer) => {
+  const standard = detectType(buffer);
+  if (standard) return standard;
+  if (!Buffer.isBuffer(buffer) || buffer.length < 20) return null;
+  const declaredSize = buffer.readUInt32LE(4) + 8;
+  const chunk = buffer.subarray(12, 16).toString('ascii');
+  const chunkSize = buffer.readUInt32LE(16);
+  const chunkFits = 20 + chunkSize <= buffer.length;
+  const validPayload = (
+    (chunk === 'VP8X' && chunkSize >= 10 && buffer.length >= 30)
+    || (chunk === 'VP8L' && chunkSize >= 5 && buffer.length >= 25 && buffer[20] === 0x2f)
+    || (chunk === 'VP8 ' && chunkSize >= 10 && buffer.length >= 30
+      && buffer.subarray(23, 26).equals(Buffer.from([0x9d, 0x01, 0x2a])))
+  );
+  if (
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+    && buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+    && declaredSize === buffer.length
+    && chunkFits
+    && validPayload
+  ) return { mime: 'image/webp', extension: '.webp' };
+  return null;
+};
 const isAllowedReceiptName = (file) => {
   const extension = path.extname(file.originalname).toLowerCase();
-  const mimeByExtension = { '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png' };
+  const mimeByExtension = {
+    '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.png': 'image/png', '.webp': 'image/webp',
+  };
   return mimeByExtension[extension] === file.mimetype;
 };
 const upload = multer({
@@ -37,9 +63,9 @@ const validateReceiptFile = (file) => {
   if (!file || !Buffer.isBuffer(file.buffer) || file.buffer.length < 1 || file.buffer.length > MAX_RECEIPT_SIZE) {
     return { ok: false, message: 'Receipt must be no larger than 10MB' };
   }
-  const detected = detectType(file.buffer);
+  const detected = detectReceiptType(file.buffer);
   if (!detected || detected.mime !== file.mimetype) {
-    return { ok: false, message: 'Receipt must be a valid PDF, JPEG, or PNG matching its MIME type' };
+    return { ok: false, message: 'Receipt must be a valid PDF, JPEG, PNG, or WebP matching its MIME type' };
   }
   return { ok: true, detected };
 };
@@ -52,7 +78,7 @@ const uploadReceipt = (req, res, next) => {
       const isSizeError = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE';
       const message = isSizeError
         ? 'Receipt must be no larger than 10MB'
-        : 'Receipt must be a PDF, JPEG, or PNG no larger than 10MB';
+        : 'Receipt must be a PDF, JPEG, PNG, or WebP no larger than 10MB';
       return res.status(400).json({ message });
     }
     if (req.file) {
@@ -96,7 +122,7 @@ const parseSelectedObligations = (value) => {
       throw { status: 400, message: 'Each selected obligation must be an object' };
     }
     const result = {};
-    ['invoice_id', 'fee_id', 'service_key', 'category', 'amount'].forEach((key) => {
+    ['invoice_id', 'invoice_line_item_id', 'fee_id', 'service_key', 'category', 'amount'].forEach((key) => {
       if (item[key] != null) result[key] = item[key];
     });
     if (!result.invoice_id && !result.fee_id && !result.service_key) {
@@ -126,21 +152,41 @@ const resolveChild = async (parentId, childId) => {
 const resolvePaymentProposals = async (executor, studentId, obligations) => {
   if (!Array.isArray(obligations) || obligations.length === 0) return null;
   const proposals = [];
-  for (const obligation of obligations) {
+  for (let index = 0; index < obligations.length; index += 1) {
+    const obligation = obligations[index];
+    const rawCategory = String(obligation.category || obligation.service_key || '').trim();
+    const oneOffCategoryMatch = rawCategory.match(/^one_off:(\d+)$/);
+    const feeId = obligation.fee_id != null
+      ? Number(obligation.fee_id)
+      : oneOffCategoryMatch ? Number(oneOffCategoryMatch[1]) : null;
+    const category = feeId != null || rawCategory === 'one_off'
+      ? 'one_off'
+      : String(obligation.service_key || rawCategory).trim();
     const params = [studentId];
-    const clauses = ['i.student_id = $1', "i.status IN ('Unpaid', 'Partial')", 'i.amount_paid < i.amount_due'];
+    const clauses = ['i.student_id = $1', 'i.amount_paid < i.amount_due'];
     if (obligation.invoice_id != null) {
       params.push(Number(obligation.invoice_id));
       clauses.push(`i.id = $${params.length}`);
-    } else if (obligation.fee_id != null) {
-      params.push(String(obligation.fee_id));
+    }
+    if (obligation.invoice_line_item_id != null) {
+      params.push(Number(obligation.invoice_line_item_id));
+      clauses.push(`li.id = $${params.length}`);
+    }
+    if (feeId != null) {
+      params.push(String(feeId));
       clauses.push(`li.metadata->>'fee_id' = $${params.length}`);
-    } else if (obligation.service_key) {
-      params.push(String(obligation.service_key));
+      params.push(Number(feeId));
+      clauses.push(`EXISTS (
+        SELECT 1 FROM student_fee_assignments fa
+        WHERE fa.student_id=i.student_id AND fa.fee_id=$${params.length}
+      )`);
+    } else if (category) {
+      params.push(category);
       clauses.push(`li.service_key = $${params.length}`);
     }
     const result = await executor.query(`
-      SELECT i.id, li.service_key, li.metadata
+      SELECT i.id, i.due_date, li.id AS invoice_line_item_id,
+             li.service_key, li.amount AS line_amount, li.metadata
       FROM invoices i
       JOIN invoice_line_items li ON li.invoice_id = i.id
       WHERE ${clauses.join(' AND ')}
@@ -149,20 +195,45 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
       LIMIT 1
     `, params);
     if (!result.rows.length) {
-      throw new Error('A selected payment obligation is not an outstanding ledger obligation');
+      let reason = `selector ${index + 1} (${rawCategory || `fee:${feeId}` || 'unknown'}) has no outstanding persisted invoice line`;
+      let status = 422;
+      let safeMessage = 'One of the selected payment items is no longer available for allocation. Please review the payment allocation before approving.';
+      if (feeId != null) {
+        const assignment = await executor.query(`
+          SELECT fa.id
+          FROM student_fee_assignments fa
+          WHERE fa.student_id=$1 AND fa.fee_id=$2
+          LIMIT 1
+        `, [studentId, feeId]);
+        if (assignment.rows.length) {
+          status = 409;
+          reason = `one-off fee ${feeId} is assigned to the learner but has no outstanding authoritative invoice line`;
+          safeMessage = 'This one-off fee requires reconciliation before it can be allocated.';
+        }
+      }
+      const error = new Error(reason);
+      error.status = status;
+      error.safeMessage = safeMessage;
+      error.obligationIndex = index;
+      error.obligationCategory = category || null;
+      throw error;
     }
     const line = result.rows[0];
     const metadata = line.metadata || {};
-    const category = metadata.category === 'one_off' || metadata.fee_id != null
-      ? `one_off:${metadata.fee_id}` : line.service_key || 'other';
-    if (obligation.category && obligation.category !== category &&
-        obligation.category !== line.service_key) {
-      throw new Error('Selected payment obligation category does not match the ledger');
+    const ledgerCategory = metadata.category === 'one_off' || metadata.fee_id != null
+      ? 'one_off' : line.service_key || 'other';
+    if (category && category !== ledgerCategory) {
+      const error = new Error(`selector ${index + 1} category ${category} does not match ledger category ${ledgerCategory}`);
+      error.status = 422;
+      error.safeMessage = 'One of the selected payment items does not match its invoice. Please review the allocation before approving.';
+      throw error;
     }
     proposals.push({
-      invoiceId: Number(result.rows[0].id),
+      invoiceId: Number(line.id),
+      invoiceLineItemId: Number(line.invoice_line_item_id),
+      obligationId: feeId,
       amount: obligation.amount == null ? null : Number(obligation.amount),
-      category,
+      category: ledgerCategory,
     });
   }
   return proposals;
@@ -211,9 +282,9 @@ router.post('/', requireParent, uploadReceipt, async (req, res) => {
     let receiptFileName = null, receiptFilePath = null, receiptS3Key = null, receiptS3Url = null, receiptMime = null, receiptData = null;
 
     if (req.file) {
-      const detected = detectType(req.file.buffer);
+      const detected = detectReceiptType(req.file.buffer);
       if (!detected || detected.mime !== req.file.mimetype) {
-        return res.status(400).json({ message: 'Receipt must be a valid PDF, JPEG, or PNG matching its MIME type' });
+        return res.status(400).json({ message: 'Receipt must be a valid PDF, JPEG, PNG, or WebP matching its MIME type' });
       }
       receiptFileName = req.file.originalname;
       receiptMime = detected.mime;
@@ -230,6 +301,7 @@ router.post('/', requireParent, uploadReceipt, async (req, res) => {
     let supportsSelectedObligations = true;
     try {
       await client.query('SELECT selected_obligations FROM pending_payments LIMIT 0');
+      await client.query('SELECT allocation_category FROM payment_transactions LIMIT 0');
     } catch (schemaError) {
       if (schemaError.code !== '42P01' && schemaError.code !== '42703') throw schemaError;
       supportsSelectedObligations = false;
@@ -436,12 +508,12 @@ router.get('/:id/receipt', authenticate, async (req, res) => {
     }
 
     const mime = proof.receipt_mime_type;
-    if (!['application/pdf', 'image/jpeg', 'image/png'].includes(mime)) {
+    if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(mime)) {
       return res.status(404).json({ message: 'Receipt file not found' });
     }
     const fileName = String(proof.receipt_file_name || 'receipt').replace(/[\r\n"]/g, '_');
     const sendValidated = (content) => {
-      const detected = detectType(content);
+      const detected = detectReceiptType(content);
       if (!detected || detected.mime !== mime) return false;
       res.setHeader('Content-Type', detected.mime);
       res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
@@ -524,14 +596,23 @@ router.get('/:id/allocation-options', requireAdmin, async (req, res) => {
     if (!proof) return res.status(404).json({ message: 'Submission not found' });
     const ledger = await getStudentLedger(proof.student_id);
     const options = (ledger?.invoices || []).flatMap((invoice) =>
-      (invoice.category_balances || []).filter((item) => Number(item.amount) > 0).map((item) => ({
-        invoice_id: invoice.id,
-        category: item.category,
-        amount: item.amount,
-        due_date: invoice.due_date,
-        reference_number: invoice.reference_number,
-        label: `${item.category} — ${String(invoice.due_date || '').slice(0, 10)} — R ${Number(item.amount).toFixed(2)}`,
-      })));
+      (invoice.category_balances || []).filter((item) => Number(item.amount) > 0).map((item) => {
+        const line = (invoice.line_items || []).find((candidate) => (
+          item.category === 'one_off'
+            ? candidate.metadata?.category === 'one_off' || candidate.metadata?.fee_id != null
+            : candidate.line_type === 'charge' && candidate.service_key === item.category
+        ));
+        return {
+          invoice_id: invoice.id,
+          invoice_line_item_id: line?.id || null,
+          fee_id: item.category === 'one_off' ? Number(line?.metadata?.fee_id) || null : null,
+          category: item.category,
+          amount: item.amount,
+          due_date: invoice.due_date,
+          reference_number: invoice.reference_number,
+          label: `${line?.label || item.category} — ${String(invoice.due_date || '').slice(0, 10)} — R ${Number(item.amount).toFixed(2)}`,
+        };
+      }));
     res.json({ options });
   } catch (error) {
     console.error('Payment allocation options error:', error);
@@ -581,7 +662,9 @@ router.put('/:id/allocations', requireAdmin, async (req, res) => {
   } catch (error) {
     if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Adjust proof allocation error:', error);
-    res.status(error.status || 500).json({ message: error.message || 'Could not adjust allocation' });
+    res.status(error.status || 500).json({
+      message: error.safeMessage || (error.status ? error.message : 'Could not adjust allocation'),
+    });
   } finally {
     if (client) client.release();
   }
@@ -652,8 +735,15 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     if (client) {
       try { await client.query('ROLLBACK'); } catch (rollbackError) { console.error('Approval rollback failed:', rollbackError.message); }
     }
-    console.error('Approve proof error:', err);
-    if (err.status) return res.status(err.status).json({ message: err.message });
+    console.error('Approve proof error:', {
+      message: err.message,
+      obligationIndex: err.obligationIndex,
+      obligationCategory: err.obligationCategory,
+    });
+    if (err.status) return res.status(err.status).json({
+      success: false,
+      message: err.safeMessage || err.message,
+    });
     res.status(500).json({ message: 'Server error approving payment' });
   } finally {
     if (client) client.release();
@@ -709,5 +799,7 @@ router.post('/:id/reject', requireAdmin, async (req, res) => {
 
 module.exports = router;
 module.exports.validateReceiptFile = validateReceiptFile;
+module.exports.resolvePaymentProposals = resolvePaymentProposals;
+module.exports.detectReceiptType = detectReceiptType;
 module.exports.MAX_RECEIPT_SIZE = MAX_RECEIPT_SIZE;
 module.exports.isAllowedReceiptName = isAllowedReceiptName;

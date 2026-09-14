@@ -59,7 +59,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
         throw new Error(data.message || 'Could not load receipt');
       }
       const blob = await res.blob();
-      if (!['application/pdf', 'image/jpeg', 'image/png'].includes(blob.type)) {
+      if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(blob.type)) {
         throw new Error('Unsupported receipt format');
       }
       const url = URL.createObjectURL(blob);
@@ -194,13 +194,14 @@ export default function ParentPaymentProof({ child, embedded = false }) {
       fd.append('notes', notes);
       fd.append('obligations', JSON.stringify([
         ...selectedServices.map((service) => ({
+          invoice_id: service.invoice_id,
           service_key: service.service_key,
           category: service.service_key,
           amount: Number(service.amount),
         })),
         ...selectedFees.map((fee) => ({
           fee_id: fee.id,
-          category: `one_off:${fee.id}`,
+          category: 'one_off',
           amount: Number(fee.remaining_amount ?? fee.amount),
         })),
       ]));
@@ -425,7 +426,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
             <input
               ref={fileRef}
               type="file"
-              accept="application/pdf,image/jpeg,image/png"
+              accept="application/pdf,image/jpeg,image/png,image/webp"
               onChange={e => setFile(e.target.files[0] || null)}
               className="hidden"
             />

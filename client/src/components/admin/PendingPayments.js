@@ -54,7 +54,7 @@ export default function PendingPayments() {
         throw new Error(data.message || 'Could not load receipt');
       }
       const blob = await res.blob();
-      if (!['application/pdf', 'image/jpeg', 'image/png'].includes(blob.type)) {
+      if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(blob.type)) {
         throw new Error('Unsupported receipt format');
       }
       const url = URL.createObjectURL(blob);
@@ -356,7 +356,13 @@ export default function PendingPayments() {
                           const option = allocationOptions.find((candidate) =>
                             `${candidate.invoice_id}:${candidate.category}` === event.target.value);
                           if (option) setAllocationDraft((current) => current.map((row, rowIndex) =>
-                            rowIndex === index ? { invoice_id: option.invoice_id, category: option.category, amount: option.amount } : row));
+                            rowIndex === index ? {
+                              invoice_id: option.invoice_id,
+                              invoice_line_item_id: option.invoice_line_item_id,
+                              fee_id: option.fee_id || undefined,
+                              category: option.category,
+                              amount: option.amount,
+                            } : row));
                         }}
                         className="min-w-0 flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
                       >
@@ -383,7 +389,11 @@ export default function PendingPayments() {
                       const used = new Set(allocationDraft.map((item) => `${item.invoice_id}:${item.category}`));
                       const option = allocationOptions.find((candidate) => !used.has(`${candidate.invoice_id}:${candidate.category}`));
                       if (option) setAllocationDraft((current) => [...current, {
-                        invoice_id: option.invoice_id, category: option.category, amount: option.amount,
+                        invoice_id: option.invoice_id,
+                        invoice_line_item_id: option.invoice_line_item_id,
+                        fee_id: option.fee_id || undefined,
+                        category: option.category,
+                        amount: option.amount,
                       }]);
                     }} className="text-xs font-semibold text-teal-700">+ Add another obligation</button>
                   )}

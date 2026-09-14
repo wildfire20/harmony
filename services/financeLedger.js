@@ -140,7 +140,7 @@ function invoiceAllocationCategories(rawLines = []) {
   lines.filter((line) => line.line_type === 'charge' && !line.included && line.amount > 0)
     .forEach((line) => {
       const category = line.metadata?.category === 'one_off' || line.metadata?.fee_id != null
-        ? `one_off:${line.metadata.fee_id}`
+        ? 'one_off'
         : line.service_key || 'other';
       categories.add(category);
     });
@@ -153,7 +153,7 @@ function invoiceCategoryBalances(rawLines = [], amountDue = 0, transactions = []
   lines.filter((line) => line.line_type === 'charge' && !line.included && line.amount > 0)
     .forEach((line) => {
       const category = line.metadata?.category === 'one_off' || line.metadata?.fee_id != null
-        ? `one_off:${line.metadata.fee_id}` : line.service_key || 'other';
+        ? 'one_off' : line.service_key || 'other';
       balances.set(category, money((balances.get(category) || 0) + line.amount));
     });
   const discounts = lines.filter((line) => line.line_type === 'discount' && line.amount > 0);
@@ -677,6 +677,12 @@ async function allocatePayment(executor, {
   allocationProposals = null,
   proposedAllocations = null,
 }) {
+  const allocationError = (message, safeMessage, status = 422) => {
+    const error = new Error(message);
+    error.status = status;
+    error.safeMessage = safeMessage || 'One or more selected payment items must be reviewed before approval.';
+    return error;
+  };
   const total = money(amount);
   if (!Number.isFinite(total) || total <= 0) throw new Error('Payment amount must be positive');
   const studentResult = await executor.query(
@@ -699,14 +705,23 @@ async function allocatePayment(executor, {
     })).filter((proposal) => Number.isSafeInteger(proposal.invoiceId) && proposal.invoiceId > 0)
     : null;
   if (proposals && proposals.length === 0) {
-    throw new Error('At least one valid allocation proposal is required');
+    throw allocationError('At least one valid allocation proposal is required');
+  }
+  if (proposals && proposals.every((proposal) => proposal.amount != null)) {
+    const proposedTotal = money(proposals.reduce((sum, proposal) => sum + proposal.amount, 0));
+    if (proposedTotal > total) {
+      throw allocationError(
+        `Selected allocation total ${proposedTotal} exceeds payment amount ${total}`,
+        'The selected allocation total exceeds the payment amount. Adjust the allocation before approving.',
+      );
+    }
   }
   // The correction route uses 0 as its explicit "no exact invoice" marker
   // for a formerly-unallocated event. Treat it as normal oldest-unpaid
   // allocation rather than accidentally forcing an invoice-id=0 query.
   const targetInvoiceId = invoiceId == null || Number(invoiceId) === 0 ? null : Number(invoiceId);
   if (targetInvoiceId != null && proposals && !proposals.some((proposal) => proposal.invoiceId === targetInvoiceId)) {
-    throw new Error('Selected invoice is not included in the allocation proposal');
+    throw allocationError('Selected invoice is not included in the allocation proposal');
   }
   const requestedInvoiceIds = proposals
     ? [...new Set(proposals.map((proposal) => proposal.invoiceId))]
@@ -716,7 +731,7 @@ async function allocatePayment(executor, {
            GREATEST(amount_due - amount_paid, 0) AS outstanding_balance,
            due_date
     FROM invoices
-    WHERE student_id = $1 AND status IN ('Unpaid', 'Partial')
+    WHERE student_id = $1 AND amount_paid < amount_due
       AND ($2::integer IS NULL OR id = $2)
       AND ($3::integer[] IS NULL OR id = ANY($3::integer[]))
     ORDER BY due_date ASC, id ASC
@@ -726,7 +741,11 @@ async function allocatePayment(executor, {
   const invoiceRowsById = new Map(invoiceResult.rows.map((invoice) => [Number(invoice.id), invoice]));
   if (proposals) {
     const missing = proposals.find((proposal) => !invoiceRowsById.has(proposal.invoiceId));
-    if (missing) throw new Error('One or more selected obligations is not outstanding for this learner');
+    if (missing) throw allocationError(
+      `Invoice ${missing.invoiceId} is no longer outstanding for this learner`,
+      'One of the selected payment items is no longer outstanding. Please review the allocation before approving.',
+      409,
+    );
   }
 
   let categoryByInvoice = new Map();
@@ -748,7 +767,7 @@ async function allocatePayment(executor, {
       const categories = invoiceAllocationCategories(linesByInvoice.get(proposal.invoiceId) || []);
       categoryByInvoice.set(proposal.invoiceId, categories);
       if (proposal.category && !categories.includes(proposal.category)) {
-        throw new Error(`Allocation category does not match invoice ${proposal.invoiceId}`);
+        throw allocationError(`Allocation category does not match invoice ${proposal.invoiceId}`);
       }
     });
   }
@@ -770,7 +789,11 @@ async function allocatePayment(executor, {
       const hasCategorised = invoiceTransactions.some((tx) =>
         tx.allocation_category && !tx.is_reversed && Number(tx.amount) > 0);
       if (Number(invoice.amount_paid) > 0 && categories.length > 1 && !hasCategorised) {
-        throw new Error('This legacy partially-paid multi-service invoice requires Admin allocation review');
+        throw allocationError(
+          'This legacy partially-paid multi-service invoice requires Admin allocation review',
+          'This legacy invoice requires category reconciliation before this payment can be approved.',
+          409,
+        );
       }
       const values = invoiceCategoryBalances(
         invoiceLines,
@@ -795,13 +818,27 @@ async function allocatePayment(executor, {
     const categoryCap = proposal?.category
       ? nonNegative(categoryRemaining.get(`${invoice.id}:${proposal.category}`) || 0)
       : invoiceRemaining;
+    if (proposal && proposal.amount != null && proposalCap > categoryCap) {
+      throw allocationError(
+        `Requested ${proposal.category || 'invoice'} allocation exceeds its outstanding balance`,
+        'One of the selected payment items is no longer available for the requested amount. Please review the allocation before approving.',
+      );
+    }
     const toApply = money(Math.min(
       remaining,
       invoiceRemaining,
       proposalCap,
       categoryCap,
     ));
-    if (toApply <= 0) continue;
+    if (toApply <= 0) {
+      if (proposal) {
+        throw allocationError(
+          `Selected ${proposal.category || 'invoice'} obligation has no outstanding balance`,
+          'One of the selected payment items is no longer outstanding. Please review the allocation before approving.',
+        );
+      }
+      continue;
+    }
     const newPaid = currentPaid + toApply;
     const due = money(invoice.amount_due);
     const status = newPaid > due ? 'Overpaid' : due === 0 ? 'Paid' : newPaid >= due ? 'Paid' : 'Partial';
