@@ -11,6 +11,15 @@ const EnhancedCSVParser = require('../utils/enhancedCSVParser');
 const FNBPDFParser = require('../utils/fnbPDFParser');
 
 const router = express.Router();
+
+const normalizeManualPaymentMethod = (value) => {
+  const method = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (['manual_entry', 'manual', 'manual_payment'].includes(method)) return 'manual_entry';
+  if (['cash'].includes(method)) return 'cash';
+  if (['bank_transfer', 'bank', 'eft', 'electronic_transfer'].includes(method)) return 'bank_transfer';
+  if (['card', 'credit_card', 'debit_card'].includes(method)) return 'card';
+  return 'other';
+};
 const { logAudit, getIp } = require('../utils/auditLogger');
 const { allocatePayment, getStudentLedger, reversePayment } = require('../services/financeLedger');
 
@@ -1442,7 +1451,7 @@ router.put('/manual-payment/:paymentId', [
   body('amount').optional().isFloat({ min: 0.01 }),
   body('payment_date').optional().isISO8601(),
   body('description').optional().isString(),
-  body('payment_method').optional().isIn(['manual_entry', 'cash', 'bank_transfer', 'card', 'other']),
+  body('payment_method').optional().isString().isLength({ min: 1, max: 100 }),
   body('reason').isString().trim().isLength({ min: 3, max: 500 }).withMessage('A correction reason is required')
 ], async (req, res) => {
   try {
@@ -1491,7 +1500,7 @@ router.put('/manual-payment/:paymentId', [
         studentId: original.student_id,
         amount: newAmount,
         paymentDate: newDate,
-        paymentMethod: payment_method || original.payment_method || 'manual_entry',
+        paymentMethod: normalizeManualPaymentMethod(payment_method || original.payment_method),
         reference: reference || original.reference || original.reference_number,
         description: `Correction replacement for payment ${paymentId}: ${description || original.description || reason}`,
         recordedBy: req.user.id,
@@ -1534,7 +1543,7 @@ router.put('/manual-payment/:paymentId', [
           old_reference: original.reference || original.reference_number,
           new_reference: reference || original.reference || original.reference_number,
           previous_method: original.payment_method,
-          new_method: payment_method || original.payment_method,
+          new_method: normalizeManualPaymentMethod(payment_method || original.payment_method),
           reason,
         },
         ipAddress: getIp(req),

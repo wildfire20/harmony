@@ -230,6 +230,28 @@ test('reversal keeps the original payment channel for legacy schema compatibilit
   assert.doesNotMatch(ledgerSource, /\$\{payment\.payment_method \|\| 'manual_entry'\}_reversal/);
 });
 
+test('manual corrections normalize legacy payment methods before replacement', () => {
+  const routes = source('routes/enhanced-invoices.js');
+  const correction = routes.split("router.put('/manual-payment/:paymentId'")[1];
+  assert.match(routes, /normalizeManualPaymentMethod/);
+  assert.match(routes, /\['bank_transfer', 'bank', 'eft', 'electronic_transfer'\]/);
+  assert.match(correction, /paymentMethod: normalizeManualPaymentMethod\(payment_method \|\| original\.payment_method\)/);
+  assert.doesNotMatch(correction, /body\('payment_method'\)\.optional\(\)\.isIn/);
+});
+
+test('mobile learner edit keeps enrollment and discount controls visible', () => {
+  const component = source('client/src/components/admin/StudentManagement.js');
+  const styles = source('client/src/index.css');
+  for (const field of ['is_boarder', 'uses_transport', 'uses_aftercare', 'has_sibling_discount', 'has_teacher_discount']) {
+    assert.match(component, new RegExp(`field: '${field}'`));
+  }
+  assert.match(component, /student-enrollment-control/);
+  assert.match(component, /discount-assignment-row/);
+  assert.match(styles, /\.student-enrollment-checkbox[\s\S]*appearance: auto !important/);
+  assert.match(styles, /@media \(max-width: 639px\)[\s\S]*grid-template-columns: minmax\(0, 1fr\)/);
+  assert.doesNotMatch(styles, /\.student-enrollment-controls[\s\S]{0,300}overflow-x/);
+});
+
 test('reversal fails closed when the invoice balance cannot support the compensation', async () => {
   const executor = correctionExecutor({ invoicePaid: 100, originalAmount: 500 });
   await assert.rejects(

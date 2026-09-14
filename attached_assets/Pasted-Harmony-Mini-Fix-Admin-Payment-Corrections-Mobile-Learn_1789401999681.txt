@@ -1,0 +1,262 @@
+Harmony Mini Fix — Admin Payment Corrections + Mobile Learner Edit Controls
+
+We have two production issues in the Harmony Learning Institute Admin Portal.
+
+Please investigate and fix both issues carefully.
+
+Do not change unrelated modules.
+Do not deploy automatically.
+Do not run any migrations automatically.
+Do not delete or recreate learner records.
+Do not change learner IDs or student numbers.
+Do not bypass the authoritative finance ledger or directly overwrite balances.
+
+ISSUE 1 — Admin cannot manually change/correct payments for learner 075
+
+The school Admin has reported that for the learner whose student number/account corresponds to 075, she is unable to manually correct/change the learner's payments through the Admin finance interface.
+
+This is important because if this learner is affected by an edge case, other learners with similar data may also be affected.
+
+First: investigate the root cause
+
+Do not hardcode a fix specifically for learner 075.
+
+Reproduce the issue using the learner/account associated with 075 and trace the complete Admin payment-correction flow:
+
+frontend payment/correction UI
+API request
+backend validation
+invoice lookup
+payment lookup
+allocation logic
+reversal/replacement logic
+ledger recalculation
+transaction handling
+response sent back to frontend
+
+Compare this learner's finance data against a learner for whom manual payment corrections work normally.
+
+Specifically check for edge cases such as:
+
+legacy invoices/payments
+missing/null values
+old payment records without newer metadata
+partially paid invoices
+fully paid invoices
+multiple payments against one invoice
+manually created payments
+unallocated payments
+reversed payments
+service charges
+discounts
+invoices generated before the newer finance model
+invoice/payment identifiers not matching what the UI expects
+frontend buttons becoming disabled incorrectly
+API validation rejecting valid older records
+
+Find the actual reason learner 075 cannot be corrected.
+
+Required behaviour
+
+Admin must be able to safely:
+
+add a manual payment to the correct invoice
+correct an incorrect manual payment
+reverse an incorrect payment
+replace/re-enter the correct payment where appropriate
+reallocate an unallocated payment where supported
+
+Existing finance rules must remain intact.
+
+Do NOT implement direct editing of historical payment amounts.
+
+Corrections must continue using the existing immutable reversal/replacement architecture.
+
+The authoritative invoice ledger must remain the source of truth:
+
+gross charges
+discount lines
+net due
+allocated payments
+outstanding
+credit/review
+
+Any correction must update Admin and Parent views from that authoritative ledger.
+
+Existing audit records and Parent notifications must remain intact.
+
+Generic fix
+
+Whatever fixes learner 075 must fix the underlying issue for all learners with the same data condition.
+
+Do not add:
+
+if (studentNumber === "075")
+
+or any equivalent learner-specific workaround.
+
+ISSUE 2 — Student Services / Discount controls are unusable on mobile
+
+In:
+
+Admin Portal → Users → Students → Edit Student
+
+the desktop interface currently shows controls such as:
+
+Services & Enrollment Flags
+
+[ ] Boarding
+[x] Transport
+[ ] Aftercare
+[ ] Legacy sibling indicator
+[ ] Legacy staff-child indicator
+
+Approved discount assignments
+
+This works on desktop.
+
+However, the Admin is currently working from her phone and reports that the checkboxes/tick controls are not visible or usable on mobile.
+
+This prevents Admin from changing a learner's applicable services/flags while away from a desktop computer.
+
+Fix the mobile interface
+
+Audit the Student edit form at:
+
+320px
+360px
+390px
+412px
+tablet
+desktop
+
+The Admin must be able to see and interact with every applicable service/discount control on a phone.
+
+On mobile, restructure the section if necessary.
+
+A preferred layout would be something similar to:
+
+Services & Enrollment
+
+Boarding        [ ]
+Transport       [✓]
+Aftercare       [ ]
+
+Legacy indicators
+
+Sibling         [ ]
+Staff child     [ ]
+
+or clean mobile toggle/checkbox rows.
+
+The exact visual implementation can follow the existing Admin design system.
+
+Requirements:
+
+checkbox/toggle must always be visible
+label must be readable
+entire row may be tappable if appropriate
+minimum comfortable touch target
+no horizontal overflow
+no controls clipped outside the card
+no requirement to rotate the phone
+no desktop functionality removed
+
+Do not change the meaning of the fields.
+
+Important finance distinction
+
+Preserve the existing distinction between:
+
+Enrollment/service flags
+
+and
+
+actual financial discount assignments.
+
+The legacy sibling/staff-child indicators are display/enrollment indicators and must not automatically create discounts.
+
+Approved financial discounts must still use the existing explicit discount-assignment system.
+
+Do not reintroduce automatic discount generation from legacy flags.
+
+If the Approved Discount Assignments section contains actions that are also inaccessible on mobile, make those controls properly responsive as part of this fix.
+
+UI behaviour
+
+Keep the current Harmony Admin visual identity.
+
+Do not redesign the entire Users page.
+
+Preserve:
+
+existing colours
+tabs
+table
+search
+grade/class filters
+learner edit workflow
+desktop layout
+
+Only improve the responsive behaviour necessary to make editing usable from mobile.
+
+Tests
+
+Add/update regression tests covering:
+
+Finance
+learner 075's underlying finance case
+normal manual payment
+partial payment
+fully paid invoice
+reversal
+replacement/correction
+legacy-compatible payment where relevant
+invoice totals remain correct after correction
+Parent Portal sees the corrected authoritative result
+audit trail remains intact
+Mobile learner edit
+
+Test that:
+
+Boarding control is visible and usable
+Transport control is visible and usable
+Aftercare control is visible and usable
+legacy indicators remain visible
+approved discount controls remain usable where applicable
+saving persists the correct selections
+mobile layout has no horizontal overflow
+desktop layout does not regress
+Production safety
+
+Do not alter production records while investigating.
+
+Do not use learner 075's real payment data as disposable test data.
+
+Use existing test fixtures or create safe test fixtures reproducing the same data shape.
+
+If a database/schema change genuinely turns out to be necessary:
+
+explain exactly why,
+provide the proposed migration,
+make it idempotent,
+do not run it.
+
+I will run production migrations separately if required.
+
+Final report
+
+When finished, return:
+
+Root cause of the learner 075 payment problem
+Whether other learners could have been affected
+Exact finance fix implemented
+Mobile checkbox/control root cause
+Mobile responsive fix implemented
+Files changed
+Whether a migration is required
+Tests added/updated
+Test results
+Any production verification steps I should perform
+
+Do not deploy automatically.

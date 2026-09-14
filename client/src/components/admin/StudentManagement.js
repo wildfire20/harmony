@@ -690,7 +690,7 @@ const StudentManagement = () => {
                             <div>
                               <p className="text-sm font-semibold text-gray-700 mb-2">Services &amp; Enrollment Flags</p>
                               <p className="text-xs text-gray-500 mb-2">These flags describe enrollment only. Legacy discount indicators below do not create new financial discounts.</p>
-                              <div className="flex flex-wrap gap-4">
+                              <div className="student-enrollment-controls">
                                 {[
                                   { field: 'is_boarder', label: 'Boarding' },
                                   { field: 'uses_transport', label: 'Transport' },
@@ -698,13 +698,13 @@ const StudentManagement = () => {
                                   { field: 'has_sibling_discount', label: 'Legacy sibling indicator (display only)' },
                                   { field: 'has_teacher_discount', label: "Legacy staff-child indicator (display only)" },
                                 ].map(({ field, label }) => (
-                                  <label key={field} className="flex items-center gap-2 cursor-pointer select-none">
+                                  <label key={field} className="student-enrollment-control">
                                     <input
                                       type="checkbox"
                                       {...register(field)}
-                                      className="w-4 h-4 accent-blue-600"
+                                      className="student-enrollment-checkbox"
                                     />
-                                    <span className="text-sm text-gray-700">{label}</span>
+                                    <span>{label}</span>
                                   </label>
                                 ))}
                               </div>
@@ -720,7 +720,7 @@ const StudentManagement = () => {
                                     <p className="text-xs text-gray-500">No explicit assignments.</p>
                                   )}
                                   {discountAssignments.map((assignment) => (
-                                    <div key={assignment.id} className="flex items-center justify-between bg-white rounded px-2 py-1.5 text-xs">
+                                    <div key={assignment.id} className="discount-assignment-row bg-white rounded px-2 py-1.5 text-xs">
                                       <span>
                                         <strong>{assignment.discount_type}</strong>{' '}
                                         {assignment.calculation_method === 'fixed'
