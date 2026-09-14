@@ -156,6 +156,66 @@
   overflow-wrap: anywhere;
 }
 
+.parent-fee-choice {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  gap: .75rem;
+  padding: .625rem;
+  border: 1px solid transparent;
+  border-radius: .65rem;
+  cursor: pointer;
+}
+.parent-fee-choice:hover,
+.parent-fee-choice.is-selected { background: #e8f1ef; border-color: #9fc5c3; }
+.parent-fee-choice-input {
+  position: absolute;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  opacity: 0;
+}
+.parent-fee-choice-box {
+  display: grid;
+  width: 1.4rem;
+  height: 1.4rem;
+  flex: 0 0 1.4rem;
+  place-items: center;
+  border: 2px solid var(--parent-navy);
+  border-radius: .35rem;
+  background: #fff;
+  color: #fff;
+}
+.parent-fee-choice-box svg { width: 1rem; height: 1rem; stroke-width: 3; }
+.parent-fee-choice.is-selected .parent-fee-choice-box {
+  border-color: var(--parent-teal);
+  background: var(--parent-teal);
+}
+.parent-fee-choice-input:focus-visible + .parent-fee-choice-box {
+  outline: 3px solid rgba(201,104,88,.38);
+  outline-offset: 2px;
+}
+.parent-fee-choice-description { overflow-wrap: anywhere; white-space: normal; }
+.parent-nav-icon { position: relative; }
+.parent-section-badge {
+  position: absolute;
+  right: -.55rem;
+  top: -.5rem;
+  display: grid;
+  min-width: 1.05rem;
+  min-height: 1.05rem;
+  place-items: center;
+  border-radius: 999px;
+  padding: 0 .2rem;
+  background: var(--parent-coral);
+  color: #fff;
+  font-size: .625rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .parent-login {
   --parent-navy: #17324d;
   --parent-teal: #2c7475;

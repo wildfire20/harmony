@@ -1,0 +1,438 @@
+Harmony Mini Phase — Mobile Fee Selection + Section Notification Badges + One-Off Fee Alerts
+
+We have two Parent Portal issues to fix.
+
+Do not redesign unrelated pages.
+Do not change the authoritative finance ledger.
+Do not deploy automatically.
+Do not run migrations automatically.
+
+Use the existing Parent notification architecture where possible. Do not create a second unrelated notification system.
+
+ISSUE 1 — Fee/service selection checkboxes are not visible on mobile
+
+In the Parent Portal:
+
+Fees
+→ Submit Proof of Payment / Submit Payment
+
+the parent can choose:
+
+payment method
+Monthly Tuition
+Boarding Fee
+Transport Fee
+applicable one-off fees
+
+On desktop, the service-selection checkboxes are visible.
+
+On mobile, the checkbox/tick controls blend into the light background and are effectively invisible.
+
+The screenshot shows that the service cards/text are visible, but the parent cannot clearly see where to tap to select the service.
+
+Fix
+
+Make the unchecked and checked states clearly visible on mobile.
+
+Preferred visual treatment:
+
+Unchecked:
+dark navy/charcoal border
+white interior
+
+Checked:
+Harmony teal/navy filled or accented state
+clear white tick
+
+Do not use a very light grey border that disappears against the Parent Portal background.
+
+The control should remain consistent with the approved Parent Portal palette:
+
+Harmony navy
+white/light neutral
+restrained teal
+
+Avoid purple/blue AI-style redesigns.
+
+Mobile usability
+
+At:
+
+320px
+360px
+390px
+412px
+
+ensure:
+
+the checkbox is always visible
+minimum comfortable touch target of approximately 44px
+the entire fee/service row may be tappable
+label and price remain readable
+selected state is obvious
+no horizontal overflow
+long one-off-fee descriptions wrap cleanly
+
+Keep desktop behaviour unchanged unless a small consistency improvement is needed.
+
+Test:
+
+Monthly Tuition
+Boarding Fee
+Transport Fee
+One-Off Fees
+
+all individually and in combinations.
+
+ISSUE 2 — One-Off Fees do not notify Parents
+
+Admin can currently create a One-Off Fee from:
+
+Admin → Payments → One-Off Fees
+
+Example:
+
+Fee: gold reef
+Amount: R1,000
+Assigned to: Grade 2
+Due date: 17 September 2026
+
+The fee correctly appears inside the affected Parent's Fees page.
+
+However:
+
+Parent receives no notification
+no unread indicator appears on Fees
+no email is sent
+
+This must be fixed.
+
+3. Target ONLY affected Parents
+
+When a one-off fee is created/assigned, determine which learners actually received the fee.
+
+Notify only Parents linked to those learners.
+
+Example:
+
+One-Off Fee assigned to Grade 2
+
+should notify Parents with linked Grade 2 learners.
+
+Do NOT send the notification to every Parent in the school.
+
+For multi-learner families:
+
+one Parent with two affected children should not receive unnecessary duplicate generic emails
+the portal notification may identify the relevant learner where useful
+preserve learner isolation/security
+
+Never expose one learner's fee to an unrelated Parent.
+
+4. Create durable Parent notification
+
+Use the existing Parent notification/event infrastructure.
+
+When the one-off fee transaction has successfully committed, create a notification similar to:
+
+New fee available
+
+A new one-off school fee has been added.
+Open Fees to view the details.
+
+Deep link:
+
+/parent/fees
+
+If the existing notification architecture supports metadata, safely associate:
+
+notification type
+fee ID
+learner ID where appropriate
+target section = fees
+
+Do not include private financial history in the notification.
+
+5. Add section-specific unread badges
+
+The Parent Portal bottom navigation currently includes:
+
+Home
+Calendar
+Attendance
+Notices
+Documents
+Fees
+
+I want the relevant navigation icon to display a small unread badge when something new has been added to that section.
+
+Examples:
+
+New calendar event
+→ Calendar icon shows 1
+
+New notice
+→ Notices icon shows 1
+
+New document
+→ Documents icon shows 1
+
+New one-off fee
+→ Fees icon shows 1
+
+If there are several unread items:
+
+Fees [3]
+
+or an equivalent compact badge.
+
+Use a small high-contrast badge that matches the Parent Portal design.
+
+Suggested:
+
+small red/coral badge
+white number
+positioned at upper-right of icon
+
+Do not make the navigation visually noisy.
+
+6. Badge behaviour
+
+Use the existing persisted notification/read-state system.
+
+The badge must survive:
+
+browser refresh
+logout/login
+switching devices where supported by the current notification architecture
+
+It must not be a temporary React-only counter.
+
+When the Parent opens the relevant section, mark only the appropriate notification(s) for that section as read according to the existing notification model.
+
+Example:
+
+Calendar unread = 2
+Fees unread = 1
+
+Parent opens Fees
+
+Fees unread → 0
+Calendar unread remains 2
+
+Do not clear every Parent notification just because one section was opened.
+
+If existing notification semantics require the user to view an item rather than merely opening a page, preserve whichever approach is safest and document it.
+
+7. Extend this cleanly to existing Parent events
+
+Audit existing Parent notification types and map appropriate ones to sections.
+
+Suggested mapping:
+
+CALENDAR event/update
+→ Calendar
+
+ATTENDANCE update
+→ Attendance
+
+NOTICE / announcement
+→ Notices
+
+DOCUMENT published
+→ Documents
+
+PAYMENT / ONE_OFF_FEE / finance update
+→ Fees
+
+Do not generate new notifications for historical records.
+
+Existing old data must not suddenly produce hundreds of unread badges.
+
+Only future events after this feature is active should behave this way unless an unread notification already legitimately exists.
+
+8. One-Off Fee email
+
+Once a one-off fee has been successfully created and committed, send an email to each affected Parent who has a verified email address.
+
+Use the existing Harmony Gmail service.
+
+Suggested email:
+
+Subject:
+New Fee Added — Harmony Learning Institute
+
+Dear Parent/Guardian,
+
+A new one-off school fee has been added to the Harmony Learning Institute Parent Portal for one of your linked learners.
+
+Please log in to your Parent Portal and open the Fees section to view the fee details, amount and due date.
+
+Parent Portal:
+[existing safe Parent Portal link]
+
+If you have any questions regarding the fee, please contact Harmony Learning Institute.
+
+Kind regards,
+Harmony Learning Institute
+powered by AutoM8
+
+Do not include sensitive account balances or other learner financial history in email.
+
+9. Email must occur AFTER database commit
+
+The sequence must be:
+
+Create fee
+↓
+assign learners
+↓
+create durable Parent notification(s)
+↓
+COMMIT
+↓
+send Parent email(s)
+
+A Gmail failure must NOT roll back an otherwise valid fee assignment.
+
+If sending fails:
+
+log a safe server-side error
+retain the portal notification
+do not expose credentials or Parent details in logs
+
+Prevent duplicate emails if the create request is retried.
+
+Add appropriate idempotency/deduplication using the fee/event ID and Parent relationship.
+
+10. Do NOT email for every finance change
+
+Do not interpret this request as:
+
+Email Parents every time anything changes in finance.
+
+For this phase, email is specifically required when a new one-off fee is published/assigned.
+
+Existing Parent notifications for approved/reversed payments should retain their current behaviour.
+
+11. One-Off Fee Parent presentation
+
+The Parent Portal currently shows one-off fees under:
+
+Optional Fees to Include
+
+Keep this functionality.
+
+Confirm that:
+
+only applicable one-off fees appear
+fee name is visible
+description is visible
+amount is visible
+due date is visible where appropriate
+selection checkbox is clearly visible on mobile
+
+If the fee is mandatory rather than optional, do NOT change its semantics automatically. Preserve the current business rule unless the existing one-off-fee model already stores mandatory/optional status.
+
+12. Tests
+
+Add/update tests covering:
+
+Mobile Fee UI
+unchecked checkbox visible
+checked checkbox clearly visible
+service row tappable
+monthly tuition
+boarding
+transport
+one-off fee
+multiple simultaneous selections
+320 / 360 / 390 / 412 widths
+no horizontal overflow
+One-Off Fee Notifications
+
+Test:
+
+Admin creates fee for Grade 2
+↓
+affected learners receive fee
+↓
+only linked Grade 2 Parents get notification
+↓
+unrelated Parents get nothing
+↓
+Fees badge increments
+↓
+Parent opens Fees
+↓
+relevant unread state clears
+
+Also test:
+
+one Parent with multiple learners
+two Parents linked to same learner
+Parent with no email
+unverified email
+Gmail send failure
+duplicate request/retry
+fee assigned to one learner
+fee assigned to grade/class
+school-wide applicable fee if currently supported
+Section Badges
+
+Verify independent counts for:
+
+Calendar
+Attendance
+Notices
+Documents
+Fees
+
+Opening one section must not clear badges belonging to another section.
+
+13. Security / compatibility
+
+Preserve:
+
+Parent/learner relationship verification
+current notification deep-link allowlist
+multi-learner isolation
+finance ledger authority
+existing one-off fee assignments
+existing payment workflow
+current Parent session handling
+
+Do not expose internal Staff/Admin notifications to Parents.
+
+Do not modify historical finance records.
+
+14. Migration
+
+First inspect the existing notification tables/schema.
+
+Since Parent notifications and read state already exist, prefer extending the existing system without a migration if possible.
+
+If a schema change genuinely is necessary:
+
+explain why,
+provide an idempotent migration,
+do not run it.
+Final report
+
+Return:
+
+Cause of invisible mobile fee checkboxes
+UI fix implemented
+Existing Parent notification architecture reused
+How section-specific unread counts work
+One-off fee notification targeting logic
+One-off fee Gmail logic
+Duplicate-prevention/idempotency behaviour
+Files changed
+Whether migration is required
+Tests added
+Test results
+Production verification steps
+
+Do not deploy automatically.
+Do not run migrations automatically.

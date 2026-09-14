@@ -17,13 +17,17 @@ import './ParentPortal.css';
 
 const NAV = [
   { path: '/parent/dashboard',      label: 'Home',        icon: Home },
-  { path: '/parent/calendar',       label: 'Calendar',    icon: CalendarDays },
-  { path: '/parent/attendance',     label: 'Attendance',  icon: CalendarDays },
-  { path: '/parent/announcements',  label: 'Notices',     icon: Bell },
-  { path: '/parent/documents',      label: 'Documents',   icon: FolderOpen },
-  { path: '/parent/invoices',       label: 'Fees',        icon: CreditCard },
+  { path: '/parent/calendar',       label: 'Calendar',    icon: CalendarDays, section: 'calendar' },
+  { path: '/parent/attendance',     label: 'Attendance',  icon: CalendarDays, section: 'attendance' },
+  { path: '/parent/announcements',  label: 'Notices',     icon: Bell, section: 'announcements' },
+  { path: '/parent/documents',      label: 'Documents',   icon: FolderOpen, section: 'documents' },
+  { path: '/parent/invoices',       label: 'Fees',        icon: CreditCard, section: 'fees' },
   { path: '/parent/account',        label: 'Account',      icon: Settings2 },
 ];
+const SECTION_BY_PATH = Object.fromEntries(NAV.filter(item => item.section).map(item => [item.path, item.section]));
+const SectionBadge = ({ count }) => count > 0 ? (
+  <span aria-label={`${count} unread`} className="parent-section-badge">{count > 99 ? '99+' : count}</span>
+) : null;
 const MOBILE_NAV_PATHS = new Set([
   '/parent/dashboard',
   '/parent/calendar',
@@ -293,6 +297,7 @@ const ParentPortal = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileChildOpen, setMobileChildOpen] = useState(false);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [sectionUnreadCounts, setSectionUnreadCounts] = useState({});
   const [notifDismissed, setNotifDismissed] = useState(
     () => localStorage.getItem('notifBannerDismissed') === '1'
   );
@@ -344,13 +349,26 @@ const ParentPortal = () => {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    const refreshUnreadCount = () => parentApi('/notifications/unread-count', { skipChildId: true })
-      .then((data) => setUnreadNotificationCount(Number(data?.count ?? data?.unread_count ?? data ?? 0)))
+    const refreshUnreadCount = () => parentApi('/notifications/unread-counts', { skipChildId: true })
+      .then((data) => {
+        setUnreadNotificationCount(Number(data?.total || 0));
+        setSectionUnreadCounts(data?.counts || {});
+      })
       .catch(() => {});
     refreshUnreadCount();
     window.addEventListener('parent-notifications-updated', refreshUnreadCount);
     return () => window.removeEventListener('parent-notifications-updated', refreshUnreadCount);
   }, [isAuthenticated, location.pathname]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const section = SECTION_BY_PATH[location.pathname];
+    if (!section || !Number(sectionUnreadCounts[section] || 0)) return;
+    parentApi(`/notifications/sections/${section}/read`, {
+      method: 'PUT',
+      skipChildId: true,
+    }).then(() => window.dispatchEvent(new Event('parent-notifications-updated'))).catch(() => {});
+  }, [isAuthenticated, location.pathname, sectionUnreadCounts]);
 
   if (bootstrapping || !isAuthenticated) return null;
 
@@ -461,7 +479,7 @@ const ParentPortal = () => {
                 </div>
               )}
 
-              {MOBILE_MENU_NAV.map(({ path, label, icon: Icon }) => (
+              {MOBILE_MENU_NAV.map(({ path, label, icon: Icon, section }) => (
                 <button
                   key={path}
                   onClick={() => { navigate(path); setMobileMenuOpen(false); }}
@@ -469,7 +487,7 @@ const ParentPortal = () => {
                      isActive(path) ? 'parent-menu-active' : 'parent-menu-item'
                   }`}
                 >
-                  <Icon className="h-4 w-4" />
+                  <span className="parent-nav-icon"><Icon className="h-4 w-4" /><SectionBadge count={Number(sectionUnreadCounts[section] || 0)} /></span>
                   {label}
                   <ChevronRight className="h-3.5 w-3.5 ml-auto" />
                 </button>
@@ -508,7 +526,7 @@ const ParentPortal = () => {
         <div className="flex w-full max-w-6xl flex-1 mx-auto">
           {/* Sidebar (desktop) */}
           <aside className="hidden w-56 shrink-0 flex-col gap-1 border-r border-[#dce7eb] px-4 pb-8 pt-7 sm:flex">
-            {NAV.map(({ path, label, icon: Icon }) => (
+            {NAV.map(({ path, label, icon: Icon, section }) => (
               <button
                 key={path}
                 onClick={() => navigate(path)}
@@ -518,7 +536,7 @@ const ParentPortal = () => {
                     : 'text-[#617487] hover:bg-[#e8f1ef]'
                 }`}
               >
-                <Icon className="h-4 w-4 shrink-0" />
+                <span className="parent-nav-icon shrink-0"><Icon className="h-4 w-4" /><SectionBadge count={Number(sectionUnreadCounts[section] || 0)} /></span>
                 {label}
               </button>
             ))}
@@ -554,7 +572,7 @@ const ParentPortal = () => {
 
         {/* Bottom nav (mobile) */}
         <nav className="parent-mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 flex border-t border-[#dce7eb] bg-[#fbfcfa]/95 shadow-[0_-8px_25px_rgba(31,65,83,.12)] backdrop-blur sm:hidden">
-           {NAV.filter(({ path }) => MOBILE_NAV_PATHS.has(path)).map(({ path, label, icon: Icon }) => (
+           {NAV.filter(({ path }) => MOBILE_NAV_PATHS.has(path)).map(({ path, label, icon: Icon, section }) => (
             <button
               key={path}
               onClick={() => navigate(path)}
@@ -562,7 +580,7 @@ const ParentPortal = () => {
                   isActive(path) ? 'text-[#176b73]' : 'text-[#84929e]'
               }`}
             >
-              <Icon className={`h-5 w-5 ${isActive(path) ? 'text-[#176b73]' : 'text-[#84929e]'}`} />
+              <span className="parent-nav-icon"><Icon className={`h-5 w-5 ${isActive(path) ? 'text-[#176b73]' : 'text-[#84929e]'}`} /><SectionBadge count={Number(sectionUnreadCounts[section] || 0)} /></span>
               {label}
             </button>
           ))}

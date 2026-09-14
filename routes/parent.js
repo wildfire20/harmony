@@ -347,17 +347,21 @@ router.get('/notifications', requireParent, async (req, res) => {
     const result = await db.query(`
       SELECT n.id, n.event_type, n.title, n.summary, n.deep_link,
              CASE
+                WHEN n.event_type LIKE 'calendar_%' THEN 'calendar'
                WHEN n.event_type LIKE 'attendance_%' THEN 'attendance'
                WHEN n.event_type LIKE 'academic_%' THEN 'grades'
-               WHEN n.event_type LIKE 'payment_%' OR n.event_type LIKE 'invoice_%' THEN 'payments'
+                WHEN n.event_type LIKE 'payment_%' OR n.event_type LIKE 'invoice_%'
+                  OR n.event_type LIKE 'one_off_fee_%' THEN 'payments'
                WHEN n.event_type LIKE 'document_%' THEN 'documents'
                WHEN n.event_type LIKE 'announcement_%' THEN 'announcements'
                ELSE 'notifications'
              END AS category,
              CASE
+                WHEN n.event_type LIKE 'calendar_%' THEN 'calendar'
                WHEN n.event_type LIKE 'attendance_%' THEN 'attendance'
                WHEN n.event_type LIKE 'academic_%' THEN 'grades'
-               WHEN n.event_type LIKE 'payment_%' OR n.event_type LIKE 'invoice_%' THEN 'payments'
+                WHEN n.event_type LIKE 'payment_%' OR n.event_type LIKE 'invoice_%'
+                  OR n.event_type LIKE 'one_off_fee_%' THEN 'payments'
                WHEN n.event_type LIKE 'document_%' THEN 'documents'
                WHEN n.event_type LIKE 'announcement_%' THEN 'announcements'
                ELSE 'notifications'
@@ -404,6 +408,71 @@ router.get('/notifications/unread-count', requireParent, async (req, res) => {
     res.json({ count: result.rows[0]?.count || 0 });
   } catch (error) {
     console.error('Parent notification count error:', error.message);
+    res.status(503).json({ message: 'Parent notifications are not yet available.' });
+  }
+});
+
+router.get('/notifications/unread-counts', requireParent, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT CASE
+        WHEN n.event_type LIKE 'calendar_%' THEN 'calendar'
+        WHEN n.event_type LIKE 'attendance_%' THEN 'attendance'
+        WHEN n.event_type LIKE 'announcement_%' THEN 'announcements'
+        WHEN n.event_type LIKE 'document_%' THEN 'documents'
+        WHEN n.event_type LIKE 'payment_%' OR n.event_type LIKE 'invoice_%'
+          OR n.event_type LIKE 'one_off_fee_%' THEN 'fees'
+        ELSE 'notifications'
+      END AS section, COUNT(*)::int AS count
+      FROM parent_notifications n
+      LEFT JOIN parent_notification_reads r
+        ON r.notification_id=n.id AND r.parent_id=n.parent_id
+      WHERE n.parent_id=$1 AND r.read_at IS NULL
+        AND (n.learner_id IS NULL OR EXISTS (
+          SELECT 1 FROM parent_students ps
+          WHERE ps.parent_id=$1 AND ps.student_id=n.learner_id
+        ))
+      GROUP BY section
+    `, [req.user.id]);
+    const counts = { calendar: 0, attendance: 0, announcements: 0, documents: 0, fees: 0 };
+    let total = 0;
+    result.rows.forEach((row) => {
+      total += Number(row.count || 0);
+      if (Object.prototype.hasOwnProperty.call(counts, row.section)) counts[row.section] = Number(row.count || 0);
+    });
+    res.json({ counts, total });
+  } catch (error) {
+    console.error('Parent section notification counts error:', error.message);
+    res.status(503).json({ message: 'Parent notifications are not yet available.' });
+  }
+});
+
+router.put('/notifications/sections/:section/read', requireParent, async (req, res) => {
+  const conditions = {
+    calendar: `n.event_type LIKE 'calendar_%'`,
+    attendance: `n.event_type LIKE 'attendance_%'`,
+    announcements: `n.event_type LIKE 'announcement_%'`,
+    documents: `n.event_type LIKE 'document_%'`,
+    fees: `(n.event_type LIKE 'payment_%' OR n.event_type LIKE 'invoice_%' OR n.event_type LIKE 'one_off_fee_%')`,
+  };
+  const condition = conditions[req.params.section];
+  if (!condition) return res.status(400).json({ message: 'Invalid notification section' });
+  try {
+    const result = await db.query(`
+      INSERT INTO parent_notification_reads (notification_id,parent_id,read_at)
+      SELECT n.id,n.parent_id,CURRENT_TIMESTAMP FROM parent_notifications n
+      WHERE n.parent_id=$1 AND ${condition}
+        AND (n.learner_id IS NULL OR EXISTS (
+          SELECT 1 FROM parent_students ps
+          WHERE ps.parent_id=$1 AND ps.student_id=n.learner_id
+        ))
+      ON CONFLICT (notification_id,parent_id)
+      DO UPDATE SET read_at=COALESCE(parent_notification_reads.read_at,CURRENT_TIMESTAMP)
+      RETURNING notification_id
+    `, [req.user.id]);
+    res.json({ success: true, marked: result.rowCount || 0 });
+  } catch (error) {
+    console.error('Mark Parent notification section read error:', error.message);
     res.status(503).json({ message: 'Parent notifications are not yet available.' });
   }
 });

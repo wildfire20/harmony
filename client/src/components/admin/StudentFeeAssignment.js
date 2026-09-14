@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { PlusCircle, Trash2, AlertCircle, CheckCircle, Users, Tag } from 'lucide-react';
 
 const API_BASE = '/api';
@@ -11,6 +11,7 @@ const R = (n) => `R ${Number(n || 0).toFixed(2)}`;
 const fmt = (d) => d ? new Date(d).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : 'No due date';
 
 export default function StudentFeeAssignment() {
+  const createRequestKey = useRef(null);
   const [fees, setFees] = useState([]);
   const [grades, setGrades] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -51,14 +52,19 @@ export default function StudentFeeAssignment() {
     setSubmitting(true);
     setFeedback(null);
     try {
+      if (!createRequestKey.current) {
+        createRequestKey.current = globalThis.crypto?.randomUUID?.().replace(/-/g, '') ||
+          `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      }
       const res = await fetch(`${API_BASE}/student-fees`, {
         method: 'POST',
-        headers: authHeaders(),
+        headers: { ...authHeaders(), 'Idempotency-Key': createRequestKey.current },
         body: JSON.stringify({ name: name.trim(), description: description.trim() || null, amount: parseFloat(amount), grade_id: gradeId || null, due_date: dueDate || null }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message);
       setFeedback({ type: 'success', message: data.message });
+      createRequestKey.current = null;
       setName(''); setDescription(''); setAmount(''); setGradeId(''); setDueDate('');
       setShowForm(false);
       loadFees();

@@ -4,6 +4,7 @@ const db = require('../config/database');
 const { authenticate, authorize, authorizeResourceAccess } = require('../middleware/auth');
 
 const router = express.Router();
+const { notifyCalendarEvent } = require('../services/parentNotificationService');
 const hasParentVisibilitySchema = async () => {
   const result = await db.query(`
     SELECT column_name FROM information_schema.columns
@@ -238,10 +239,12 @@ router.post('/events', [
       RETURNING id, title, description, start_date, end_date, event_type, target_audience, grade_id, false AS parent_visible, created_at
     `, [title, description, start_date, end_date || null, event_type, target_audience, processedGradeId, user.id]);
 
+    const event = result.rows[0];
+    await notifyCalendarEvent(event);
     res.status(201).json({
       success: true,
       message: 'School event created successfully',
-      event: result.rows[0]
+      event
     });
 
   } catch (error) {
@@ -304,6 +307,7 @@ router.put('/events/:id', [
       });
     }
 
+    await notifyCalendarEvent(result.rows[0]);
     res.json({
       success: true,
       message: 'School event updated successfully',

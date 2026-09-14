@@ -29,6 +29,8 @@ const EVENT = Object.freeze({
   PAYMENT_ADJUSTED: 'payment_adjusted',
   PAYMENT_REVERSED: 'payment_reversed',
   INVOICE: 'invoice_created',
+  ONE_OFF_FEE: 'one_off_fee_created',
+  CALENDAR: 'calendar_event_published',
   ANNOUNCEMENT: 'announcement_published',
   DOCUMENT: 'document_published',
 });
@@ -78,7 +80,7 @@ function portalUrl(destination) {
   }
 }
 
-async function parentRecipients({ learnerId, parentIds, gradeId, classId, audience = 'linked' }) {
+async function parentRecipients({ learnerId, learnerIds, parentIds, gradeId, classId, audience = 'linked', executor = db }) {
   const params = [];
   const predicates = [`p.role = 'parent'`, `p.is_active = true`];
   // An explicitly empty selection means nobody, not everybody.  This is
@@ -94,6 +96,12 @@ async function parentRecipients({ learnerId, parentIds, gradeId, classId, audien
     params.push(Number(learnerId));
     predicates.push(`ps.student_id = $${params.length}`);
   }
+  if (Array.isArray(learnerIds)) {
+    const safeLearnerIds = learnerIds.map(Number).filter(Number.isSafeInteger);
+    if (!safeLearnerIds.length) return [];
+    params.push(safeLearnerIds);
+    predicates.push(`s.id = ANY($${params.length}::int[])`);
+  }
   if (gradeId != null) {
     params.push(Number(gradeId));
     predicates.push(`s.grade_id = $${params.length}`);
@@ -105,8 +113,8 @@ async function parentRecipients({ learnerId, parentIds, gradeId, classId, audien
   // `audience=all` is reserved for callers that have already applied their
   // source-record eligibility checks. It still requires a current link.
   if (audience !== 'all') predicates.push('ps.student_id = s.id');
-  const result = await db.query(`
-    SELECT DISTINCT p.id AS parent_id, p.email, p.first_name AS parent_first_name,
+  const result = await executor.query(`
+    SELECT DISTINCT p.id AS parent_id, p.email, p.email_verified_at, p.first_name AS parent_first_name,
            s.id AS learner_id, s.first_name, s.last_name
     FROM users p
     JOIN parent_students ps ON ps.parent_id = p.id
@@ -171,6 +179,9 @@ async function createParentNotifications({
   important = false,
   email = important,
   recipients,
+  executor = db,
+  deliver = true,
+  required = false,
 }) {
   try {
     const safeDestination = destinationFor(destination);
@@ -179,12 +190,13 @@ async function createParentNotifications({
     const safeSummary = clean(summary, 500);
     const safeDedupe = clean(dedupeKey, 240);
     if (!safeEvent || !safeTitle || !safeSummary || !safeDedupe) return { created: 0 };
-    const rows = recipients || await parentRecipients({ learnerId, parentIds, gradeId, classId, audience });
+    const rows = recipients || await parentRecipients({ learnerId, parentIds, gradeId, classId, audience, executor });
     let created = 0;
+    const createdRecipients = [];
     for (const recipient of rows) {
       // A recipient row is always linked at insertion time.  This also makes
       // a stale queued event harmless if a parent/learner was unlinked.
-      const inserted = await db.query(`
+      const inserted = await executor.query(`
         INSERT INTO parent_notifications
           (event_type, parent_id, learner_id, title, summary, deep_link, dedupe_key, important)
         SELECT $1,$2,$3,$4,$5,$6,$7,$8
@@ -200,9 +212,10 @@ async function createParentNotifications({
       ]);
       if (inserted.rows.length) {
         created++;
+        createdRecipients.push(recipient);
         // Delivery is intentionally after the durable insert and can never
         // reject/rollback the source transaction.
-        await Promise.allSettled([
+        if (deliver) await Promise.allSettled([
           deliverOptional({
             parent: recipient, title: safeTitle, summary: safeSummary,
             destination: safeDestination, important: Boolean(important && email),
@@ -218,13 +231,77 @@ async function createParentNotifications({
         ]);
       }
     }
-    return { created };
+    return { created, createdRecipients };
   } catch (error) {
+    if (required) throw error;
     // Notification infrastructure is optional.  Source records have already
     // committed and must remain successful if this system is unavailable.
     console.warn('Parent notification creation skipped:', error.message);
     return { created: 0, skipped: true };
   }
+}
+
+async function createOneOffFeeNotifications({ fee, learnerIds, executor }) {
+  const rows = await parentRecipients({ learnerIds, audience: 'all', executor });
+  const recipients = rows.filter((row, index, all) =>
+    all.findIndex((other) => other.parent_id === row.parent_id) === index);
+  return createParentNotifications({
+    eventType: EVENT.ONE_OFF_FEE,
+    title: 'New fee available',
+    summary: 'A new one-off school fee has been added. Open Fees to view the details.',
+    destination: 'fees',
+    dedupeKey: `one-off-fee:${fee.id}`,
+    recipients,
+    executor,
+    deliver: false,
+    required: true,
+  });
+}
+
+async function deliverOneOffFeeNotifications({ recipients = [] }) {
+  const destination = destinationFor('fees');
+  const url = portalUrl(destination);
+  for (const recipient of recipients) {
+    const deliveries = [
+      deliverPush({
+        parentId: recipient.parent_id,
+        title: 'New fee available',
+        summary: 'A new one-off school fee has been added. Open Fees to view the details.',
+        destination,
+        eventType: EVENT.ONE_OFF_FEE,
+        learnerId: recipient.learner_id,
+      }),
+    ];
+    if (url && recipient.email && recipient.email_verified_at) {
+      deliveries.push(sendEmail(
+        recipient.email,
+        'New Fee Added — Harmony Learning Institute',
+        `<p>Dear ${escapeHtml(recipient.parent_first_name || 'Parent/Guardian')},</p>` +
+        '<p>A new one-off school fee has been added to the Harmony Learning Institute Parent Portal for one of your linked learners.</p>' +
+        '<p>Please log in to your Parent Portal and open the Fees section to view the fee details, amount and due date.</p>' +
+        `<p><a href="${escapeHtml(url)}">Open Parent Portal Fees</a></p>` +
+        '<p>If you have any questions regarding the fee, please contact Harmony Learning Institute.</p>' +
+        '<p>Kind regards,<br>Harmony Learning Institute</p>' +
+        '<p><a href="https://www.auto-m8.co.za/" style="color:#64748b;text-decoration:none">Powered by AutoM8</a></p>',
+        { fromName: 'Harmony Learning Institute — powered by AutoM8', replyTo: 'harmonylearninginstitute@gmail.com' },
+      ).catch((error) => console.warn('One-off fee email delivery failed:', error.message)));
+    }
+    await Promise.allSettled(deliveries);
+  }
+}
+
+async function notifyCalendarEvent(event) {
+  if (!event?.parent_visible) return { created: 0 };
+  return createParentNotifications({
+    eventType: EVENT.CALENDAR,
+    title: clean(event.title || 'New calendar event', 180),
+    summary: 'A new calendar event is available in the Parent Portal.',
+    destination: 'home',
+    dedupeKey: `calendar:${event.id}:${event.updated_at || event.created_at || 'published'}`,
+    gradeId: event.grade_id,
+    classId: event.class_id,
+    audience: 'all',
+  });
 }
 
 async function learner(learnerId) {
@@ -413,5 +490,8 @@ module.exports = {
   notifyInvoice,
   notifyAnnouncement,
   notifyDocument,
+  notifyCalendarEvent,
+  createOneOffFeeNotifications,
+  deliverOneOffFeeNotifications,
   safeRejectionReason,
 };

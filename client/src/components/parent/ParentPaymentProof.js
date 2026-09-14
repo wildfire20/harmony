@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Upload, CheckCircle, Clock, XCircle, AlertCircle,
-  ChevronLeft, Receipt, CreditCard, Banknote, Smartphone, Building2
+  ChevronLeft, Receipt, CreditCard, Banknote, Smartphone, Building2, Check
 } from 'lucide-react';
 import { parentApi } from './ParentPortal';
 
@@ -274,13 +274,14 @@ export default function ParentPaymentProof({ child, embedded = false }) {
                 {applicableServices.map(price => {
                   const checked = selectedServices.some(s => s.service_key === price.service_key);
                   return (
-                    <label key={price.service_key} className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50">
+                    <label key={price.service_key} className={`parent-fee-choice ${checked ? 'is-selected' : ''}`}>
                       <input
                         type="checkbox"
                         checked={checked}
                         onChange={() => toggleService(price)}
-                        className="w-4 h-4 accent-[#2c7475]"
+                        className="parent-fee-choice-input"
                       />
+                      <span className="parent-fee-choice-box" aria-hidden="true">{checked && <Check />}</span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-700">{price.label}</p>
                         {price.description && <p className="text-xs text-gray-400">{price.description}</p>}
@@ -305,16 +306,17 @@ export default function ParentPaymentProof({ child, embedded = false }) {
               <p className="text-xs text-gray-400">Check any fees you are paying with this payment</p>
               <div className="space-y-2">
                 {oneOffFees.map(fee => (
-                  <label key={fee.id} className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50">
+                  <label key={fee.id} className={`parent-fee-choice ${selectedFees.some(f => f.id === fee.id) ? 'is-selected' : ''}`}>
                     <input
                       type="checkbox"
                       checked={selectedFees.some(f => f.id === fee.id)}
                       onChange={() => toggleFee(fee)}
-                       className="w-4 h-4 accent-[#2c7475]"
+                       className="parent-fee-choice-input"
                     />
+                    <span className="parent-fee-choice-box" aria-hidden="true">{selectedFees.some(f => f.id === fee.id) && <Check />}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-700">{fee.name}</p>
-                      {fee.description && <p className="text-xs text-gray-400 truncate">{fee.description}</p>}
+                      {fee.description && <p className="parent-fee-choice-description text-xs text-gray-500">{fee.description}</p>}
                     </div>
                      <span className="text-sm font-semibold text-[#176b73] shrink-0">{R(fee.amount)}</span>
                   </label>
