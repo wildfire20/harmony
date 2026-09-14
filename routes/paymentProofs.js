@@ -7,7 +7,7 @@ const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const s3Service = require('../services/s3Service');
 const { logAudit, getIp } = require('../utils/auditLogger');
-const { allocatePayment } = require('../services/financeLedger');
+const { allocatePayment, getStudentLedger } = require('../services/financeLedger');
 const { detectType } = require('../services/admissionsDocumentService');
 const { notifyPayment } = require('../services/parentNotificationService');
 
@@ -80,6 +80,35 @@ const boundedText = (value, max, name) => {
   return value.trim() || null;
 };
 
+const parseSelectedObligations = (value) => {
+  if (value == null || value === '') return [];
+  let parsed;
+  try {
+    parsed = typeof value === 'string' ? JSON.parse(value) : value;
+  } catch (_) {
+    throw { status: 400, message: 'Selected payment obligations are invalid JSON' };
+  }
+  if (!Array.isArray(parsed) || parsed.length > 100) {
+    throw { status: 400, message: 'Selected payment obligations must be a list of no more than 100 items' };
+  }
+  return parsed.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw { status: 400, message: 'Each selected obligation must be an object' };
+    }
+    const result = {};
+    ['invoice_id', 'fee_id', 'service_key', 'category', 'amount'].forEach((key) => {
+      if (item[key] != null) result[key] = item[key];
+    });
+    if (!result.invoice_id && !result.fee_id && !result.service_key) {
+      throw { status: 400, message: 'Each selected obligation must identify an invoice, fee, or service' };
+    }
+    if (result.amount != null && (!Number.isFinite(Number(result.amount)) || Number(result.amount) <= 0)) {
+      throw { status: 400, message: 'Selected obligation amounts must be positive' };
+    }
+    return result;
+  });
+};
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const resolveChild = async (parentId, childId) => {
   const q = childId
@@ -94,7 +123,59 @@ const resolveChild = async (parentId, childId) => {
   return r.rows[0];
 };
 
-const applyPaymentToInvoices = async (executor, studentId, amount, proofId, adminId) => {
+const resolvePaymentProposals = async (executor, studentId, obligations) => {
+  if (!Array.isArray(obligations) || obligations.length === 0) return null;
+  const proposals = [];
+  for (const obligation of obligations) {
+    const params = [studentId];
+    const clauses = ['i.student_id = $1', "i.status IN ('Unpaid', 'Partial')", 'i.amount_paid < i.amount_due'];
+    if (obligation.invoice_id != null) {
+      params.push(Number(obligation.invoice_id));
+      clauses.push(`i.id = $${params.length}`);
+    } else if (obligation.fee_id != null) {
+      params.push(String(obligation.fee_id));
+      clauses.push(`li.metadata->>'fee_id' = $${params.length}`);
+    } else if (obligation.service_key) {
+      params.push(String(obligation.service_key));
+      clauses.push(`li.service_key = $${params.length}`);
+    }
+    const result = await executor.query(`
+      SELECT i.id, li.service_key, li.metadata
+      FROM invoices i
+      JOIN invoice_line_items li ON li.invoice_id = i.id
+      WHERE ${clauses.join(' AND ')}
+        AND li.line_type = 'charge' AND li.is_included = false
+      ORDER BY i.due_date ASC, i.id ASC
+      LIMIT 1
+    `, params);
+    if (!result.rows.length) {
+      throw new Error('A selected payment obligation is not an outstanding ledger obligation');
+    }
+    const line = result.rows[0];
+    const metadata = line.metadata || {};
+    const category = metadata.category === 'one_off' || metadata.fee_id != null
+      ? `one_off:${metadata.fee_id}` : line.service_key || 'other';
+    if (obligation.category && obligation.category !== category &&
+        obligation.category !== line.service_key) {
+      throw new Error('Selected payment obligation category does not match the ledger');
+    }
+    proposals.push({
+      invoiceId: Number(result.rows[0].id),
+      amount: obligation.amount == null ? null : Number(obligation.amount),
+      category,
+    });
+  }
+  return proposals;
+};
+
+const applyPaymentToInvoices = async (executor, studentId, amount, proofId, adminId, obligations = []) => {
+  let selected = obligations;
+  if (typeof selected === 'string') {
+    try { selected = JSON.parse(selected); } catch (_) {
+      throw new Error('Stored payment obligation proposal is invalid');
+    }
+  }
+  const allocationProposals = await resolvePaymentProposals(executor, studentId, selected);
   const result = await allocatePayment(executor, {
     studentId,
     amount,
@@ -102,12 +183,14 @@ const applyPaymentToInvoices = async (executor, studentId, amount, proofId, admi
     reference: `PROOF-${proofId}`,
     description: `Approved proof of payment (Ref #${proofId})`,
     recordedBy: adminId,
+    allocationProposals,
   });
   return result.allocations.map((allocation) => allocation.transactionId);
 };
 
 // ─── POST /api/payment-proofs  (parent submits proof) ────────────────────────
 router.post('/', requireParent, uploadReceipt, async (req, res) => {
+  let client;
   try {
     const { amount, payment_method, reference, notes, child_id } = req.body;
     if (!amount || !payment_method) {
@@ -120,6 +203,7 @@ router.post('/', requireParent, uploadReceipt, async (req, res) => {
     const normalizedMethod = payment_method.trim().toLowerCase();
     const normalizedReference = boundedText(reference, 255, 'Reference');
     const normalizedNotes = boundedText(notes, 2000, 'Notes');
+    const selectedObligations = parseSelectedObligations(req.body.obligations || req.body.allocations);
 
     const child = await resolveChild(req.user.id, child_id);
     if (!child) return res.status(404).json({ message: 'No child linked to this account' });
@@ -136,40 +220,127 @@ router.post('/', requireParent, uploadReceipt, async (req, res) => {
       // Always store the raw buffer in the database for reliable retrieval across deployments
       receiptData = req.file.buffer;
 
-      if (s3Service.isConfigValid) {
-        try {
-          const s3Result = await s3Service.uploadFile(req.file.buffer, req.file.originalname, req.file.mimetype, 'payment-proofs');
-          receiptS3Key = s3Result.s3Key;
-          receiptS3Url = s3Result.s3Url;
-        } catch (s3Err) {
-          console.warn('S3 upload failed, will use DB storage:', s3Err.message);
-        }
+    }
+
+    const idempotencyKey = String(req.get('Idempotency-Key') || '').trim();
+    if (idempotencyKey && !/^[A-Za-z0-9_-]{8,100}$/.test(idempotencyKey)) {
+      return res.status(400).json({ message: 'Invalid request key' });
+    }
+    client = await db.pool.connect();
+    let supportsSelectedObligations = true;
+    try {
+      await client.query('SELECT selected_obligations FROM pending_payments LIMIT 0');
+    } catch (schemaError) {
+      if (schemaError.code !== '42P01' && schemaError.code !== '42703') throw schemaError;
+      supportsSelectedObligations = false;
+      if (selectedObligations.length) {
+        return res.status(503).json({
+          message: 'Multi-obligation payment selection is unavailable until migrations/finance_multi_allocation.sql is applied',
+        });
+      }
+    }
+    await client.query('BEGIN');
+    if (idempotencyKey) {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext('parent-payment-proof'), hashtext($1))`,
+        [`${req.user.id}:${idempotencyKey}`],
+      );
+      const existing = await client.query(`
+        SELECT pp.id, pp.amount, pp.payment_method, pp.reference, pp.status, pp.submitted_at
+        FROM audit_logs a
+        JOIN pending_payments pp ON pp.id=a.entity_id
+        WHERE a.action='payment_proof_submit' AND a.entity_type='payment_proof'
+          AND a.user_id=$1 AND a.details->>'idempotency_key'=$2
+        ORDER BY a.id DESC LIMIT 1
+      `, [req.user.id, idempotencyKey]);
+      if (existing.rows.length) {
+        await client.query('COMMIT');
+        return res.status(200).json({
+          message: 'Proof of payment was already submitted',
+          submission: existing.rows[0],
+          duplicate: true,
+        });
       }
     }
 
-    const result = await db.query(`
-      INSERT INTO pending_payments
-        (parent_id, student_id, amount, payment_method, reference, notes,
-         receipt_file_name, receipt_file_path, receipt_s3_key, receipt_s3_url, receipt_mime_type, receipt_data)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-      RETURNING *
-    `, [req.user.id, child.id, normalizedAmount.toFixed(2), normalizedMethod,
-        normalizedReference, normalizedNotes,
-        receiptFileName, receiptFilePath, receiptS3Key, receiptS3Url, receiptMime, receiptData]);
+    const result = supportsSelectedObligations
+      ? await client.query(`
+        INSERT INTO pending_payments
+          (parent_id, student_id, amount, payment_method, reference, notes,
+           receipt_file_name, receipt_file_path, receipt_s3_key, receipt_s3_url,
+           receipt_mime_type, receipt_data, selected_obligations)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+        RETURNING *
+      `, [req.user.id, child.id, normalizedAmount.toFixed(2), normalizedMethod,
+          normalizedReference, normalizedNotes,
+          receiptFileName, receiptFilePath, receiptS3Key, receiptS3Url, receiptMime, receiptData,
+          JSON.stringify(selectedObligations)])
+      : await client.query(`
+        INSERT INTO pending_payments
+          (parent_id, student_id, amount, payment_method, reference, notes,
+           receipt_file_name, receipt_file_path, receipt_s3_key, receipt_s3_url,
+           receipt_mime_type, receipt_data)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        RETURNING *
+      `, [req.user.id, child.id, normalizedAmount.toFixed(2), normalizedMethod,
+          normalizedReference, normalizedNotes,
+          receiptFileName, receiptFilePath, receiptS3Key, receiptS3Url, receiptMime, receiptData]);
 
     const submission = result.rows[0];
-    await notifyPayment({
-      kind: 'submitted',
-      paymentId: submission.id,
-      learnerId: child.id,
-      amount: submission.amount,
+    await logAudit({
+      executor: client,
+      required: true,
+      userId: req.user.id,
+      userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role,
+      action: 'payment_proof_submit',
+      entityType: 'payment_proof',
+      entityId: submission.id,
+      details: {
+        idempotency_key: idempotencyKey || null,
+        student_id: child.id,
+        amount: submission.amount,
+        selected_obligations: selectedObligations,
+      },
+      ipAddress: getIp(req),
     });
+    await client.query('COMMIT');
+
     res.status(201).json({
       message: 'Proof of payment submitted successfully',
       submission: { id: submission.id, amount: submission.amount, payment_method: submission.payment_method,
         reference: submission.reference, status: submission.status, submitted_at: submission.submitted_at }
     });
+
+    // Database receipt storage is authoritative. Optional S3 mirroring and
+    // notifications must never keep the Parent's browser waiting after commit.
+    setImmediate(async () => {
+      if (req.file && s3Service.isConfigValid) {
+        try {
+          const s3Result = await s3Service.uploadFile(
+            req.file.buffer,
+            req.file.originalname,
+            req.file.mimetype,
+            'payment-proofs',
+          );
+          await db.query(`
+            UPDATE pending_payments
+            SET receipt_s3_key=$1, receipt_s3_url=$2
+            WHERE id=$3 AND receipt_s3_key IS NULL
+          `, [s3Result.s3Key, s3Result.s3Url, submission.id]);
+        } catch (s3Err) {
+          console.warn('Post-commit S3 receipt mirror failed:', s3Err.message);
+        }
+      }
+      await notifyPayment({
+        kind: 'submitted',
+        paymentId: submission.id,
+        learnerId: child.id,
+        amount: submission.amount,
+      }).catch((error) => console.warn('Post-commit proof notification failed:', error.message));
+    });
   } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     if (err.status) return res.status(err.status).json({ message: err.message });
     if (err instanceof multer.MulterError || err.message?.includes('Only valid') ||
         err.message?.includes('Only images') || err.code === 'LIMIT_FILE_SIZE') {
@@ -177,6 +348,8 @@ router.post('/', requireParent, uploadReceipt, async (req, res) => {
     }
     console.error('Submit proof error:', err);
     res.status(500).json({ message: 'Server error submitting proof of payment' });
+  } finally {
+    if (client) client.release();
   }
 });
 
@@ -318,10 +491,16 @@ router.get('/:id/receipt', authenticate, async (req, res) => {
 // ─── DELETE /api/payment-proofs/:id  (admin deletes a submission) ────────────
 router.delete('/:id', requireAdmin, async (req, res) => {
   try {
-    const result = await db.query('SELECT * FROM pending_payments WHERE id=$1', [req.params.id]);
-    if (!result.rows.length) return res.status(404).json({ message: 'Submission not found' });
+    const result = await db.query(
+      `DELETE FROM pending_payments WHERE id=$1 AND status <> 'approved' RETURNING *`,
+      [req.params.id],
+    );
+    if (!result.rows.length) {
+      const existing = await db.query('SELECT status FROM pending_payments WHERE id=$1', [req.params.id]);
+      if (!existing.rows.length) return res.status(404).json({ message: 'Submission not found' });
+      return res.status(409).json({ message: 'Approved payment evidence cannot be deleted; use an audited payment reversal instead' });
+    }
     const proof = result.rows[0];
-    await db.query('DELETE FROM pending_payments WHERE id=$1', [req.params.id]);
     await logAudit({
       userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
       userRole: req.user.role, action: 'payment_proof_delete',
@@ -333,6 +512,78 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('Delete proof error:', err);
     res.status(500).json({ message: 'Server error deleting submission' });
+  }
+});
+
+router.get('/:id/allocation-options', requireAdmin, async (req, res) => {
+  try {
+    const proof = (await db.query(
+      `SELECT id, student_id, status FROM pending_payments WHERE id=$1`,
+      [req.params.id],
+    )).rows[0];
+    if (!proof) return res.status(404).json({ message: 'Submission not found' });
+    const ledger = await getStudentLedger(proof.student_id);
+    const options = (ledger?.invoices || []).flatMap((invoice) =>
+      (invoice.category_balances || []).filter((item) => Number(item.amount) > 0).map((item) => ({
+        invoice_id: invoice.id,
+        category: item.category,
+        amount: item.amount,
+        due_date: invoice.due_date,
+        reference_number: invoice.reference_number,
+        label: `${item.category} — ${String(invoice.due_date || '').slice(0, 10)} — R ${Number(item.amount).toFixed(2)}`,
+      })));
+    res.json({ options });
+  } catch (error) {
+    console.error('Payment allocation options error:', error);
+    res.status(500).json({ message: 'Could not load allocation options' });
+  }
+});
+
+router.put('/:id/allocations', requireAdmin, async (req, res) => {
+  let client;
+  try {
+    const reason = boundedText(req.body?.reason, 500, 'Adjustment reason');
+    if (!reason) return res.status(400).json({ message: 'An allocation adjustment reason is required' });
+    const obligations = parseSelectedObligations(req.body?.obligations);
+    if (!obligations.length) return res.status(400).json({ message: 'At least one allocation is required' });
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const proof = (await client.query(
+      `SELECT * FROM pending_payments WHERE id=$1 FOR UPDATE`,
+      [req.params.id],
+    )).rows[0];
+    if (!proof) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Submission not found' });
+    }
+    if (proof.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ message: 'Only pending submissions can be adjusted' });
+    }
+    await resolvePaymentProposals(client, proof.student_id, obligations);
+    await client.query(
+      `UPDATE pending_payments SET selected_obligations=$1::jsonb WHERE id=$2`,
+      [JSON.stringify(obligations), proof.id],
+    );
+    await logAudit({
+      executor: client, required: true,
+      userId: req.user.id,
+      userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role,
+      action: 'payment_allocation_adjust',
+      entityType: 'payment_proof',
+      entityId: proof.id,
+      details: { reason, previous: proof.selected_obligations || [], proposed: obligations },
+      ipAddress: getIp(req),
+    });
+    await client.query('COMMIT');
+    res.json({ message: 'Proposed allocation updated', obligations });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('Adjust proof allocation error:', error);
+    res.status(error.status || 500).json({ message: error.message || 'Could not adjust allocation' });
+  } finally {
+    if (client) client.release();
   }
 });
 
@@ -357,7 +608,14 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     }
 
     const admin_note = boundedText(req.body?.admin_note, 2000, 'Admin note');
-    const txIds = await applyPaymentToInvoices(client, proof.student_id, proof.amount, proof.id, req.user.id);
+    const txIds = await applyPaymentToInvoices(
+      client,
+      proof.student_id,
+      proof.amount,
+      proof.id,
+      req.user.id,
+      proof.selected_obligations || [],
+    );
 
     await client.query(`
       UPDATE pending_payments
@@ -373,19 +631,23 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
       ipAddress: getIp(req), executor: client, required: true
     });
     await client.query('COMMIT');
-     await notifyPayment({
-       kind: 'approved',
-       paymentId: proof.id,
-       learnerId: proof.student_id,
-       amount: proof.amount,
-     });
-     await notifyPayment({
-       kind: 'applied',
-       paymentId: proof.id,
-       learnerId: proof.student_id,
-       amount: proof.amount,
-     });
     res.json({ message: 'Payment approved and applied to student balance', status: 'approved', transaction_ids: txIds });
+    setImmediate(async () => {
+      await Promise.allSettled([
+        notifyPayment({
+          kind: 'approved',
+          paymentId: proof.id,
+          learnerId: proof.student_id,
+          amount: proof.amount,
+        }),
+        notifyPayment({
+          kind: 'applied',
+          paymentId: proof.id,
+          learnerId: proof.student_id,
+          amount: proof.amount,
+        }),
+      ]);
+    });
   } catch (err) {
     if (client) {
       try { await client.query('ROLLBACK'); } catch (rollbackError) { console.error('Approval rollback failed:', rollbackError.message); }
@@ -400,16 +662,25 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
 
 // ─── POST /api/payment-proofs/:id/reject  (admin rejects) ────────────────────
 router.post('/:id/reject', requireAdmin, async (req, res) => {
+  let client;
   try {
-    const proof = (await db.query('SELECT * FROM pending_payments WHERE id=$1', [req.params.id])).rows[0];
-    if (!proof) return res.status(404).json({ message: 'Submission not found' });
-    if (proof.status !== 'pending') return res.status(400).json({ message: `This submission is already ${proof.status}` });
+    client = await db.pool.connect();
+    await client.query('BEGIN');
+    const proof = (await client.query('SELECT * FROM pending_payments WHERE id=$1 FOR UPDATE', [req.params.id])).rows[0];
+    if (!proof) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Submission not found' });
+    }
+    if (proof.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ message: `This submission is already ${proof.status}` });
+    }
 
     const admin_note = boundedText(req.body?.admin_note, 2000, 'Admin note');
-    await db.query(`
+    await client.query(`
       UPDATE pending_payments
       SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, admin_note=$2
-      WHERE id=$3
+      WHERE id=$3 AND status='pending'
     `, [req.user.id, admin_note || null, proof.id]);
 
     await logAudit({
@@ -417,18 +688,22 @@ router.post('/:id/reject', requireAdmin, async (req, res) => {
       userRole: req.user.role, action: 'payment_proof_reject',
       entityType: 'payment_proof', entityId: proof.id,
       details: { summary: `Rejected payment proof of R${proof.amount}`, amount: proof.amount, student_id: proof.student_id, reason: admin_note || null },
-      ipAddress: getIp(req)
+      ipAddress: getIp(req), executor: client, required: true
     });
-     await notifyPayment({
-       kind: 'rejected',
-       paymentId: proof.id,
-       learnerId: proof.student_id,
-       reason: admin_note,
-     });
+    await client.query('COMMIT');
     res.json({ message: 'Submission rejected' });
+    setImmediate(() => notifyPayment({
+      kind: 'rejected',
+      paymentId: proof.id,
+      learnerId: proof.student_id,
+      reason: admin_note,
+    }).catch((error) => console.warn('Post-commit rejection notification failed:', error.message)));
   } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Reject proof error:', err);
     res.status(500).json({ message: 'Server error rejecting payment' });
+  } finally {
+    if (client) client.release();
   }
 });
 

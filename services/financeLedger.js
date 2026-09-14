@@ -93,6 +93,14 @@ function buildInvoiceBreakdown(invoice, rawLines = [], reviewFlags = []) {
   const discounts = lines.filter((line) => line.line_type === 'discount');
   const amountDue = money(invoice.amount_due);
   const amountPaid = money(invoice.amount_paid);
+  const chargeTotals = {};
+  charges.forEach((line) => {
+    const key = line.service_key || 'other';
+    chargeTotals[key] = money((chargeTotals[key] || 0) + line.amount);
+  });
+  const oneOffLines = charges.filter((line) => (
+    line.metadata && (line.metadata.fee_id != null || line.metadata.category === 'one_off')
+  ));
   return {
     ...invoice,
     status: invoiceStatus(amountDue, amountPaid, invoice.status),
@@ -107,10 +115,75 @@ function buildInvoiceBreakdown(invoice, rawLines = [], reviewFlags = []) {
     overpaid_amount: nonNegative(amountPaid - amountDue),
     credit: nonNegative(amountPaid - amountDue),
     line_items: lines,
+    charge_totals: chargeTotals,
+    service_charge_lines: charges.filter((line) => !oneOffLines.includes(line)),
+    one_off_charge_lines: oneOffLines,
+    one_off_fee_ids: [...new Set(oneOffLines
+      .map((line) => line.metadata?.fee_id)
+      .filter((id) => id != null)
+      .map((id) => Number(id)))],
     snapshot_available: lines.length > 0,
     payment_review_flags: reviewFlags,
     review_required: reviewFlags.length > 0,
   };
+}
+
+/*
+ * An allocation category is part of the invoice snapshot, never inferred from
+ * the learner's current enrollment flags. This is deliberately exported for
+ * payment-review and reconciliation callers so a selected one-off/service
+ * obligation cannot drift into another category.
+ */
+function invoiceAllocationCategories(rawLines = []) {
+  const lines = normaliseInvoiceLines(rawLines);
+  const categories = new Set();
+  lines.filter((line) => line.line_type === 'charge' && !line.included && line.amount > 0)
+    .forEach((line) => {
+      const category = line.metadata?.category === 'one_off' || line.metadata?.fee_id != null
+        ? `one_off:${line.metadata.fee_id}`
+        : line.service_key || 'other';
+      categories.add(category);
+    });
+  return [...categories];
+}
+
+function invoiceCategoryBalances(rawLines = [], amountDue = 0, transactions = []) {
+  const lines = normaliseInvoiceLines(rawLines);
+  const balances = new Map();
+  lines.filter((line) => line.line_type === 'charge' && !line.included && line.amount > 0)
+    .forEach((line) => {
+      const category = line.metadata?.category === 'one_off' || line.metadata?.fee_id != null
+        ? `one_off:${line.metadata.fee_id}` : line.service_key || 'other';
+      balances.set(category, money((balances.get(category) || 0) + line.amount));
+    });
+  const discounts = lines.filter((line) => line.line_type === 'discount' && line.amount > 0);
+  discounts.filter((line) => line.service_key).forEach((line) => {
+    balances.set(line.service_key, nonNegative((balances.get(line.service_key) || 0) - line.amount));
+  });
+  discounts.filter((line) => !line.service_key).forEach((line) => {
+    const total = money([...balances.values()].reduce((sum, value) => sum + value, 0));
+    let applied = 0;
+    const entries = [...balances.entries()];
+    entries.forEach(([category, value], index) => {
+      const share = index === entries.length - 1 ? money(line.amount - applied)
+        : money(line.amount * value / total);
+      applied = money(applied + share);
+      balances.set(category, nonNegative(value - share));
+    });
+  });
+  const netTotal = money([...balances.values()].reduce((sum, value) => sum + value, 0));
+  const difference = money(Number(amountDue) - netTotal);
+  if (difference && balances.size) {
+    const first = balances.keys().next().value;
+    balances.set(first, nonNegative((balances.get(first) || 0) + difference));
+  }
+  transactions
+    .filter((tx) => tx.allocation_category && !tx.is_reversed && Number(tx.amount) > 0)
+    .forEach((tx) => balances.set(
+      tx.allocation_category,
+      nonNegative((balances.get(tx.allocation_category) || 0) - Number(tx.amount)),
+    ));
+  return [...balances.entries()].map(([category, amount]) => ({ category, amount }));
 }
 
 function configuredComponents(student, prices) {
@@ -331,6 +404,7 @@ async function getStudentLedger(studentId, executor = db) {
     executor.query(`
       SELECT pt.id, pt.invoice_id, pt.student_id, pt.student_number,
              pt.reverses_transaction_id,
+             to_jsonb(pt)->>'allocation_category' AS allocation_category,
              (pt.reverses_transaction_id IS NOT NULL) AS is_reversal,
              reversal.id AS reversal_id,
              (reversal.id IS NOT NULL) AS is_reversed,
@@ -402,6 +476,14 @@ async function getStudentLedger(studentId, executor = db) {
     const discounts = lines.filter((line) => line.line_type === 'discount');
     const grossCharges = money(charges.reduce((sum, line) => sum + line.amount, 0));
     const discountTotal = money(discounts.reduce((sum, line) => sum + line.amount, 0));
+    const chargeTotals = {};
+    charges.forEach((line) => {
+      const key = line.service_key || 'other';
+      chargeTotals[key] = money((chargeTotals[key] || 0) + line.amount);
+    });
+    const oneOffChargeLines = charges.filter((line) => (
+      line.metadata && (line.metadata.fee_id != null || line.metadata.category === 'one_off')
+    ));
     const paymentReviewFlags = [];
     const invoiceDate = row.due_date ? new Date(row.due_date) : null;
     const invoiceMonth = invoiceDate && invoiceDate.getUTCMonth() + 1;
@@ -421,6 +503,17 @@ async function getStudentLedger(studentId, executor = db) {
       }
     }
     const status = invoiceStatus(amountDue, amountPaid, row.status);
+    const categoryBalances = invoiceCategoryBalances(
+      lines,
+      amountDue,
+      paymentRowsByInvoice.get(row.id) || [],
+    );
+    const effectiveCategorised = (paymentRowsByInvoice.get(row.id) || [])
+      .some((transaction) => transaction.allocation_category && !transaction.is_reversed && Number(transaction.amount) > 0);
+    const legacyCategoryReview = amountPaid > 0 && categoryBalances.length > 1 && !effectiveCategorised;
+    if (legacyCategoryReview) {
+      paymentReviewFlags.push({ type: 'legacy_category_allocation_unknown' });
+    }
     return {
       ...row,
       status,
@@ -438,6 +531,15 @@ async function getStudentLedger(studentId, executor = db) {
       payment_review_flags: paymentReviewFlags,
       review_required: paymentReviewFlags.length > 0,
       line_items: lines,
+      charge_totals: chargeTotals,
+      service_charge_lines: charges.filter((line) => !oneOffChargeLines.includes(line)),
+      one_off_charge_lines: oneOffChargeLines,
+      one_off_fee_ids: [...new Set(oneOffChargeLines
+        .map((line) => line.metadata?.fee_id)
+        .filter((id) => id != null)
+        .map((id) => Number(id)))],
+      category_balances: legacyCategoryReview ? [] : categoryBalances,
+      category_allocation_review_required: legacyCategoryReview,
        // Enrollment information is not historical billing evidence. Billed
        // and bundled truth comes only from this invoice's immutable lines.
        service_components: charge.components.map(({ key, label, description, enrolled }) => ({
@@ -566,6 +668,14 @@ async function allocatePayment(executor, {
   invoiceId = null,
   transactionMonth = null,
   transactionYear = null,
+  /*
+   * Optional parent/admin proposal. Each item is { invoiceId, amount,
+   * category }. When supplied, only those exact invoice obligations may
+   * receive this payment. An omitted proposal preserves the established
+   * oldest-unpaid behavior.
+   */
+  allocationProposals = null,
+  proposedAllocations = null,
 }) {
   const total = money(amount);
   if (!Number.isFinite(total) || total <= 0) throw new Error('Payment amount must be positive');
@@ -580,6 +690,27 @@ async function allocatePayment(executor, {
   let remaining = total;
   const allocations = [];
 
+  const rawProposals = allocationProposals || proposedAllocations;
+  const proposals = Array.isArray(rawProposals)
+    ? rawProposals.map((proposal) => ({
+      invoiceId: Number(proposal.invoiceId ?? proposal.invoice_id),
+      amount: proposal.amount == null ? null : money(proposal.amount),
+      category: proposal.category || proposal.service_key || null,
+    })).filter((proposal) => Number.isSafeInteger(proposal.invoiceId) && proposal.invoiceId > 0)
+    : null;
+  if (proposals && proposals.length === 0) {
+    throw new Error('At least one valid allocation proposal is required');
+  }
+  // The correction route uses 0 as its explicit "no exact invoice" marker
+  // for a formerly-unallocated event. Treat it as normal oldest-unpaid
+  // allocation rather than accidentally forcing an invoice-id=0 query.
+  const targetInvoiceId = invoiceId == null || Number(invoiceId) === 0 ? null : Number(invoiceId);
+  if (targetInvoiceId != null && proposals && !proposals.some((proposal) => proposal.invoiceId === targetInvoiceId)) {
+    throw new Error('Selected invoice is not included in the allocation proposal');
+  }
+  const requestedInvoiceIds = proposals
+    ? [...new Set(proposals.map((proposal) => proposal.invoiceId))]
+    : null;
   const invoiceResult = await executor.query(`
     SELECT id, student_number, reference_number, amount_due, amount_paid,
            GREATEST(amount_due - amount_paid, 0) AS outstanding_balance,
@@ -587,15 +718,91 @@ async function allocatePayment(executor, {
     FROM invoices
     WHERE student_id = $1 AND status IN ('Unpaid', 'Partial')
       AND ($2::integer IS NULL OR id = $2)
+      AND ($3::integer[] IS NULL OR id = ANY($3::integer[]))
     ORDER BY due_date ASC, id ASC
     FOR UPDATE
-  `, [studentId, invoiceId]);
+  `, [studentId, targetInvoiceId, requestedInvoiceIds]);
 
-  for (const invoice of invoiceResult.rows) {
+  const invoiceRowsById = new Map(invoiceResult.rows.map((invoice) => [Number(invoice.id), invoice]));
+  if (proposals) {
+    const missing = proposals.find((proposal) => !invoiceRowsById.has(proposal.invoiceId));
+    if (missing) throw new Error('One or more selected obligations is not outstanding for this learner');
+  }
+
+  let categoryByInvoice = new Map();
+  let allocationLineRows = [];
+  if (proposals) {
+    const lineResult = await executor.query(`
+      SELECT invoice_id, line_type, service_key, amount, is_included, metadata
+      FROM invoice_line_items
+      WHERE invoice_id = ANY($1::integer[])
+      ORDER BY invoice_id, id
+    `, [requestedInvoiceIds]);
+    allocationLineRows = lineResult.rows;
+    const linesByInvoice = new Map();
+    lineResult.rows.forEach((line) => {
+      if (!linesByInvoice.has(Number(line.invoice_id))) linesByInvoice.set(Number(line.invoice_id), []);
+      linesByInvoice.get(Number(line.invoice_id)).push(line);
+    });
+    proposals.forEach((proposal) => {
+      const categories = invoiceAllocationCategories(linesByInvoice.get(proposal.invoiceId) || []);
+      categoryByInvoice.set(proposal.invoiceId, categories);
+      if (proposal.category && !categories.includes(proposal.category)) {
+        throw new Error(`Allocation category does not match invoice ${proposal.invoiceId}`);
+      }
+    });
+  }
+  const categoryRemaining = new Map();
+  if (proposals) {
+    const priorResult = await executor.query(`
+      SELECT pt.invoice_id, pt.amount,
+             to_jsonb(pt)->>'allocation_category' AS allocation_category,
+             (reversal.id IS NOT NULL) AS is_reversed
+      FROM payment_transactions pt
+      LEFT JOIN payment_transactions reversal ON reversal.reverses_transaction_id=pt.id
+      WHERE pt.invoice_id = ANY($1::integer[])
+    `, [requestedInvoiceIds]);
+    requestedInvoiceIds.forEach((id) => {
+      const invoice = invoiceRowsById.get(id);
+      const invoiceLines = allocationLineRows.filter((line) => Number(line.invoice_id) === id);
+      const invoiceTransactions = priorResult.rows.filter((tx) => Number(tx.invoice_id) === id);
+      const categories = invoiceAllocationCategories(invoiceLines);
+      const hasCategorised = invoiceTransactions.some((tx) =>
+        tx.allocation_category && !tx.is_reversed && Number(tx.amount) > 0);
+      if (Number(invoice.amount_paid) > 0 && categories.length > 1 && !hasCategorised) {
+        throw new Error('This legacy partially-paid multi-service invoice requires Admin allocation review');
+      }
+      const values = invoiceCategoryBalances(
+        invoiceLines,
+        invoice.amount_due,
+        invoiceTransactions,
+      );
+      values.forEach((value) => categoryRemaining.set(`${id}:${value.category}`, value.amount));
+    });
+  }
+
+  const allocationTargets = proposals
+    ? proposals.map((proposal) => ({ invoice: invoiceRowsById.get(proposal.invoiceId), proposal }))
+    : invoiceResult.rows.map((invoice) => ({ invoice, proposal: null }));
+  const paidByInvoice = new Map(invoiceResult.rows.map((invoice) => [Number(invoice.id), money(invoice.amount_paid)]));
+  for (const { invoice, proposal } of allocationTargets) {
     if (remaining <= 0) break;
-    const toApply = money(Math.min(remaining, nonNegative(invoice.outstanding_balance)));
+    const currentPaid = paidByInvoice.get(Number(invoice.id)) || 0;
+    const invoiceRemaining = nonNegative(money(invoice.amount_due) - currentPaid);
+    const proposalCap = proposal?.amount == null
+      ? invoiceRemaining
+      : nonNegative(proposal.amount);
+    const categoryCap = proposal?.category
+      ? nonNegative(categoryRemaining.get(`${invoice.id}:${proposal.category}`) || 0)
+      : invoiceRemaining;
+    const toApply = money(Math.min(
+      remaining,
+      invoiceRemaining,
+      proposalCap,
+      categoryCap,
+    ));
     if (toApply <= 0) continue;
-    const newPaid = money(invoice.amount_paid) + toApply;
+    const newPaid = currentPaid + toApply;
     const due = money(invoice.amount_due);
     const status = newPaid > due ? 'Overpaid' : due === 0 ? 'Paid' : newPaid >= due ? 'Paid' : 'Partial';
     await executor.query(`
@@ -603,7 +810,27 @@ async function allocatePayment(executor, {
       SET amount_paid = $1, status = $2, updated_at = CURRENT_TIMESTAMP
       WHERE id = $3
     `, [newPaid.toFixed(2), status, invoice.id]);
-    const tx = await executor.query(`
+    paidByInvoice.set(Number(invoice.id), newPaid);
+    if (proposal?.category) {
+      categoryRemaining.set(
+        `${invoice.id}:${proposal.category}`,
+        nonNegative(categoryCap - toApply),
+      );
+    }
+    const tx = proposals ? await executor.query(`
+      INSERT INTO payment_transactions
+        (invoice_id, student_id, student_number, reference_number, reference,
+         amount, transaction_date, payment_date, description, payment_method,
+          recorded_by, month, year, allocation_category)
+      VALUES ($1,$2,$3,$4,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12)
+      RETURNING id
+    `, [
+      invoice.id, studentId, student.student_number, ref, toApply.toFixed(2),
+      date, description || null, paymentMethod, recordedBy || null,
+      transactionMonth || new Date(invoice.due_date).getUTCMonth() + 1,
+      transactionYear || new Date(invoice.due_date).getUTCFullYear(),
+      proposal?.category || null,
+    ]) : await executor.query(`
       INSERT INTO payment_transactions
         (invoice_id, student_id, student_number, reference_number, reference,
          amount, transaction_date, payment_date, description, payment_method,
@@ -619,6 +846,7 @@ async function allocatePayment(executor, {
     allocations.push({
       transactionId: tx.rows[0].id,
       invoiceId: invoice.id,
+      category: proposal?.category || categoryByInvoice.get(Number(invoice.id))?.[0] || null,
       reference: invoice.reference_number,
       dueDate: invoice.due_date,
       status,
@@ -829,6 +1057,8 @@ module.exports = {
   invoiceStatusExpression,
   loadInvoiceLineItems,
   buildInvoiceBreakdown,
+  invoiceAllocationCategories,
+  invoiceCategoryBalances,
   configuredComponents,
   configuredBillableLines,
   calculateApprovedDiscounts,

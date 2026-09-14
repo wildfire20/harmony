@@ -1,0 +1,1030 @@
+# Harmony Finance Integrity Phase
+## Multi-Fee Allocation + Service Charges + Discounts + One-Off Reconciliation + Proof Preview + Submission Reliability
+
+We need to complete and harden the Harmony Learning Institute finance workflow.
+
+Several connected production issues have now been identified.
+
+This is NOT just a UI patch.
+
+Audit the current finance architecture first and then fix the underlying generic issues so Admin, Parent Portal, Excel exports, invoices, one-off fees and payment history all use the same authoritative financial truth.
+
+DO NOT:
+- deploy automatically
+- run migrations automatically
+- directly overwrite immutable historical payment transactions
+- hardcode fixes for Milton/HAR049
+- hardcode sibling/staff discount amounts
+- infer discounts from legacy sibling/staff-child checkboxes
+- reconstruct historical finances by guessing
+- create a second independent finance ledger
+
+Preserve the existing authoritative finance ledger, immutable reversal/correction architecture, audit trail and Parent security.
+
+--------------------------------------------------
+PRODUCTION EXAMPLES TO USE FOR DIAGNOSIS
+--------------------------------------------------
+
+Example learner:
+
+Milton MUNDIRWA
+Student number: HAR049
+Grade 2
+
+His Student Management record currently shows:
+
+- Boarding: enabled
+- Transport: enabled
+- Aftercare: disabled
+
+However, his Admin payment history currently appears to show only normal tuition/monthly school fees.
+
+Boarding and Transport are not clearly represented in his payment-history/export view.
+
+The current screen also shows figures such as:
+
+Total Due: R21,150
+Total Paid: R15,300
+Outstanding: R5,850
+Credit / Overpaid: R28,200
+
+Do NOT assume these values are correct or incorrect.
+
+Use them only as a diagnostic example.
+
+If omitted recurring service charges are causing false outstanding/credit calculations, fix the generic calculation rather than patching Milton.
+
+Another production feature:
+
+One-Off Fee:
+Zoo Trip
+R1,200
+Assigned to Grade 2
+
+Parents can select this together with tuition, transport or other fees.
+
+--------------------------------------------------
+CORE PRINCIPLE
+--------------------------------------------------
+
+Every finance-facing surface must derive from the SAME authoritative data:
+
+- Admin learner payment history
+- Admin invoice history
+- Parent Fees page
+- Parent payment submissions
+- Excel exports
+- recurring service charges
+- discount lines
+- one-off fees
+- one-off fee reconciliation
+- paid/outstanding/partial statuses
+- credit/unallocated amounts
+
+There must not be one calculation for Admin, another for Parent, and another for Excel.
+
+The authoritative model remains:
+
+gross charge lines
+- approved discount lines
+= net amount due
+
+then:
+
+allocated payments
+→ outstanding / paid / partial / credit / review
+
+--------------------------------------------------
+1. RECURRING SERVICE CHARGES ARE MISSING FROM HISTORY
+--------------------------------------------------
+
+Audit why a learner with services such as:
+
+Boarding
+Transport
+Aftercare
+
+can have those enrollment/service flags enabled while the learner financial history/export appears to show only tuition.
+
+Trace:
+
+Student service/enrollment flag
+↓
+service pricing
+↓
+invoice generation
+↓
+persisted service charge line
+↓
+finance ledger
+↓
+Admin history
+↓
+Parent history
+↓
+Excel export
+
+Determine whether the issue is:
+
+A. the service charge was never generated,
+B. it exists but finance-history queries exclude it,
+C. it exists but exports exclude it,
+D. bundle/service rules are being interpreted incorrectly,
+E. legacy data predates current service-line architecture.
+
+Do not simply add Transport/Boarding text to the UI.
+
+Fix the authoritative data path.
+
+--------------------------------------------------
+2. RESPECT CURRENT SERVICE/BUNDLE RULES
+--------------------------------------------------
+
+Inspect the existing billing configuration before making changes.
+
+Do NOT double-charge a learner.
+
+If a service is configured as a bundled package, respect that existing bundle rule.
+
+For example, if current production configuration says a Boarding package already includes another service, do not separately generate duplicate charge lines merely because multiple enrollment flags are enabled.
+
+The financial history must display exactly what the billing engine legitimately charged.
+
+Return in the final report how Boarding, Tuition, Transport and Aftercare are currently configured.
+
+--------------------------------------------------
+3. ADMIN / PARENT FINANCIAL HISTORY
+--------------------------------------------------
+
+A learner's finance history must make recurring services understandable.
+
+For each billing period, Admin should be able to see a breakdown similar to:
+
+September 2026
+
+Tuition                  R...
+Transport                R...
+Boarding                 R...
+Other service            R...
+Discount                -R...
+--------------------------------
+Net Due                  R...
+Paid                     R...
+Outstanding              R...
+
+Use the existing design system and data model.
+
+Do not create duplicate invoices merely for display purposes.
+
+Parent may receive a simplified view, but the totals must come from the same ledger.
+
+--------------------------------------------------
+4. EXCEL EXPORT MUST INCLUDE ALL AUTHORITATIVE FINANCE DATA
+--------------------------------------------------
+
+The learner payment-history Excel export currently risks giving Parents/Admin an incorrect impression because services and/or discounts may not be represented consistently.
+
+Audit the export.
+
+The Excel export must be generated from the same authoritative ledger used by Admin.
+
+Include, where applicable:
+
+- year
+- month/billing period
+- tuition charge
+- recurring service charges
+- one-off charges if they belong in that history
+- gross amount due
+- approved discount
+- net amount due
+- amount paid
+- outstanding amount
+- credit/unallocated amount where appropriate
+- status
+
+Status must be calculated against NET DUE.
+
+NOT against the pre-discount gross tuition amount.
+
+--------------------------------------------------
+5. STAFF / SIBLING / CUSTOM DISCOUNT ISSUE
+--------------------------------------------------
+
+Admin reports that some learners have legitimate staff/sibling discounts, but the Admin financial history and Excel export can still make the learner appear partially paid.
+
+This must be investigated.
+
+IMPORTANT:
+
+Legacy fields:
+
+"Legacy sibling indicator"
+"Legacy staff-child indicator"
+
+remain DISPLAY / ENROLLMENT indicators only.
+
+They MUST NOT automatically generate financial discounts.
+
+Only existing explicit APPROVED DISCOUNT ASSIGNMENTS are authoritative.
+
+Inspect:
+
+- approved discount assignment
+- discount type
+- fixed / percentage value
+- scope
+- effective start date
+- effective end date
+- invoice period
+- generated discount ledger line
+- Admin history query
+- Excel export
+- Parent view
+
+--------------------------------------------------
+6. CORRECT DISCOUNT STATUS CALCULATION
+--------------------------------------------------
+
+Example only:
+
+Gross tuition                R2,350
+Approved staff discount      -R850
+----------------------------------
+Net due                      R1,500
+Payment received             R1,500
+
+The learner must show:
+
+PAID
+
+not:
+
+PARTIAL PAYMENT
+
+Do not hardcode R850 or any other value.
+
+Use the actual approved assignment.
+
+Correct formula:
+
+gross charge lines
+- approved discount lines
+= net due
+
+payment status must compare:
+
+allocated payment
+
+against:
+
+net due
+
+NOT gross amount before discount.
+
+--------------------------------------------------
+7. DISCOUNT MUST APPEAR EVERYWHERE
+--------------------------------------------------
+
+If an approved discount genuinely applies to an invoice, it must appear consistently in:
+
+- Admin payment history
+- Admin invoice detail
+- Parent Fees view where appropriate
+- Excel payment-history export
+- outstanding calculation
+- paid/partial/missed status
+- totals
+
+Example:
+
+Amount Due            R2,350
+Discount               R850
+Net Due              R1,500
+Paid                 R1,500
+Outstanding              R0
+Status                 Paid
+
+Do not hide the discount from Excel and then classify the learner against R2,350.
+
+--------------------------------------------------
+8. EXISTING / HISTORICAL DISCOUNTS
+--------------------------------------------------
+
+Inspect how current invoices behave if an approved discount assignment was created AFTER an invoice was already generated.
+
+Do NOT silently rewrite historical financial records.
+
+If:
+
+- the assignment existed and was effective when the invoice was generated,
+- but the discount ledger line is missing,
+
+treat that as a finance-generation bug and determine the safest correction.
+
+If:
+
+- the assignment was only added later,
+
+do not automatically rewrite historical months unless the existing business rules explicitly support it.
+
+If historical correction is needed, provide a controlled audited Admin correction/recalculation path rather than silently mutating history.
+
+Explain this clearly in the final report.
+
+--------------------------------------------------
+9. PARENT PAYMENT = ONE SUBMISSION, MULTIPLE ALLOCATIONS
+--------------------------------------------------
+
+One Parent bank payment may cover several obligations.
+
+Example:
+
+Tuition                 R2,350
+Transport                 R650
+Zoo Trip                R1,200
+--------------------------------
+Total                   R4,200
+
+This must remain:
+
+ONE payment submission
+ONE proof of payment
+MULTIPLE authoritative allocations
+
+Do not require separate uploads.
+
+--------------------------------------------------
+10. PARENT PAYMENT SELECTION
+--------------------------------------------------
+
+Parent may select:
+
+[✓] Tuition
+[✓] Transport
+[ ] Boarding
+[✓] Zoo Trip
+
+Show a clear proposed breakdown.
+
+Example:
+
+Tuition                R2,350
+Transport                R650
+Zoo Trip               R1,200
+--------------------------------
+Expected total          R4,200
+
+If entered amount does not match the selected obligations, do not silently invent allocations.
+
+Support:
+
+- exact payment
+- partial payment
+- overpayment
+- Admin review / unallocated amount
+
+--------------------------------------------------
+11. OLDEST UNPAID TUITION RULE
+--------------------------------------------------
+
+Harmony currently applies later tuition payments to older unpaid tuition where appropriate.
+
+Preserve this behaviour.
+
+Example:
+
+June Tuition unpaid
+July paid
+August paid
+September due
+
+Parent pays one tuition amount in September.
+
+Suggested allocation:
+
+June tuition first.
+
+Use the existing "Apply to Oldest Unpaid" architecture where possible.
+
+Do not create conflicting logic.
+
+However, Admin must still be allowed to explicitly choose another invoice where legitimately required.
+
+--------------------------------------------------
+12. SERVICE-SPECIFIC ALLOCATION
+--------------------------------------------------
+
+Do not mix categories.
+
+If Parent selects:
+
+Zoo Trip
+
+that allocation goes to the learner's Zoo Trip obligation.
+
+If Parent selects:
+
+Transport
+
+it goes to Transport.
+
+If Parent selects:
+
+Tuition
+
+it goes to the appropriate tuition invoice.
+
+Do not allow:
+
+Zoo Trip payment → Tuition
+Transport payment → Zoo Trip
+Tuition payment → Boarding
+
+unless Admin explicitly performs an audited correction/reallocation.
+
+--------------------------------------------------
+13. ADMIN PAYMENT REVIEW
+--------------------------------------------------
+
+Pending payment review should show:
+
+Parent payment total: R4,200
+
+Proposed allocations:
+
+June Tuition             R2,350
+September Transport        R650
+Zoo Trip                 R1,200
+
+Total allocated          R4,200
+Unallocated                  R0
+
+Admin actions:
+
+Approve as proposed
+Adjust allocation
+Reject
+
+--------------------------------------------------
+14. MANUAL ADMIN ALLOCATION
+--------------------------------------------------
+
+Admin must have a safe manual fallback.
+
+Systems can make allocation assumptions incorrectly.
+
+Add / preserve:
+
+Adjust Allocation
+
+Admin may select:
+
+- invoice
+- billing month
+- recurring service
+- one-off fee
+- amount allocated
+
+Require:
+
+Manual adjustment reason
+
+Example:
+
+"Parent requested this payment be applied to June tuition."
+
+Store the reason in the finance audit trail.
+
+--------------------------------------------------
+15. POST-APPROVAL CORRECTIONS
+--------------------------------------------------
+
+Do not directly edit approved historical transactions.
+
+Continue using:
+
+reverse
+correct
+replace
+reallocate
+
+Example:
+
+R1,200 wrongly allocated to Transport
+↓
+reverse Transport allocation
+↓
+reallocate R1,200 to Zoo Trip
+↓
+record correction reason
+
+Parent, Admin, Excel and one-off reconciliation must update from the authoritative corrected ledger.
+
+--------------------------------------------------
+16. ONE-OFF FEE LIFECYCLE
+--------------------------------------------------
+
+Current one-off fees remain visible in:
+
+Parent → Fees → Optional Fees to Include
+
+even after payment may eventually be approved.
+
+Fix the lifecycle.
+
+A one-off fee must have meaningful states such as:
+
+UNPAID
+PENDING_REVIEW
+PARTIALLY_PAID
+PAID
+REJECTED / ACTION_REQUIRED where appropriate
+
+--------------------------------------------------
+17. PARENT ONE-OFF FEE VISIBILITY
+--------------------------------------------------
+
+For the Parent payment-selection area:
+
+UNPAID:
+- visible
+- selectable
+
+PENDING_REVIEW:
+- must NOT be selectable again
+- show "Payment pending review" if useful
+
+PARTIALLY_PAID:
+- show remaining amount
+- allow Parent to pay outstanding remainder
+
+PAID / APPROVED IN FULL:
+- remove from "Optional Fees to Include"
+- do NOT allow Parent to pay it again
+
+REJECTED:
+- may become payable/selectable again according to existing rejection workflow
+
+--------------------------------------------------
+18. PAID ONE-OFF FEES MUST STILL HAVE HISTORY
+--------------------------------------------------
+
+When Zoo Trip is fully paid and approved:
+
+Do NOT delete the obligation or payment history.
+
+It should disappear only from the list of AVAILABLE FEES TO PAY.
+
+Parent must still be able to see evidence in:
+
+- payment history
+- approved payment submission
+- transaction/fee history
+- notification history where applicable
+
+Example:
+
+Zoo Trip
+R1,200
+Paid
+Approved 14 Sep 2026
+
+This prevents confusion while preserving auditability.
+
+--------------------------------------------------
+19. ONE-OFF FEE ADMIN RECONCILIATION
+--------------------------------------------------
+
+Admin → Payments → One-Off Fees
+
+Clicking a fee should open a reconciliation/detail view.
+
+Example:
+
+Zoo Trip
+R1,200 per learner
+Grade 2
+59 learners
+
+Summary:
+
+Assigned              59
+Paid                  21
+Pending Review         3
+Partially Paid          2
+Unpaid                 33
+
+Expected             R70,800
+Confirmed Collected  R...
+Pending              R...
+Outstanding          R...
+
+Learner table:
+
+Learner | Due | Paid | Outstanding | Status | Payment
+
+Example:
+
+Learner A | R1,200 | R1,200 | R0     | Paid
+Learner B | R1,200 | R0     | R1,200 | Unpaid
+Learner C | R1,200 | R600   | R600   | Partial
+Learner D | R1,200 | pending proof   | Pending Review
+
+The dashboard must derive from authoritative allocations.
+
+Do NOT introduce a manually editable `paid=true` flag.
+
+--------------------------------------------------
+20. MIXED PAYMENT MUST UPDATE ONE-OFF RECONCILIATION
+--------------------------------------------------
+
+Example:
+
+Parent pays:
+
+Tuition       R2,350
+Transport       R650
+Zoo Trip      R1,200
+
+Total         R4,200
+
+After Admin approves:
+
+- tuition invoice updates
+- transport obligation updates
+- Zoo Trip allocation = R1,200
+- Zoo Trip learner status becomes Paid
+- Zoo Trip collected total increases R1,200
+- one payment/proof remains linked to all allocations
+
+--------------------------------------------------
+21. PROOF-OF-PAYMENT PREVIEW IS BLOCKED
+--------------------------------------------------
+
+Both Admin and Parent receive:
+
+"This content is blocked. Contact the site owner to fix the issue."
+
+when opening uploaded PDFs.
+
+Investigate:
+
+- Content-Security-Policy
+- frame-src
+- frame-ancestors
+- X-Frame-Options
+- Content-Type
+- Content-Disposition
+- authenticated streaming endpoint
+- secure storage URL
+- iframe/embed behaviour
+
+Do NOT make uploaded proofs public.
+
+Parent may only access proofs belonging to their linked learner/account.
+
+Admin may access authorised proofs.
+
+Preferred:
+
+PDF / image
+→ secure inline preview
+
+Fallback:
+
+Open securely in new tab
+Download
+
+Never show a broken modal.
+
+--------------------------------------------------
+22. SLOW / HANGING PAYMENT SUBMISSIONS
+--------------------------------------------------
+
+Parent payment submission is becoming increasingly slow.
+
+Symptoms:
+
+- "Submitting..." indefinitely
+- website appears to keep loading
+- first submission eventually succeeds
+- repeated submissions can become slower
+- sometimes nothing appears to happen
+
+Trace:
+
+file upload
+↓
+secure storage
+↓
+DB transaction
+↓
+payment submission
+↓
+allocation proposal
+↓
+notification creation
+↓
+Gmail
+↓
+push notifications
+↓
+API response
+
+Find the actual bottleneck.
+
+Do NOT simply increase timeout values.
+
+Critical financial work should commit promptly.
+
+Non-critical external operations such as:
+
+- Gmail
+- push
+- other external notifications
+
+must not unnecessarily block the Parent's browser request.
+
+--------------------------------------------------
+23. DUPLICATE SUBMISSION PROTECTION
+--------------------------------------------------
+
+Because users may press Submit repeatedly when the UI appears frozen:
+
+Add/preserve idempotency.
+
+One real bank payment must not create:
+
+Payment A
+Payment B
+Payment C
+
+because Submit was pressed repeatedly.
+
+While request is running:
+
+- disable Submit
+- show clear progress
+
+If browser timeout occurs but backend succeeded:
+
+retry must safely detect the existing submission.
+
+--------------------------------------------------
+24. PARTIAL PAYMENTS
+--------------------------------------------------
+
+Example:
+
+Tuition invoice = R2,350
+Payment = R1,500
+
+Result:
+
+Paid          R1,500
+Outstanding     R850
+Status        Partial
+
+Same rule applies to a one-off fee.
+
+Example:
+
+Zoo Trip = R1,200
+Paid = R600
+
+Remaining = R600
+
+It remains visible to the Parent, but only the R600 remainder is payable.
+
+--------------------------------------------------
+25. FINANCE STATUS MUST USE NET DUE
+--------------------------------------------------
+
+Across EVERY surface:
+
+PAID
+PARTIAL
+MISSED
+OUTSTANDING
+
+must be based on:
+
+NET DUE AFTER APPROVED DISCOUNTS
+
+not gross fee.
+
+This applies to:
+
+- Admin
+- Parent
+- Excel
+- reconciliation
+- analytics
+- totals
+
+--------------------------------------------------
+26. AUDIT
+--------------------------------------------------
+
+Audit:
+
+- payment submitted
+- proposed allocations
+- Admin allocation adjustment
+- approval
+- rejection
+- reversal
+- reallocation
+- correction reason
+- discount application
+- one-off fee allocation
+
+Do not weaken the existing audit system.
+
+--------------------------------------------------
+27. REGRESSION TESTS
+--------------------------------------------------
+
+Add comprehensive tests for:
+
+### Services
+
+Learner with:
+- tuition only
+- tuition + transport
+- boarding/service configuration
+- multiple recurring services
+
+Confirm:
+- ledger charges
+- Admin history
+- Parent history
+- Excel
+all agree.
+
+### Discounts
+
+Approved fixed discount
+Approved percentage discount
+Staff discount assignment
+Sibling discount assignment
+Custom discount
+
+Confirm:
+
+gross
+discount
+net due
+paid
+outstanding
+status
+
+are identical across Admin / Parent / Excel.
+
+Also verify:
+
+legacy sibling/staff indicators alone create NO discount.
+
+### Multi-allocation
+
+Tuition only
+Transport only
+One-off only
+Tuition + one-off
+Tuition + transport + one-off
+Multiple services
+
+### Oldest unpaid
+
+June unpaid
+July paid
+August paid
+September payment received
+
+→ tuition proposal targets June.
+
+### One-off lifecycle
+
+Unpaid
+Pending
+Partial
+Paid
+Rejected
+
+Confirm fully approved one-off fees disappear from AVAILABLE payment options.
+
+Confirm they remain visible in historical/audit surfaces.
+
+### One-off reconciliation
+
+Verify:
+
+assigned
+paid
+pending
+partial
+unpaid
+expected total
+confirmed collected
+outstanding
+
+### Proof access
+
+Parent owns proof → allowed
+Admin → allowed
+Unrelated Parent → denied
+
+PDF
+image
+open/download fallback
+
+### Submission reliability
+
+Repeated clicks
+slow upload
+storage failure
+Gmail failure
+push failure
+request retry
+database rollback
+duplicate prevention
+
+--------------------------------------------------
+28. HISTORICAL DATA SAFETY
+--------------------------------------------------
+
+Do NOT silently modify production history.
+
+Audit existing records first.
+
+If the problem is query/display-only:
+fix the queries.
+
+If valid service or discount ledger lines exist but are excluded:
+include them.
+
+If expected authoritative ledger lines genuinely never existed:
+report exactly why and propose a controlled reconciliation mechanism.
+
+Do not invent old financial events from assumptions.
+
+--------------------------------------------------
+29. MIGRATION
+--------------------------------------------------
+
+Inspect current schema first.
+
+Prefer existing:
+
+- invoices
+- charge/service lines
+- discount lines
+- payment submissions
+- payment allocations
+- one-off fee assignments
+- ledger transactions
+
+If no schema change is needed:
+
+state clearly:
+NO MIGRATION REQUIRED.
+
+If a migration is genuinely required:
+
+1. explain why
+2. make it idempotent
+3. provide an audit command
+4. DO NOT RUN IT
+
+--------------------------------------------------
+FINAL REPORT REQUIRED
+--------------------------------------------------
+
+Return:
+
+1. Current authoritative finance architecture
+2. Why Milton's history appears to show only tuition
+3. Whether his Transport/Boarding charges exist in the ledger
+4. Existing bundle/service billing rules
+5. Fix for recurring service history
+6. Fix for Excel service visibility
+7. Root cause of staff/sibling discount reporting issue
+8. How discount/net-due status is now calculated
+9. Any historical discount limitations
+10. Multi-allocation implementation
+11. Oldest-unpaid behaviour
+12. Manual Admin override behaviour
+13. One-off fee lifecycle implementation
+14. One-off reconciliation implementation
+15. Proof-preview root cause and fix
+16. Slow-submission root cause and fix
+17. Duplicate-prevention behaviour
+18. Files changed
+19. Whether migration is required
+20. Tests added
+21. Test results
+22. Exact production verification steps
+
+DO NOT DEPLOY AUTOMATICALLY.
+DO NOT RUN MIGRATIONS AUTOMATICALLY.

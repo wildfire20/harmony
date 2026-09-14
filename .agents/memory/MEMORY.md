@@ -11,3 +11,4 @@
 - [Parent migration verification](parent-migration-verification.md) — legacy-compatible migrations must converge semantically and verify on the same transaction before reporting success.
 - [Parent self-activation](parent-self-activation.md) — self-activation verifies registered phone plus email OTP without creating accounts or changing learner links.
 - [PostgreSQL date expression typing](postgres-date-expression-typing.md) — explicitly cast nullable bound date parameters inside SQL expressions such as COALESCE.
+- [Legacy finance category isolation](legacy-finance-category-isolation.md) — partially paid multi-service invoices without category events must fail closed; never infer old allocation ownership.

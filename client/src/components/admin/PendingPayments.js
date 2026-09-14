@@ -36,6 +36,10 @@ export default function PendingPayments() {
   const [feedback, setFeedback] = useState(null);
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [receiptModal, setReceiptModal] = useState(null);
+  const [receiptPreviewFailed, setReceiptPreviewFailed] = useState(false);
+  const [allocationDraft, setAllocationDraft] = useState([]);
+  const [allocationReason, setAllocationReason] = useState('');
+  const [allocationOptions, setAllocationOptions] = useState([]);
 
   const viewReceipt = async (id, fileName) => {
     setReceiptLoading(true);
@@ -50,7 +54,11 @@ export default function PendingPayments() {
         throw new Error(data.message || 'Could not load receipt');
       }
       const blob = await res.blob();
+      if (!['application/pdf', 'image/jpeg', 'image/png'].includes(blob.type)) {
+        throw new Error('Unsupported receipt format');
+      }
       const url = URL.createObjectURL(blob);
+      setReceiptPreviewFailed(false);
       setReceiptModal({ url, mime: blob.type, fileName: fileName || 'Receipt' });
     } catch (err) {
       setFeedback({ type: 'error', message: `Could not open receipt: ${err.message}` });
@@ -62,6 +70,45 @@ export default function PendingPayments() {
   const closeReceiptModal = () => {
     if (receiptModal?.url) URL.revokeObjectURL(receiptModal.url);
     setReceiptModal(null);
+    setReceiptPreviewFailed(false);
+  };
+
+  useEffect(() => {
+    setAllocationDraft(Array.isArray(selected?.selected_obligations)
+      ? selected.selected_obligations.map((item) => ({ ...item })) : []);
+    setAllocationReason('');
+    if (selected?.status === 'pending') {
+      fetch(`${API_BASE}/payment-proofs/${selected.id}/allocation-options`, { headers: authHeaders() })
+        .then((response) => response.json())
+        .then((data) => setAllocationOptions(data.options || []))
+        .catch(() => setAllocationOptions([]));
+    } else {
+      setAllocationOptions([]);
+    }
+  }, [selected]);
+
+  const saveAllocationAdjustment = async () => {
+    if (!allocationReason.trim()) {
+      setFeedback({ type: 'error', message: 'Enter a reason for the allocation adjustment' });
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/payment-proofs/${selected.id}/allocations`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ obligations: allocationDraft, reason: allocationReason.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Could not update allocation');
+      setSelected((current) => ({ ...current, selected_obligations: data.obligations }));
+      setFeedback({ type: 'success', message: data.message });
+      setAllocationReason('');
+    } catch (error) {
+      setFeedback({ type: 'error', message: error.message });
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const load = useCallback(async () => {
@@ -235,20 +282,31 @@ export default function PendingPayments() {
               <p className="text-sm font-semibold text-gray-700 truncate">{receiptModal.fileName}</p>
               <button onClick={closeReceiptModal} className="text-gray-400 hover:text-gray-700 text-2xl leading-none ml-4">&times;</button>
             </div>
-            <div className="flex-1 overflow-auto flex items-center justify-center bg-gray-50 p-2 min-h-[300px]">
-              {receiptModal.mime === 'application/pdf' ? (
+            <div className="flex-1 overflow-auto flex-col flex items-center justify-center bg-gray-50 p-2 min-h-[300px]">
+              {receiptModal.mime === 'application/pdf' && !receiptPreviewFailed ? (
                 <iframe
                   src={receiptModal.url}
                   title="Receipt"
                   className="w-full h-full min-h-[500px] rounded"
+                  onError={() => setReceiptPreviewFailed(true)}
                 />
-              ) : (
+              ) : receiptModal.mime !== 'application/pdf' ? (
                 <img
                   src={receiptModal.url}
                   alt="Receipt"
                   className="max-w-full max-h-[70vh] object-contain rounded"
+                  onError={() => setReceiptPreviewFailed(true)}
                 />
+              ) : null}
+              {receiptPreviewFailed && (
+                <p className="text-sm text-gray-600 text-center px-5 py-8">
+                  This browser could not display the receipt inline. Use Open or Download below.
+                </p>
               )}
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-100">
+              <a href={receiptModal.url} target="_blank" rel="noreferrer" className="px-3 py-2 text-sm font-medium text-teal-700">Open</a>
+              <a href={receiptModal.url} download={receiptModal.fileName} className="px-3 py-2 rounded-lg bg-teal-700 text-white text-sm font-medium">Download</a>
             </div>
           </div>
         </div>
@@ -284,6 +342,68 @@ export default function PendingPayments() {
                 {selected.reference && <div className="flex justify-between"><span className="text-sm text-gray-500">Reference</span><span className="text-sm text-gray-700">{selected.reference}</span></div>}
                 {selected.notes && <div className="pt-1 text-sm text-gray-600 italic">"{selected.notes}"</div>}
               </div>
+              {selected.status === 'pending' && allocationDraft.length > 0 && (
+                <div className="rounded-xl border border-teal-100 bg-teal-50 p-4 space-y-3">
+                  <div className="flex justify-between text-sm font-semibold text-gray-700">
+                    <span>Proposed allocations</span>
+                    <span>{R(allocationDraft.reduce((sum, item) => sum + Number(item.amount || 0), 0))}</span>
+                  </div>
+                  {allocationDraft.map((item, index) => (
+                    <div key={`${item.category || item.service_key || item.fee_id}-${index}`} className="flex items-center gap-3">
+                      <select
+                        value={`${item.invoice_id || ''}:${item.category || ''}`}
+                        onChange={(event) => {
+                          const option = allocationOptions.find((candidate) =>
+                            `${candidate.invoice_id}:${candidate.category}` === event.target.value);
+                          if (option) setAllocationDraft((current) => current.map((row, rowIndex) =>
+                            rowIndex === index ? { invoice_id: option.invoice_id, category: option.category, amount: option.amount } : row));
+                        }}
+                        className="min-w-0 flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+                      >
+                        <option value={`${item.invoice_id || ''}:${item.category || ''}`}>
+                          {item.category || item.service_key || `Fee ${item.fee_id}`}
+                        </option>
+                        {allocationOptions.map((option) => (
+                          <option key={`${option.invoice_id}:${option.category}`} value={`${option.invoice_id}:${option.category}`}>{option.label}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="number" min="0.01" step="0.01"
+                        value={item.amount || ''}
+                        onChange={(event) => setAllocationDraft((current) => current.map((row, rowIndex) =>
+                          rowIndex === index ? { ...row, amount: Number(event.target.value) } : row))}
+                        className="w-28 rounded-lg border border-gray-200 px-2 py-1.5 text-right text-sm"
+                      />
+                      <button type="button" onClick={() => setAllocationDraft((current) => current.filter((_, rowIndex) => rowIndex !== index))}
+                        className="text-xs text-red-600">Remove</button>
+                    </div>
+                  ))}
+                  {allocationOptions.length > 0 && (
+                    <button type="button" onClick={() => {
+                      const used = new Set(allocationDraft.map((item) => `${item.invoice_id}:${item.category}`));
+                      const option = allocationOptions.find((candidate) => !used.has(`${candidate.invoice_id}:${candidate.category}`));
+                      if (option) setAllocationDraft((current) => [...current, {
+                        invoice_id: option.invoice_id, category: option.category, amount: option.amount,
+                      }]);
+                    }} className="text-xs font-semibold text-teal-700">+ Add another obligation</button>
+                  )}
+                  <div className="flex justify-between text-xs text-gray-600">
+                    <span>Unallocated / review</span>
+                    <span>{R(Math.max(0, Number(selected.amount) - allocationDraft.reduce((sum, item) => sum + Number(item.amount || 0), 0)))}</span>
+                  </div>
+                  <textarea
+                    value={allocationReason}
+                    onChange={(event) => setAllocationReason(event.target.value)}
+                    placeholder="Required reason for changing the proposed allocation"
+                    rows={2}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                  />
+                  <button type="button" onClick={saveAllocationAdjustment} disabled={actionLoading}
+                    className="w-full rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                    Save allocation adjustment
+                  </button>
+                </div>
+              )}
 
               {/* Receipt */}
               {selected.receipt_file_name && (
@@ -338,8 +458,7 @@ export default function PendingPayments() {
                 </div>
               )}
 
-              {/* Delete — always available */}
-              <div className="pt-2 border-t border-gray-100 flex justify-center">
+              {selected.status !== 'approved' && <div className="pt-2 border-t border-gray-100 flex justify-center">
                 <button
                   onClick={handleDelete}
                   disabled={actionLoading}
@@ -347,7 +466,7 @@ export default function PendingPayments() {
                 >
                   Delete this submission
                 </button>
-              </div>
+              </div>}
             </div>
           </div>
         </div>

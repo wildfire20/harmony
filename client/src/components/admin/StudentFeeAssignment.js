@@ -18,6 +18,8 @@ export default function StudentFeeAssignment() {
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState(null);
+  const [reconciliation, setReconciliation] = useState(null);
+  const [reconciliationLoading, setReconciliationLoading] = useState(false);
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -88,6 +90,20 @@ export default function StudentFeeAssignment() {
     }
   };
 
+  const openReconciliation = async (fee) => {
+    setReconciliationLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/student-fees/${fee.id}/reconciliation`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Could not load reconciliation');
+      setReconciliation(data);
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.message });
+    } finally {
+      setReconciliationLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -110,6 +126,44 @@ export default function StudentFeeAssignment() {
         }`}>
           {feedback.type === 'success' ? <CheckCircle className="h-5 w-5 shrink-0 mt-0.5" /> : <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />}
           {feedback.message}
+        </div>
+      )}
+
+      {reconciliation && (
+        <div className="bg-white rounded-2xl border border-blue-100 p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-gray-800">{reconciliation.fee?.name} reconciliation</p>
+              <p className="text-xs text-gray-400">Derived from authoritative invoice allocations; no manual paid flag.</p>
+            </div>
+            <button type="button" onClick={() => setReconciliation(null)} className="text-xs text-gray-500">Close</button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+            {[
+              ['Assigned', reconciliation.summary?.assigned],
+              ['Paid', reconciliation.summary?.paid],
+              ['Pending', reconciliation.summary?.pending_review],
+              ['Outstanding', R(reconciliation.summary?.outstanding)],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-xl bg-gray-50 px-2 py-2">
+                <p className="text-[11px] uppercase text-gray-400">{label}</p>
+                <p className="text-sm font-bold text-gray-700">{value ?? 0}</p>
+              </div>
+            ))}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Learner</th><th>Due</th><th>Paid</th><th>Outstanding</th><th>Status</th></tr></thead>
+              <tbody>
+                {(reconciliation.learners || []).map((learner) => (
+                  <tr key={learner.assignment_id} className="border-b border-gray-50">
+                    <td className="py-2">{learner.first_name} {learner.last_name} ({learner.student_number})</td>
+                    <td>{R(learner.due)}</td><td>{R(learner.paid)}</td><td>{R(learner.outstanding)}</td><td>{learner.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -212,7 +266,7 @@ export default function StudentFeeAssignment() {
             {fees.map(fee => (
               <div key={fee.id} className="grid sm:grid-cols-5 items-center gap-2 px-5 py-4">
                 <div className="sm:col-span-2">
-                  <p className="text-sm font-semibold text-gray-800">{fee.name}</p>
+                  <button type="button" onClick={() => openReconciliation(fee)} className="text-left text-sm font-semibold text-gray-800 hover:text-blue-600">{fee.name}</button>
                   {fee.description && <p className="text-xs text-gray-400 mt-0.5">{fee.description}</p>}
                 </div>
                 <p className="text-sm font-bold text-blue-600">{R(fee.amount)}</p>
@@ -224,8 +278,9 @@ export default function StudentFeeAssignment() {
                     <span>{fee.assignment_count} student{fee.assignment_count !== 1 ? 's' : ''}</span>
                   )}
                 </div>
-                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3">
                   <span className="text-xs text-gray-400">{fmt(fee.due_date)}</span>
+                   <button type="button" onClick={() => openReconciliation(fee)} disabled={reconciliationLoading} className="text-xs font-semibold text-blue-600">Details</button>
                   <button
                     onClick={() => handleDelete(fee.id, fee.name)}
                     className="ml-auto text-gray-300 hover:text-red-500 transition-colors"

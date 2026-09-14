@@ -11,6 +11,61 @@ const { logAudit, getIp } = require('../utils/auditLogger');
 const requireAdmin = [authenticate, authorize('admin', 'super_admin')];
 const requireParent = [authenticate, authorize('parent')];
 
+/*
+ * One-off assignments become ordinary immutable invoice snapshots. This keeps
+ * one-off fees in the existing finance ledger rather than maintaining a
+ * parallel paid flag or payment calculation. Existing assignments are not
+ * reconstructed here; only a newly-created assignment receives a snapshot.
+ */
+async function createOneOffLedgerInvoice(executor, fee, studentId, assignmentId, createdBy) {
+  try {
+    const existing = await executor.query(`
+      SELECT i.id
+      FROM invoices i
+      JOIN invoice_line_items li ON li.invoice_id = i.id
+      WHERE li.metadata->>'category' = 'one_off'
+        AND li.metadata->>'assignment_id' = $1
+      LIMIT 1
+    `, [String(assignmentId)]);
+    if (existing.rows.length) return existing.rows[0].id;
+
+    const dueDate = fee.due_date || new Date().toISOString().slice(0, 10);
+    const reference = `ONEOFF-${fee.id}-${studentId}`;
+    const invoice = await executor.query(`
+      INSERT INTO invoices
+        (student_id, student_number, amount_due, due_date, status,
+         reference_number, description, created_by, created_at)
+      SELECT u.id, u.student_number, $1, $2, 'Unpaid', $3, $4, $5, CURRENT_TIMESTAMP
+      FROM users u
+      WHERE u.id = $6 AND u.role = 'student'
+      RETURNING id
+    `, [
+      Number(fee.amount), dueDate, reference, `One-off fee: ${fee.name}`,
+      createdBy || null, studentId,
+    ]);
+    if (!invoice.rows.length) throw new Error('Learner not found while creating one-off ledger obligation');
+    await executor.query(`
+      INSERT INTO invoice_line_items
+        (invoice_id, line_type, service_key, label, description,
+         quantity, unit_amount, amount, is_included, metadata)
+      VALUES ($1, 'charge', 'one_off_fee', $2, $3, 1, $4, $4, false, $5::jsonb)
+    `, [
+      invoice.rows[0].id, fee.name, fee.description || null, Number(fee.amount),
+      JSON.stringify({
+        category: 'one_off',
+        fee_id: Number(fee.id),
+        assignment_id: Number(assignmentId),
+      }),
+    ]);
+    return invoice.rows[0].id;
+  } catch (error) {
+    if (error.code === '42P01' || error.code === '42703') {
+      throw new Error('One-off ledger obligations require migrations/mini_phase1_finance_truth.sql and migrations/finance_multi_allocation.sql');
+    }
+    throw error;
+  }
+}
+
 // ─── GET /api/student-fees  (admin: list all) ────────────────────────────────
 router.get('/', requireAdmin, async (req, res) => {
   try {
@@ -31,6 +86,92 @@ router.get('/', requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('List fees error:', err);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ─── GET /api/student-fees/:id/reconciliation (admin detail) ────────────────
+// Counts are projections of invoice balances/payment allocations and pending
+// submissions. There is intentionally no editable "paid" flag.
+router.get('/:id/reconciliation', requireAdmin, async (req, res) => {
+  try {
+    const feeResult = await db.query(`
+      SELECT f.*, g.name AS grade_name
+      FROM student_one_off_fees f
+      LEFT JOIN grades g ON g.id = f.grade_id
+      WHERE f.id = $1
+    `, [req.params.id]);
+    if (!feeResult.rows.length) return res.status(404).json({ message: 'Fee not found' });
+    const fee = feeResult.rows[0];
+    const assignments = await db.query(`
+      SELECT fa.id AS assignment_id, fa.student_id,
+             u.first_name, u.last_name, u.student_number,
+             COALESCE(i.amount_due, f.amount) AS due,
+             COALESCE(i.amount_paid, 0) AS paid,
+             GREATEST(COALESCE(i.amount_due, f.amount) - COALESCE(i.amount_paid, 0), 0) AS outstanding,
+             i.id AS invoice_id, i.status AS invoice_status
+      FROM student_fee_assignments fa
+      JOIN student_one_off_fees f ON f.id = fa.fee_id
+      JOIN users u ON u.id = fa.student_id
+      LEFT JOIN LATERAL (
+        SELECT i.id, i.amount_due, i.amount_paid, i.status
+        FROM invoices i
+        JOIN invoice_line_items li ON li.invoice_id = i.id
+        WHERE i.student_id = fa.student_id
+          AND li.metadata->>'category' = 'one_off'
+          AND li.metadata->>'assignment_id' = fa.id::text
+        ORDER BY i.id DESC
+        LIMIT 1
+      ) i ON TRUE
+      WHERE fa.fee_id = $1
+      ORDER BY u.last_name, u.first_name, fa.id
+    `, [req.params.id]);
+    let pendingRows = [];
+    try {
+      const pending = await db.query(`
+        SELECT student_id, selected_obligations
+        FROM pending_payments
+        WHERE status = 'pending'
+          AND selected_obligations @> $1::jsonb
+      `, [JSON.stringify([{ fee_id: Number(req.params.id) }])]);
+      pendingRows = pending.rows;
+    } catch (error) {
+      if (error.code !== '42P01' && error.code !== '42703') throw error;
+    }
+    const learners = assignments.rows.map((row) => {
+      const pendingForFee = pendingRows
+        .filter((item) => Number(item.student_id) === Number(row.student_id))
+        .flatMap((item) => Array.isArray(item.selected_obligations) ? item.selected_obligations : [])
+        .filter((item) => Number(item.fee_id) === Number(req.params.id));
+      const pendingAmount = pendingForFee.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const due = Number(row.due || 0);
+      const paid = Number(row.paid || 0);
+      const status = paid >= due && due > 0 ? 'PAID'
+        : pendingForFee.length ? 'PENDING_REVIEW'
+          : paid > 0 ? 'PARTIALLY_PAID'
+            : row.invoice_id ? 'UNPAID' : 'UNTRACKED';
+      return {
+        ...row,
+        due, paid,
+        outstanding: Math.max(0, due - paid),
+        pending_amount: pendingAmount,
+        status,
+      };
+    });
+    const summary = {
+      assigned: learners.length,
+      paid: learners.filter((row) => row.status === 'PAID').length,
+      pending_review: learners.filter((row) => row.status === 'PENDING_REVIEW').length,
+      partially_paid: learners.filter((row) => row.status === 'PARTIALLY_PAID').length,
+      unpaid: learners.filter((row) => row.status === 'UNPAID' || row.status === 'UNTRACKED').length,
+      expected: learners.reduce((sum, row) => sum + row.due, 0),
+      confirmed_collected: learners.reduce((sum, row) => sum + row.paid, 0),
+      pending: learners.reduce((sum, row) => sum + row.pending_amount, 0),
+      outstanding: learners.reduce((sum, row) => sum + row.outstanding, 0),
+    };
+    res.json({ fee, summary, learners });
+  } catch (error) {
+    console.error('One-off reconciliation error:', error);
+    res.status(503).json({ message: 'One-off reconciliation is unavailable until the finance-truth schema is applied' });
   }
 });
 
@@ -84,11 +225,15 @@ router.post('/', requireAdmin, async (req, res) => {
 
       if (students.rows.length > 0) {
         for (const student of students.rows) {
-          await client.query(`
+          const assignment = await client.query(`
             INSERT INTO student_fee_assignments (fee_id, student_id)
             VALUES ($1, $2)
             ON CONFLICT (fee_id, student_id) DO NOTHING
+            RETURNING id
           `, [fee.id, student.id]);
+          if (assignment.rows.length) {
+            await createOneOffLedgerInvoice(client, fee, student.id, assignment.rows[0].id, req.user.id);
+          }
         }
         assignedCount = students.rows.length;
       }
@@ -182,6 +327,25 @@ router.post('/:id/assign', requireAdmin, async (req, res) => {
       ON CONFLICT (fee_id, student_id) DO NOTHING
       RETURNING id
     `, [fee.id, student_id]);
+    if (assignment.rows.length) {
+      await createOneOffLedgerInvoice(client, fee, student_id, assignment.rows[0].id, req.user.id);
+      await logAudit({
+        executor: client,
+        required: true,
+        userId: req.user.id,
+        userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        userRole: req.user.role,
+        action: 'one_off_fee_assigned',
+        entityType: 'one_off_fee',
+        entityId: fee.id,
+        details: {
+          student_id: Number(student_id),
+          assignment_id: assignment.rows[0].id,
+          invoice_created: true,
+        },
+        ipAddress: getIp(req),
+      });
+    }
     let notificationResult = { createdRecipients: [] };
     if (assignment.rows.length) {
       notificationResult = await createOneOffFeeNotifications({
@@ -232,16 +396,65 @@ router.get('/for-child', requireParent, async (req, res) => {
     const child = childResult.rows[0];
 
     const result = await db.query(`
-      SELECT f.*, fa.id AS assignment_id
+      SELECT f.*, fa.id AS assignment_id,
+             i.id AS ledger_invoice_id, i.amount_due AS ledger_amount_due,
+             i.amount_paid AS ledger_amount_paid, i.status AS ledger_status,
+             GREATEST(i.amount_due - COALESCE(i.amount_paid, 0), 0) AS remaining_amount,
+             CASE
+               WHEN i.id IS NULL THEN 'UNTRACKED'
+               WHEN i.amount_paid >= i.amount_due THEN 'PAID'
+               WHEN i.amount_paid > 0 THEN 'PARTIALLY_PAID'
+               ELSE 'UNPAID'
+             END AS payment_status
       FROM student_one_off_fees f
       JOIN student_fee_assignments fa ON fa.fee_id = f.id
+      LEFT JOIN LATERAL (
+        SELECT i.id, i.amount_due, i.amount_paid, i.status
+        FROM invoices i
+        JOIN invoice_line_items li ON li.invoice_id = i.id
+        WHERE i.student_id = fa.student_id
+          AND li.metadata->>'category' = 'one_off'
+          AND li.metadata->>'assignment_id' = fa.id::text
+        ORDER BY i.id DESC
+        LIMIT 1
+      ) i ON TRUE
       WHERE fa.student_id = $1 AND f.is_active = true
       ORDER BY f.created_at DESC
     `, [child.id]);
 
-    res.json({ fees: result.rows, child });
+    // A pending proof is not an allocation and therefore does not change the
+    // ledger status. It is still exposed as unavailable for a second payment
+    // when the selected obligation is present in the submission proposal.
+    let pendingRows = [];
+    try {
+      const pending = await db.query(`
+        SELECT selected_obligations
+        FROM pending_payments
+        WHERE student_id = $1 AND status = 'pending'
+      `, [child.id]);
+      pendingRows = pending.rows;
+    } catch (error) {
+      if (error.code !== '42P01' && error.code !== '42703') throw error;
+    }
+    const fees = result.rows.map((fee) => {
+      const pending = pendingRows.some((row) => Array.isArray(row.selected_obligations) &&
+        row.selected_obligations.some((item) => Number(item.fee_id || item.id) === Number(fee.id)));
+      const status = pending && fee.payment_status !== 'PAID'
+        ? 'PENDING_REVIEW' : fee.payment_status;
+      const remaining = fee.remaining_amount == null ? Number(fee.amount) : Number(fee.remaining_amount);
+      return {
+        ...fee,
+        payment_status: status,
+        remaining_amount: Math.max(0, remaining),
+        is_payable: status === 'UNPAID' || status === 'PARTIALLY_PAID' || status === 'REJECTED',
+      };
+    });
+    res.json({ fees, child });
   } catch (err) {
     console.error('Parent fees error:', err);
+    if (err.code === '42P01' || err.code === '42703') {
+      return res.status(503).json({ message: 'Parent fee lifecycle is unavailable until the finance-truth schema is applied' });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 });

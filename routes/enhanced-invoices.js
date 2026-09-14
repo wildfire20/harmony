@@ -807,6 +807,9 @@ router.get('/student-payment-history/:studentNumber', [
         outstanding: inv.outstanding_balance,
         credit: inv.credit,
         grossCharges: inv.gross_charges,
+         serviceCharges: inv.charge_totals || {},
+         serviceChargeLines: inv.service_charge_lines || [],
+         oneOffChargeLines: inv.one_off_charge_lines || [],
         discountLines: inv.discount_lines,
         discountTotal: inv.discount_total,
         netDue: inv.net_due,
@@ -1004,7 +1007,7 @@ router.get('/student-payment-history/:studentNumber', [
       const headerRowNum = historyTitleRow + 1;
       const headerRow = worksheet.getRow(headerRowNum);
       headerRow.values = [
-        'Year', 'Month', 'Gross Charges', 'Discounts', 'Net Due',
+        'Year', 'Month', 'Service Charges', 'Gross Charges', 'Discounts', 'Net Due',
         'Allocated Payments', 'Outstanding', 'Credit', 'Status', 'Review Flags', 'Reference',
       ];
       headerRow.font = { bold: true };
@@ -1042,32 +1045,33 @@ router.get('/student-payment-history/:studentNumber', [
         row.values = [
           month.year,
           month.month,
-          month.grossCharges,
-          -(month.discountLines || []).reduce((sum, line) => sum + Number(line.amount || 0), 0),
-          month.amountDue,
-          month.amountPaid,
-          month.outstanding,
-          month.credit,
-          month.paymentStatus,
-          (month.reviewFlags || []).map((flag) => flag.type).join(', '),
-          month.reference
+           Object.entries(month.serviceCharges || {}).map(([key, value]) => `${key}: R${Number(value).toFixed(2)}`).join('; '),
+           month.grossCharges,
+           -(month.discountLines || []).reduce((sum, line) => sum + Number(line.amount || 0), 0),
+           month.amountDue,
+           month.amountPaid,
+           month.outstanding,
+           month.credit,
+           month.paymentStatus,
+           (month.reviewFlags || []).map((flag) => flag.type).join(', '),
+           month.reference
         ];
         
         // Format currency columns
-        row.getCell(3).numFmt = 'R #,##0.00';
         row.getCell(4).numFmt = 'R #,##0.00';
         row.getCell(5).numFmt = 'R #,##0.00';
         row.getCell(6).numFmt = 'R #,##0.00';
         row.getCell(7).numFmt = 'R #,##0.00';
         row.getCell(8).numFmt = 'R #,##0.00';
+        row.getCell(9).numFmt = 'R #,##0.00';
         
         // Color status
-        const statusCell = row.getCell(9);
-        if (month.paymentStatus === 'Paid' || month.paymentStatus === 'Overpaid') {
+         const statusCell = row.getCell(10);
+         if (month.paymentStatus === 'Paid' || month.paymentStatus === 'Overpaid') {
           statusCell.font = { color: { argb: 'FF16A34A' } };
         } else if (month.paymentStatus === 'Missed Payment') {
           statusCell.font = { bold: true, color: { argb: 'FFDC2626' } };
-          row.getCell(7).font = { bold: true, color: { argb: 'FFDC2626' } };
+           row.getCell(8).font = { bold: true, color: { argb: 'FFDC2626' } };
         } else if (month.paymentStatus === 'Partial Payment') {
           statusCell.font = { color: { argb: 'FFEA580C' } };
         }
@@ -1089,15 +1093,16 @@ router.get('/student-payment-history/:studentNumber', [
       worksheet.columns = [
         { width: 22 },  // A: labels ("Outstanding Balance:", "Reference Number:", …)
         { width: 22 },  // B: values ("HARMONY LEARNING INSTITUTE", amounts, …)
-        { width: 13 },  // C: Gross charges
-        { width: 13 },  // D: Discounts
-        { width: 13 },  // E: Net due
-        { width: 13 },  // F: Allocated payments
-        { width: 13 },  // G: Outstanding
-        { width: 11 },  // H: Credit
-        { width: 14 },  // I: Status
-        { width: 24 },  // J: Review flags
-        { width: 20 },  // K: Reference number
+         { width: 28 },  // C: Service charges
+         { width: 13 },  // D: Gross charges
+         { width: 13 },  // E: Discounts
+         { width: 13 },  // F: Net due
+         { width: 13 },  // G: Allocated payments
+         { width: 13 },  // H: Outstanding
+         { width: 11 },  // I: Credit
+         { width: 14 },  // J: Status
+         { width: 24 },  // K: Review flags
+         { width: 20 },  // L: Reference number
       ];
 
       // Page setup — A4 landscape, always fit to one page width

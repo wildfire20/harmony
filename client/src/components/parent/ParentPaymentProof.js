@@ -41,8 +41,10 @@ export default function ParentPaymentProof({ child, embedded = false }) {
   const [banking, setBanking] = useState(null);
 
   const fileRef = useRef();
+  const submissionKeyRef = useRef(null);
   const [receiptModal, setReceiptModal] = useState(null);
   const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptPreviewFailed, setReceiptPreviewFailed] = useState(false);
 
   const viewReceipt = async (id, fileName) => {
     setReceiptLoading(id);
@@ -57,7 +59,11 @@ export default function ParentPaymentProof({ child, embedded = false }) {
         throw new Error(data.message || 'Could not load receipt');
       }
       const blob = await res.blob();
+      if (!['application/pdf', 'image/jpeg', 'image/png'].includes(blob.type)) {
+        throw new Error('Unsupported receipt format');
+      }
       const url = URL.createObjectURL(blob);
+      setReceiptPreviewFailed(false);
       setReceiptModal({ url, mime: blob.type, fileName: fileName || 'Receipt' });
     } catch (err) {
       setError(`Could not open receipt: ${err.message}`);
@@ -69,6 +75,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
   const closeReceiptModal = () => {
     if (receiptModal?.url) URL.revokeObjectURL(receiptModal.url);
     setReceiptModal(null);
+    setReceiptPreviewFailed(false);
   };
 
   // Which service keys apply to this child
@@ -106,13 +113,43 @@ export default function ParentPaymentProof({ child, embedded = false }) {
     authFetch('/api/service-prices')
       .then(d => setServicePrices(d.prices || []))
       .catch(() => {});
+    // Payment choices are narrowed to open, persisted invoice lines. The
+    // service-prices endpoint remains useful for labels, but enrollment flags
+    // alone must never create a payment category or bypass bundle rules.
+    parentApi('/invoices')
+      .then((d) => {
+        const byService = new Map();
+        (d.invoices || []).forEach((invoice) => {
+          if (Number(invoice.outstanding_balance || 0) <= 0) return;
+          (invoice.line_items || []).forEach((line) => {
+            if (line.line_type !== 'charge' || line.included || Number(line.amount || 0) <= 0 || !line.service_key) return;
+            if (line.metadata?.category === 'one_off' || line.metadata?.fee_id != null) return;
+            const balance = (invoice.category_balances || [])
+              .find((item) => item.category === line.service_key);
+            if (!balance || Number(balance.amount || 0) <= 0) return;
+            const current = byService.get(line.service_key);
+            if (!current || new Date(invoice.due_date) < new Date(current.due_date)) {
+              byService.set(line.service_key, {
+                service_key: line.service_key,
+                label: line.label,
+                description: line.description,
+                amount: Number(balance.amount),
+                invoice_id: invoice.id,
+                due_date: invoice.due_date,
+              });
+            }
+          });
+        });
+        if (byService.size) setServicePrices([...byService.values()]);
+      })
+      .catch(() => {});
     parentApi('/banking-details').then(d => setBanking(d.banking)).catch(() => {});
   }, [child?.id]);
 
   // Recalculate total from both selected services and one-off fees
   const recalcTotal = (services, fees) => {
     const serviceTotal = services.reduce((s, p) => s + parseFloat(p.amount), 0);
-    const feeTotal = fees.reduce((s, f) => s + parseFloat(f.amount), 0);
+    const feeTotal = fees.reduce((s, f) => s + parseFloat(f.remaining_amount ?? f.amount), 0);
     const total = serviceTotal + feeTotal;
     if (total > 0) setAmount(total.toFixed(2));
   };
@@ -146,11 +183,27 @@ export default function ParentPaymentProof({ child, embedded = false }) {
     }
     setSubmitting(true);
     try {
+      if (!submissionKeyRef.current) {
+        submissionKeyRef.current = globalThis.crypto?.randomUUID?.().replace(/-/g, '') ||
+          `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      }
       const fd = new FormData();
       fd.append('amount', amount);
       fd.append('payment_method', method);
       fd.append('reference', reference);
       fd.append('notes', notes);
+      fd.append('obligations', JSON.stringify([
+        ...selectedServices.map((service) => ({
+          service_key: service.service_key,
+          category: service.service_key,
+          amount: Number(service.amount),
+        })),
+        ...selectedFees.map((fee) => ({
+          fee_id: fee.id,
+          category: `one_off:${fee.id}`,
+          amount: Number(fee.remaining_amount ?? fee.amount),
+        })),
+      ]));
       if (child?.id) fd.append('child_id', child.id);
       if (file) fd.append('receipt', file);
 
@@ -158,13 +211,17 @@ export default function ParentPaymentProof({ child, embedded = false }) {
       const res = await fetch('/api/payment-proofs', {
         method: 'POST',
         credentials: 'include',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': submissionKeyRef.current,
+        },
         body: fd,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Submission failed');
 
       setSuccess('Your proof of payment has been submitted! The admin will review it shortly.');
+      submissionKeyRef.current = null;
       setAmount(''); setReference(''); setNotes(''); setFile(null);
       setSelectedFees([]); setSelectedServices([]);
       setView('list');
@@ -306,11 +363,12 @@ export default function ParentPaymentProof({ child, embedded = false }) {
               <p className="text-xs text-gray-400">Check any fees you are paying with this payment</p>
               <div className="space-y-2">
                 {oneOffFees.map(fee => (
-                  <label key={fee.id} className={`parent-fee-choice ${selectedFees.some(f => f.id === fee.id) ? 'is-selected' : ''}`}>
+                  <label key={fee.id} className={`parent-fee-choice ${selectedFees.some(f => f.id === fee.id) ? 'is-selected' : ''} ${!fee.is_payable ? 'opacity-70' : ''}`}>
                     <input
                       type="checkbox"
                       checked={selectedFees.some(f => f.id === fee.id)}
                       onChange={() => toggleFee(fee)}
+                      disabled={!fee.is_payable}
                        className="parent-fee-choice-input"
                     />
                     <span className="parent-fee-choice-box" aria-hidden="true">{selectedFees.some(f => f.id === fee.id) && <Check />}</span>
@@ -318,7 +376,16 @@ export default function ParentPaymentProof({ child, embedded = false }) {
                       <p className="text-sm font-medium text-gray-700">{fee.name}</p>
                       {fee.description && <p className="parent-fee-choice-description text-xs text-gray-500">{fee.description}</p>}
                     </div>
-                     <span className="text-sm font-semibold text-[#176b73] shrink-0">{R(fee.amount)}</span>
+                      <span className="text-right text-sm font-semibold text-[#176b73] shrink-0">
+                        {R(fee.remaining_amount ?? fee.amount)}
+                        {fee.payment_status && fee.payment_status !== 'UNPAID' && (
+                          <span className="block text-[10px] text-gray-500">
+                            {fee.payment_status === 'UNTRACKED'
+                              ? 'Requires Admin reconciliation'
+                              : fee.payment_status.replaceAll('_', ' ')}
+                          </span>
+                        )}
+                      </span>
                   </label>
                 ))}
               </div>
@@ -358,7 +425,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
             <input
               ref={fileRef}
               type="file"
-              accept="image/*,application/pdf"
+              accept="application/pdf,image/jpeg,image/png"
               onChange={e => setFile(e.target.files[0] || null)}
               className="hidden"
             />
@@ -479,20 +546,31 @@ export default function ParentPaymentProof({ child, embedded = false }) {
               <p className="text-sm font-semibold text-gray-700 truncate">{receiptModal.fileName}</p>
               <button onClick={closeReceiptModal} className="text-gray-400 hover:text-gray-700 text-2xl leading-none ml-3">&times;</button>
             </div>
-            <div className="flex-1 overflow-auto flex items-center justify-center bg-gray-50 p-2 min-h-[280px]">
-              {receiptModal.mime === 'application/pdf' ? (
+            <div className="flex-1 overflow-auto flex-col flex items-center justify-center bg-gray-50 p-2 min-h-[280px]">
+              {receiptModal.mime === 'application/pdf' && !receiptPreviewFailed ? (
                 <iframe
                   src={receiptModal.url}
                   title="Receipt"
                   className="w-full min-h-[400px] rounded"
+                  onError={() => setReceiptPreviewFailed(true)}
                 />
-              ) : (
+              ) : receiptModal.mime !== 'application/pdf' ? (
                 <img
                   src={receiptModal.url}
                   alt="Receipt"
                   className="max-w-full max-h-[65vh] object-contain rounded"
+                  onError={() => setReceiptPreviewFailed(true)}
                 />
+              ) : null}
+              {receiptPreviewFailed && (
+                <p className="text-sm text-gray-600 text-center px-5 py-8">
+                  This browser could not display the receipt inline. Use Open or Download below.
+                </p>
               )}
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-100">
+              <a href={receiptModal.url} target="_blank" rel="noreferrer" className="px-3 py-2 text-sm font-medium text-[#176b73]">Open</a>
+              <a href={receiptModal.url} download={receiptModal.fileName} className="px-3 py-2 rounded-lg bg-[#176b73] text-white text-sm font-medium">Download</a>
             </div>
           </div>
         </div>

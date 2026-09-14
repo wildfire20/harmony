@@ -1472,52 +1472,12 @@ router.delete('/clear-all', [
   authenticate,
   authorize('admin', 'super_admin')
 ], async (req, res) => {
-  try {
-    console.log('Admin clearing all invoices:', req.user.email);
-
-    // Start transaction
-    await db.query('BEGIN');
-
-    try {
-      // Delete all payment transactions first (due to foreign key constraints)
-      const transactionsResult = await db.query('DELETE FROM payment_transactions RETURNING id');
-      console.log(`Deleted ${transactionsResult.rowCount} payment transactions`);
-
-      // Delete all payment upload logs
-      const uploadsResult = await db.query('DELETE FROM payment_upload_logs RETURNING id');
-      console.log(`Deleted ${uploadsResult.rowCount} payment upload logs`);
-
-      // Delete all invoices
-      const invoicesResult = await db.query('DELETE FROM invoices RETURNING id');
-      console.log(`Deleted ${invoicesResult.rowCount} invoices`);
-
-      // Commit transaction
-      await db.query('COMMIT');
-
-      res.json({
-        success: true,
-        message: 'All invoices and related data cleared successfully',
-        deleted: {
-          invoices: invoicesResult.rowCount,
-          transactions: transactionsResult.rowCount,
-          uploadLogs: uploadsResult.rowCount
-        }
-      });
-
-    } catch (innerError) {
-      // Rollback on error
-      await db.query('ROLLBACK');
-      throw innerError;
-    }
-
-  } catch (error) {
-    console.error('Clear invoices error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to clear invoices',
-      error: error.message
-    });
-  }
+  // Finance events are immutable. Corrections must use the audited reversal
+  // flow; this legacy destructive endpoint must never erase payment history.
+  return res.status(410).json({
+    success: false,
+    message: 'Destructive invoice clearing is disabled; use audited reversals and corrections',
+  });
 });
 
 // Database migration endpoint - SUPER ADMIN ONLY
@@ -1612,13 +1572,13 @@ router.post('/migrate-database', [
     console.log('Step 3: Testing the fixed schema...');
     
     try {
-      // Test payment_transactions
+      // Payment transactions are immutable after the integrity migration.
+      // Schema verification must not create and delete a historical event.
       await db.query(`
-        INSERT INTO payment_transactions (
-          reference_number, amount, payment_date, 
-          description, status
-        ) VALUES ($1, $2, $3, $4, $5)
-      `, ['MIGRATION_TEST', 1.00, new Date(), 'Migration test transaction', 'Matched']);
+        SELECT payment_date
+        FROM payment_transactions
+        LIMIT 0
+      `);
       
       // Test payment_upload_logs
       await db.query(`
@@ -1629,8 +1589,7 @@ router.post('/migrate-database', [
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       `, ['test-migration.csv', 1, 1, 1, 0, 0, 0, 0, 0]);
       
-      // Clean up test data
-      await db.query(`DELETE FROM payment_transactions WHERE reference_number = 'MIGRATION_TEST'`);
+      // Clean up only the non-financial schema test row.
       await db.query(`DELETE FROM payment_upload_logs WHERE filename = 'test-migration.csv'`);
       
       migrationResults.push('✅ Schema test successful - both tables working correctly');
