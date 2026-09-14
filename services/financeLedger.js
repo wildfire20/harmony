@@ -781,7 +781,12 @@ async function reversePayment(executor, { transactionId, recordedBy, description
       (invoice_id, student_id, student_number, reference_number, reference, reverses_transaction_id,
        amount, transaction_date, payment_date, description, payment_method,
        recorded_by, month, year)
-    VALUES ($1,$2,$3,$4,$4,$5,$6,COALESCE($7,$8),COALESCE($7,$8),$9,$10,$11,$12,$13)
+    VALUES (
+      $1,$2,$3,$4,$4,$5,$6,
+      COALESCE($7::date,$8::date),
+      COALESCE($7::date,$8::date),
+      $9,$10,$11,$12,$13
+    )
     RETURNING id
   `, [
     targetInvoiceId, payment.student_id, payment.student_number,

@@ -230,6 +230,14 @@ test('reversal keeps the original payment channel for legacy schema compatibilit
   assert.doesNotMatch(ledgerSource, /\$\{payment\.payment_method \|\| 'manual_entry'\}_reversal/);
 });
 
+test('reversal explicitly casts legacy payment dates before inserting date columns', () => {
+  const ledgerSource = source('services/financeLedger.js');
+  const reversalInsert = ledgerSource.split('async function reversePayment')[1]
+    .split('RETURNING id')[0];
+  assert.match(reversalInsert, /COALESCE\(\$7::date,\$8::date\)/);
+  assert.doesNotMatch(reversalInsert, /COALESCE\(\$7,\$8\)/);
+});
+
 test('manual corrections normalize legacy payment methods before replacement', () => {
   const routes = source('routes/enhanced-invoices.js');
   const correction = routes.split("router.put('/manual-payment/:paymentId'")[1];
