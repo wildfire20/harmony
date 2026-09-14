@@ -36,7 +36,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
   const [file, setFile] = useState(null);
   const [oneOffFees, setOneOffFees] = useState([]);
   const [selectedFees, setSelectedFees] = useState([]);
-  const [servicePrices, setServicePrices] = useState([]);
+  const [payableServices, setPayableServices] = useState([]);
   const [selectedServices, setSelectedServices] = useState([]);
   const [banking, setBanking] = useState(null);
 
@@ -73,21 +73,16 @@ export default function ParentPaymentProof({ child, embedded = false }) {
   };
 
   const closeReceiptModal = () => {
-    if (receiptModal?.url) URL.revokeObjectURL(receiptModal.url);
     setReceiptModal(null);
     setReceiptPreviewFailed(false);
   };
 
-  // Which service keys apply to this child
-  const applicableServiceKeys = ['tuition'].concat([
-    child?.is_boarder    ? 'boarding'  : null,
-    child?.uses_transport ? 'transport' : null,
-    child?.uses_aftercare ? 'aftercare' : null,
-  ].filter(Boolean));
-
-  const applicableServices = servicePrices.filter(
-    p => applicableServiceKeys.includes(p.service_key) && parseFloat(p.amount) > 0
-  );
+  useEffect(() => {
+    const url = receiptModal?.url;
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [receiptModal?.url]);
 
   const authFetch = (url) => {
     const token = sessionStorage.getItem('parentToken');
@@ -110,12 +105,9 @@ export default function ParentPaymentProof({ child, embedded = false }) {
     authFetch(`/api/student-fees/for-child${suffix}`)
       .then(d => setOneOffFees(d.fees || []))
       .catch(() => {});
-    authFetch('/api/service-prices')
-      .then(d => setServicePrices(d.prices || []))
-      .catch(() => {});
-    // Payment choices are narrowed to open, persisted invoice lines. The
-    // service-prices endpoint remains useful for labels, but enrollment flags
-    // alone must never create a payment category or bypass bundle rules.
+    setPayableServices([]);
+    // Payable services come only from open, persisted invoice lines.
+    // Enrollment flags and current Service Pricing are not billing evidence.
     parentApi('/invoices')
       .then((d) => {
         const byService = new Map();
@@ -135,14 +127,15 @@ export default function ParentPaymentProof({ child, embedded = false }) {
                 description: line.description,
                 amount: Number(balance.amount),
                 invoice_id: invoice.id,
+                invoice_line_item_id: line.id,
                 due_date: invoice.due_date,
               });
             }
           });
         });
-        if (byService.size) setServicePrices([...byService.values()]);
+        setPayableServices([...byService.values()]);
       })
-      .catch(() => {});
+      .catch(() => setPayableServices([]));
     parentApi('/banking-details').then(d => setBanking(d.banking)).catch(() => {});
   }, [child?.id]);
 
@@ -195,12 +188,16 @@ export default function ParentPaymentProof({ child, embedded = false }) {
       fd.append('obligations', JSON.stringify([
         ...selectedServices.map((service) => ({
           invoice_id: service.invoice_id,
+          invoice_line_item_id: service.invoice_line_item_id,
           service_key: service.service_key,
           category: service.service_key,
           amount: Number(service.amount),
         })),
         ...selectedFees.map((fee) => ({
           fee_id: fee.id,
+          assignment_id: fee.assignment_id,
+          invoice_id: fee.ledger_invoice_id,
+          invoice_line_item_id: fee.invoice_line_item_id,
           category: 'one_off',
           amount: Number(fee.remaining_amount ?? fee.amount),
         })),
@@ -322,14 +319,14 @@ export default function ParentPaymentProof({ child, embedded = false }) {
           </div>
 
           {/* Monthly service rates */}
-          {applicableServices.length > 0 && (
+          {payableServices.length > 0 && (
             <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
               <div>
                 <p className="text-sm font-semibold text-gray-700">Monthly Service Rates</p>
                 <p className="text-xs text-gray-400 mt-0.5">Tick the services you are paying for this month</p>
               </div>
               <div className="space-y-2">
-                {applicableServices.map(price => {
+                {payableServices.map(price => {
                   const checked = selectedServices.some(s => s.service_key === price.service_key);
                   return (
                     <label key={price.service_key} className={`parent-fee-choice ${checked ? 'is-selected' : ''}`}>

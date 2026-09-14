@@ -399,6 +399,7 @@ router.get('/for-child', requireParent, async (req, res) => {
       SELECT f.*, fa.id AS assignment_id,
              i.id AS ledger_invoice_id, i.amount_due AS ledger_amount_due,
              i.amount_paid AS ledger_amount_paid, i.status AS ledger_status,
+             i.invoice_line_item_id,
              GREATEST(i.amount_due - COALESCE(i.amount_paid, 0), 0) AS remaining_amount,
              CASE
                WHEN i.id IS NULL THEN 'UNTRACKED'
@@ -409,7 +410,8 @@ router.get('/for-child', requireParent, async (req, res) => {
       FROM student_one_off_fees f
       JOIN student_fee_assignments fa ON fa.fee_id = f.id
       LEFT JOIN LATERAL (
-        SELECT i.id, i.amount_due, i.amount_paid, i.status
+        SELECT i.id, i.amount_due, i.amount_paid, i.status,
+               li.id AS invoice_line_item_id
         FROM invoices i
         JOIN invoice_line_items li ON li.invoice_id = i.id
         WHERE i.student_id = fa.student_id

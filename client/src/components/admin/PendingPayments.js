@@ -10,6 +10,12 @@ const authHeaders = () => {
 const R = (n) => `R ${Number(n || 0).toFixed(2)}`;
 const fmt = (d) => d ? new Date(d).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 const fmtTime = (d) => d ? new Date(d).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+const optionKey = (item) => [
+  item.invoice_id || '',
+  item.invoice_line_item_id || '',
+  item.fee_id || '',
+  item.category || item.service_key || '',
+].join(':');
 
 const STATUS_STYLE = {
   pending:  { color: 'bg-amber-100 text-amber-700 border-amber-200', icon: Clock },
@@ -68,10 +74,16 @@ export default function PendingPayments() {
   };
 
   const closeReceiptModal = () => {
-    if (receiptModal?.url) URL.revokeObjectURL(receiptModal.url);
     setReceiptModal(null);
     setReceiptPreviewFailed(false);
   };
+
+  useEffect(() => {
+    const url = receiptModal?.url;
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [receiptModal?.url]);
 
   useEffect(() => {
     setAllocationDraft(Array.isArray(selected?.selected_obligations)
@@ -351,26 +363,28 @@ export default function PendingPayments() {
                   {allocationDraft.map((item, index) => (
                     <div key={`${item.category || item.service_key || item.fee_id}-${index}`} className="flex items-center gap-3">
                       <select
-                        value={`${item.invoice_id || ''}:${item.category || ''}`}
+                        value={optionKey(item)}
                         onChange={(event) => {
-                          const option = allocationOptions.find((candidate) =>
-                            `${candidate.invoice_id}:${candidate.category}` === event.target.value);
+                          const option = allocationOptions.find((candidate) => optionKey(candidate) === event.target.value);
                           if (option) setAllocationDraft((current) => current.map((row, rowIndex) =>
                             rowIndex === index ? {
                               invoice_id: option.invoice_id,
                               invoice_line_item_id: option.invoice_line_item_id,
                               fee_id: option.fee_id || undefined,
+                              assignment_id: option.assignment_id || undefined,
                               category: option.category,
                               amount: option.amount,
                             } : row));
                         }}
                         className="min-w-0 flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
                       >
-                        <option value={`${item.invoice_id || ''}:${item.category || ''}`}>
-                          {item.category || item.service_key || `Fee ${item.fee_id}`}
-                        </option>
+                        {!allocationOptions.some((option) => optionKey(option) === optionKey(item)) && (
+                          <option value={optionKey(item)} disabled>
+                            {item.category || item.service_key || `Fee ${item.fee_id}`} — unavailable, retarget or remove
+                          </option>
+                        )}
                         {allocationOptions.map((option) => (
-                          <option key={`${option.invoice_id}:${option.category}`} value={`${option.invoice_id}:${option.category}`}>{option.label}</option>
+                          <option key={optionKey(option)} value={optionKey(option)}>{option.label}</option>
                         ))}
                       </select>
                       <input
@@ -386,12 +400,13 @@ export default function PendingPayments() {
                   ))}
                   {allocationOptions.length > 0 && (
                     <button type="button" onClick={() => {
-                      const used = new Set(allocationDraft.map((item) => `${item.invoice_id}:${item.category}`));
-                      const option = allocationOptions.find((candidate) => !used.has(`${candidate.invoice_id}:${candidate.category}`));
+                      const used = new Set(allocationDraft.map(optionKey));
+                      const option = allocationOptions.find((candidate) => !used.has(optionKey(candidate)));
                       if (option) setAllocationDraft((current) => [...current, {
                         invoice_id: option.invoice_id,
                         invoice_line_item_id: option.invoice_line_item_id,
                         fee_id: option.fee_id || undefined,
+                        assignment_id: option.assignment_id || undefined,
                         category: option.category,
                         amount: option.amount,
                       }]);
@@ -408,6 +423,12 @@ export default function PendingPayments() {
                     rows={2}
                     className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
                   />
+                  {feedback?.type === 'error' && (
+                    <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                      <span>{feedback.message}</span>
+                    </div>
+                  )}
                   <button type="button" onClick={saveAllocationAdjustment} disabled={actionLoading}
                     className="w-full rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
                     Save allocation adjustment

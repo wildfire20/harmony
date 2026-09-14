@@ -1,0 +1,700 @@
+Harmony Finance Follow-Up — Inline Receipt Preview + Allocation 422 Fix
+
+We have two remaining production issues in the new payment workflow.
+
+The multi-allocation schema audit has already passed in production:
+
+audit:finance-multi-allocation
+ok: true
+selectedObligationsColumn: true
+allocationCategoryColumn: true
+oneOffAssignmentUniqueIndex: true
+paymentTransactionsImmutable: true
+
+Therefore:
+
+DO NOT rerun the finance migration.
+
+Do not deploy automatically.
+Do not alter historical finance records.
+Do not hardcode proof IDs, learner IDs, or fee IDs.
+
+ISSUE 1 — JPG/image receipt does not display inline
+
+Parent and Admin can successfully:
+
+upload receipt
+Open receipt in another tab
+Download receipt
+
+But inline image preview fails.
+
+Browser console shows the exact CSP failure:
+
+Loading the image 'blob:https://www.harmonylearning.co.za/...'
+violates Content Security Policy directive:
+
+img-src 'self' data: https:
+
+The receipt is a JPG:
+
+IMG-20260909-WA0007.jpg
+
+The current modal shows:
+
+This browser could not display the receipt inline.
+Use Open or Download below.
+
+This occurs in both Parent and Admin receipt viewers.
+
+1. Fix CSP for secure blob image previews
+
+The application fetches the authenticated receipt as a Blob and creates:
+
+URL.createObjectURL(blob)
+
+This is correct for keeping the underlying receipt private.
+
+Update Helmet/CSP so trusted browser-generated Blob URLs can render as images.
+
+Current effective rule resembles:
+
+img-src 'self' data: https:
+
+Change only what is necessary so it also safely permits:
+
+blob:
+
+Example intended policy:
+
+img-src 'self' data: https: blob:
+
+Preserve the existing secure policy.
+
+Do NOT:
+
+use *
+disable CSP
+make receipt URLs public
+weaken unrelated security directives
+
+PDFs should retain the existing secure blob: frame support.
+
+2. Correct preview renderer
+
+Determine trusted server-side content type.
+
+For:
+
+image/jpeg
+image/png
+image/webp
+
+render:
+
+<img>
+
+using the authenticated Blob URL.
+
+For:
+
+application/pdf
+
+use the secure PDF inline viewer.
+
+Keep:
+
+Open
+Download
+
+as fallback actions for both.
+
+Image preview must:
+
+preserve aspect ratio
+fit inside the modal
+never stretch/distort
+work on mobile
+work on desktop
+be large enough for Admin to verify the payment
+
+Revoke object URLs with:
+
+URL.revokeObjectURL(...)
+
+when the modal closes or the receipt changes.
+
+Prevent Blob URL memory leaks.
+
+ISSUE 2 — Payment allocation / approval returns 422
+
+A new Parent payment successfully submitted.
+
+Admin receives it correctly.
+
+Example production test:
+
+Total payment: R4,250
+
+Proposed allocations:
+
+Boarding     R1,600
+Tuition      R2,350
+One-Off        R300
+-------------------
+Total        R4,250
+
+Unallocated     R0
+
+However:
+
+PUT /api/payment-proofs/7/allocations
+→ 422 Unprocessable Content
+
+and:
+
+POST /api/payment-proofs/7/approve
+→ 422 Unprocessable Content
+
+Admin receives:
+
+One of the selected payment items is no longer available for allocation.
+Please review the payment allocation before approving.
+
+This means the new validation is correctly rejecting something, but the Parent/Admin interface is still allowing an obligation that the authoritative ledger does not consider payable.
+
+That mismatch must be fixed.
+
+3. Identify the EXACT failing obligation
+
+Inspect production-safe logs and reproduce using a test fixture with the same data shape.
+
+Determine whether the failing allocation is:
+
+Boarding R1,600
+Tuition R2,350
+One-Off R300
+
+Do not return another generic explanation.
+
+Final report must explicitly state something like:
+
+Boarding failed because ...
+
+or:
+
+One-Off failed because ...
+
+Trace:
+
+Parent payment options
+↓
+selected_obligations
+↓
+Admin proposed allocations
+↓
+resolvePaymentProposals()
+↓
+financeLedger authoritative obligations
+4. Parent must only be offered genuinely payable obligations
+
+This is the core rule.
+
+The Parent payment form must NOT build payable choices merely from:
+
+learner enrollment flags
+Service Pricing
+current service configuration
+a one-off fee card
+
+A selectable payment item must correspond to a real authoritative payable obligation.
+
+Parent payment choices must come from:
+
+persisted invoice
++
+persisted invoice line
++
+positive outstanding category balance
+
+or the equivalent authoritative one-off obligation.
+
+Therefore:
+
+Displayed as selectable
+
+must mean:
+
+Backend can actually allocate to it.
+
+Do not let Parent select something that will inevitably fail during Admin approval.
+
+5. Recurring service obligations
+
+For:
+
+Tuition
+Boarding
+Transport
+Aftercare
+
+distinguish:
+
+learner is enrolled in service
+
+from:
+
+learner currently has an outstanding authoritative charge for service
+
+They are not the same thing.
+
+Example:
+
+Boarding checkbox = enabled
+
+does NOT automatically prove:
+
+Boarding R1,600 is currently payable.
+
+A persisted billing line must exist.
+
+6. Diagnose Boarding specifically
+
+The current test contains:
+
+Boarding R1,600
+
+Audit whether this learner has:
+
+persisted Boarding charge line
+correct billing month
+positive outstanding Boarding amount
+proper bundle relationship
+correct invoice ID
+correct invoice line ID
+
+If the Parent UI currently generates Boarding from Service Pricing even though no actual charge exists, fix the Parent query.
+
+Do NOT fabricate a historical Boarding obligation during approval.
+
+If the current billing cycle legitimately requires a Boarding charge but invoice generation failed to persist it, diagnose the invoice-generation path separately.
+
+7. Diagnose Tuition
+
+Tuition must resolve to a persisted outstanding Tuition line.
+
+Preserve:
+
+oldest unpaid Tuition first
+
+where no explicit invoice was selected.
+
+Parent submission should preferably persist:
+
+invoice_id
+invoice_line_item_id
+billing period
+category = tuition
+
+when the choice is made.
+
+Approval must not rely on stale text status such as:
+
+invoice.status = 'Unpaid'
+
+if authoritative balance shows a legitimate remaining Tuition amount.
+
+8. Diagnose the R300 one-off fee
+
+The newly created one-off fee is visible under:
+
+Admin → Payments → One-Off Fees
+
+Example:
+
+Fee: test im tierd
+Amount: R300
+Assigned: Grade 2
+
+Verify the selected Parent learner has:
+
+one-off assignment
+↓
+persisted one-off invoice line
+↓
+positive outstanding balance
+
+The Parent payment choice must persist the specific:
+
+fee_id
+assignment ID if available
+invoice_id
+invoice_line_item_id
+category = one_off
+
+Do not reduce it to only:
+
+one_off
+
+if that loses the identity of which fee is being paid.
+
+Multiple one-off fees may exist simultaneously.
+
+The system must distinguish:
+
+Zoo Trip
+Fun Day
+Uniform
+Excursion
+
+independently.
+
+9. Proposed allocation objects must carry authoritative identity
+
+Use normalized allocation objects similar to:
+
+{
+  category: 'boarding',
+  invoiceId: 123,
+  invoiceLineItemId: 456,
+  amount: 1600
+}
+
+and:
+
+{
+  category: 'one_off',
+  feeId: 4,
+  invoiceId: 123,
+  invoiceLineItemId: 789,
+  amount: 300
+}
+
+Do not rely only on labels such as:
+
+boarding
+tuition
+one_off
+
+when approving.
+
+10. Admin allocation dropdown must only contain valid targets
+
+When Admin chooses:
+
+Adjust Allocation
+
+the dropdown must be populated only with authoritative payable obligations for that learner.
+
+Do not show:
+
+settled obligations
+missing service lines
+unrelated learner obligations
+old one-off fees already paid
+
+Display clear labels:
+
+Tuition — June 2026 — R2,350 outstanding
+Boarding — September 2026 — R1,600 outstanding
+Zoo Trip — R300 outstanding
+
+Admin should not have to understand internal IDs.
+
+11. If selected obligation becomes stale AFTER submission
+
+A legitimate race may occur.
+
+Example:
+
+Parent submits payment.
+
+Before Admin approves:
+
+another Admin manually settles one of those obligations.
+
+In that case:
+
+return:
+
+409 Conflict
+
+and tell Admin exactly which item changed.
+
+Example:
+
+Boarding for September 2026 is already fully paid.
+Please adjust the allocation before approving.
+
+Do not return only:
+
+One item is unavailable.
+
+Keep technical IDs/details server-side.
+
+12. Saving allocation adjustment
+
+Current:
+
+PUT /api/payment-proofs/:id/allocations
+
+also returns 422.
+
+Fix the same authoritative-resolution mismatch there.
+
+Admin must be able to:
+
+choose valid obligations
+enter amounts
+provide mandatory adjustment reason
+save
+reopen modal
+see the exact saved normalized allocation
+approve successfully
+
+Saving must not create finance transactions yet.
+
+It only persists the proposed allocation plan until approval.
+
+13. Mixed payment approval
+
+When all three obligations genuinely exist:
+
+Boarding      R1,600
+Tuition       R2,350
+One-Off         R300
+--------------------
+Total         R4,250
+
+approval must succeed atomically.
+
+One payment.
+One receipt.
+Three immutable allocation events.
+
+BEGIN
+↓
+lock pending payment
+↓
+resolve three authoritative obligations
+↓
+lock invoices/lines
+↓
+recheck balances
+↓
+validate total
+↓
+create allocations
+↓
+update ledger
+↓
+mark Approved
+↓
+audit
+↓
+COMMIT
+↓
+notifications after commit
+14. Partial and mixed service payments
+
+Do not assume every selected category must be fully paid.
+
+Example:
+
+Boarding due: R1,600
+Parent allocates: R800
+
+Result:
+
+Boarding paid: R800
+Boarding outstanding: R800
+Status: Partial
+
+Same applies to:
+
+Tuition
+Transport
+one-off fee
+
+according to existing finance rules.
+
+15. Fully paid one-off lifecycle
+
+Once Admin approves the full R300 one-off obligation:
+
+Parent must no longer see it under:
+
+Optional Fees to Include
+
+It must remain visible in:
+
+payment history
+proof history
+approved transactions
+one-off reconciliation
+audit
+
+Do not delete the one-off assignment.
+
+16. One-off Details view
+
+Preserve the new:
+
+Details
+
+functionality.
+
+The reconciliation screen should derive from real allocations and show:
+
+Assigned
+Paid
+Pending
+Partial
+Unpaid
+Expected
+Collected
+Outstanding
+
+A mixed payment allocating R300 to the fee must update this view after approval.
+
+17. Better frontend handling of 409/422
+
+Do not treat controlled validation responses like unexpected server crashes.
+
+When API returns:
+
+409
+
+or:
+
+422
+
+show the safe backend message prominently in the modal.
+
+Example:
+
+Boarding has no outstanding charge for this learner.
+Remove or retarget this allocation before approving.
+
+Keep the payment pending.
+
+Do not refresh/lose the Admin's proposed allocation unnecessarily.
+
+18. Regression tests
+
+Create authoritative fixtures for:
+
+Valid mixed payment
+Boarding R1,600 outstanding
+Tuition R2,350 outstanding
+One-Off R300 outstanding
+
+payment R4,250
+
+Verify:
+
+Parent sees all three
+submission persists line IDs
+Admin sees all three
+adjustment save works
+approval succeeds
+three allocations exist
+total R4,250
+one-off reconciliation updates
+Service flag without financial obligation
+Boarding enrollment flag = true
+no outstanding Boarding ledger line
+
+Verify:
+
+Parent does NOT see Boarding as payable
+Admin does NOT see it as allocation target
+no fabricated Boarding charge
+Stale obligation
+
+Submit payment while obligation outstanding.
+
+Settle obligation before approval.
+
+Verify controlled 409 and useful Admin message.
+
+One-off identity
+
+Create two one-off fees simultaneously.
+
+Verify payment intended for Fee A cannot allocate to Fee B.
+
+19. Receipt preview tests
+
+Verify inline:
+
+JPG
+JPEG
+PNG
+WebP
+PDF
+
+on:
+
+Parent desktop
+Parent mobile
+Admin desktop
+Admin mobile
+
+Confirm:
+
+blob: image URL
+
+is allowed by CSP.
+
+Confirm unrelated Parent receives:
+
+403
+
+Keep Open and Download fallbacks.
+
+20. Do NOT disturb working features
+
+Preserve:
+
+fast Parent submission
+idempotency
+immutable approved transactions
+corrections/reversals
+notification system
+Parent security
+one-off notification emails
+section badges
+discount logic
+bundle rules
+existing migration/schema
+
+No migration should be required unless you discover a genuine missing schema requirement.
+
+If one is required, explain it but DO NOT RUN IT.
+
+FINAL REPORT
+
+Return:
+
+Exact allocation that caused the current R4,250 payment to return 422
+Why Parent was allowed to select it
+Fix to Parent payable-obligation query
+Fix to Admin allocation targets
+Fix to saving allocation adjustments
+Fix to approval
+How Boarding is resolved
+How Tuition is resolved
+How one-off fee identity is preserved
+Inline JPG/PNG/WebP preview fix
+CSP change made
+PDF behaviour
+Error handling for stale obligations
+Files changed
+Whether migration is required
+Tests added
+Test results
+Exact production verification steps
+
+Do not deploy automatically.
+Do not run migrations automatically.
