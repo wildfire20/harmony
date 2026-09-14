@@ -29,6 +29,8 @@
     "migrate:manual-finance-reconciliation": "node scripts/run-manual-finance-reconciliation-migration.js",
     "migrate:mini-phase1-finance": "node scripts/run-mini-phase1-finance-migration.js",
     "audit:mini-phase1-finance": "node scripts/run-mini-phase1-finance-migration.js --audit",
+    "migrate:finance-multi-allocation": "node scripts/run-finance-multi-allocation-migration.js",
+    "audit:finance-multi-allocation": "node scripts/audit-finance-multi-allocation.js",
     "audit:parent-rollout-preflight": "node scripts/audit-parent-rollout-preflight.js",
     "audit:parent-schema-debug": "node scripts/audit-parent-schema-debug.js",
     "audit:calendar-parent-visibility": "node scripts/audit-calendar-parent-visibility.js",

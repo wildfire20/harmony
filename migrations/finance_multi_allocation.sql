@@ -13,6 +13,7 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conname = 'pending_payments_selected_obligations_array'
+      AND conrelid = 'public.pending_payments'::regclass
   ) THEN
     ALTER TABLE pending_payments
       ADD CONSTRAINT pending_payments_selected_obligations_array
