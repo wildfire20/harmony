@@ -279,6 +279,13 @@ test('mobile learner edit keeps enrollment and discount controls visible', () =>
   assert.doesNotMatch(styles, /\.student-enrollment-controls[\s\S]{0,300}overflow-x/);
 });
 
+test('unallocated payment selector identifies each unpaid invoice by month and outstanding amount', () => {
+  const component = source('client/src/components/admin/ManualPayments.js');
+  assert.match(component, /formatInvoicePeriod\(invoice\.due_date\)/);
+  assert.match(component, /formatRand\(invoice\.outstanding_balance\)/);
+  assert.match(component, /outstanding/);
+});
+
 test('reversal fails closed when the invoice balance cannot support the compensation', async () => {
   const executor = correctionExecutor({ invoicePaid: 100, originalAmount: 500 });
   await assert.rejects(

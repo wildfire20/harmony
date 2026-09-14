@@ -5,6 +5,20 @@ import { paymentsAPI, adminAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 import toast from 'react-hot-toast';
 
+const formatInvoicePeriod = (dueDate) => {
+  if (!dueDate) return 'Unknown period';
+  return new Date(dueDate).toLocaleDateString('en-ZA', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC'
+  });
+};
+
+const formatRand = (amount) => Number(amount || 0).toLocaleString('en-ZA', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
 const ManualPayments = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeSearch, setActiveSearch] = useState('');
@@ -604,7 +618,7 @@ const ManualPayments = () => {
                                  <option value="">Select invoice</option>
                                  {invoices.map(invoice => (
                                    <option key={invoice.id} value={invoice.id}>
-                                     {invoice.reference_number || `#${invoice.id}`} — R {Number(invoice.outstanding_balance).toFixed(2)}
+                                      {formatInvoicePeriod(invoice.due_date)} — R {formatRand(invoice.outstanding_balance)} outstanding
                                    </option>
                                  ))}
                                </select>
