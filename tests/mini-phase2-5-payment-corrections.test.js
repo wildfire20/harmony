@@ -239,6 +239,25 @@ test('manual corrections normalize legacy payment methods before replacement', (
   assert.doesNotMatch(correction, /body\('payment_method'\)\.optional\(\)\.isIn/);
 });
 
+test('manual correction logs the failing transaction stage without exposing database details', () => {
+  const routes = source('routes/enhanced-invoices.js');
+  const correction = routes.split("router.put('/manual-payment/:paymentId'")[1]
+    .split("router.delete('/manual-payment/:paymentId'")[0];
+  for (const stage of [
+    'load_original_payment',
+    'reverse_original_allocation',
+    'allocate_replacement_payment',
+    'write_audit_event',
+    'commit_transaction',
+  ]) {
+    assert.match(correction, new RegExp(`correctionStage = '${stage}'`));
+  }
+  assert.match(correction, /Manual payment correction failed/);
+  assert.match(correction, /constraint: error\.constraint/);
+  assert.doesNotMatch(correction, /res\.status[^;]+constraint/);
+  assert.doesNotMatch(correction, /res\.status[^;]+stack/);
+});
+
 test('mobile learner edit keeps enrollment and discount controls visible', () => {
   const component = source('client/src/components/admin/StudentManagement.js');
   const styles = source('client/src/index.css');

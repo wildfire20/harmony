@@ -1454,12 +1454,14 @@ router.put('/manual-payment/:paymentId', [
   body('payment_method').optional().isString().isLength({ min: 1, max: 100 }),
   body('reason').isString().trim().isLength({ min: 3, max: 500 }).withMessage('A correction reason is required')
 ], async (req, res) => {
+  const { paymentId } = req.params;
+  let correctionStage = 'validate_request';
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
-    const { paymentId } = req.params;
     const { amount, payment_date, description, reference, month, year, payment_method, reason } = req.body;
 
+    correctionStage = 'acquire_database_connection';
     const client = await db.pool.connect();
     let original;
     let replacement;
@@ -1467,7 +1469,9 @@ router.put('/manual-payment/:paymentId', [
     let replacementPayment;
     let reversalId;
     try {
+      correctionStage = 'begin_transaction';
       await client.query('BEGIN');
+      correctionStage = 'load_original_payment';
       const originalResult = await client.query(`
         SELECT *
         FROM payment_transactions
@@ -1479,12 +1483,14 @@ router.put('/manual-payment/:paymentId', [
         return res.status(404).json({ success: false, message: 'Payment not found' });
       }
       original = originalResult.rows[0];
+      correctionStage = 'normalize_replacement_fields';
       const oldAmount = parseFloat(original.amount);
       const newAmount = amount == null ? oldAmount : parseFloat(amount);
       const newDate = payment_date || original.payment_date || original.transaction_date;
       const newMonth = month ? parseInt(month, 10) : (original.month || (newDate ? new Date(newDate).getUTCMonth() + 1 : null));
       const newYear = year ? parseInt(year, 10) : (original.year || (newDate ? new Date(newDate).getUTCFullYear() : null));
 
+      correctionStage = 'reverse_original_allocation';
       const reversal = await reversePayment(client, {
         transactionId: paymentId,
         recordedBy: req.user.id,
@@ -1496,6 +1502,7 @@ router.put('/manual-payment/:paymentId', [
         throw error;
       }
       reversalId = reversal.reversalId;
+      correctionStage = 'allocate_replacement_payment';
       const allocation = await allocatePayment(client, {
         studentId: original.student_id,
         amount: newAmount,
@@ -1516,12 +1523,14 @@ router.put('/manual-payment/:paymentId', [
       replacement = allocation.allocations[0] || null;
       replacementTransactionIds = allocation.allocations.map((item) => item.transactionId);
       if (replacement?.transactionId) {
+        correctionStage = 'load_replacement_payment';
         const replacementResult = await client.query(
           'SELECT * FROM payment_transactions WHERE id = $1',
           [replacement.transactionId],
         );
         replacementPayment = replacementResult.rows[0] || null;
       }
+      correctionStage = 'write_audit_event';
       await logAudit({
         userId: req.user.id,
         userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
@@ -1550,6 +1559,7 @@ router.put('/manual-payment/:paymentId', [
         executor: client,
         required: true,
       });
+      correctionStage = 'commit_transaction';
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -1560,6 +1570,7 @@ router.put('/manual-payment/:paymentId', [
 
     console.log(`✅ Manual payment ${paymentId} reversed and reapplied as transaction ${replacement?.transactionId || 'unallocated'}`);
 
+    correctionStage = 'send_parent_notification';
     await notifyPayment({
       kind: 'adjusted',
       paymentId: replacement?.transactionId || reversalId,
@@ -1575,7 +1586,14 @@ router.put('/manual-payment/:paymentId', [
     });
 
   } catch (error) {
-    console.error('Edit payment error:', error);
+    console.error('Manual payment correction failed', {
+      paymentId,
+      stage: correctionStage,
+      error: error.message,
+      code: error.code,
+      constraint: error.constraint,
+      stack: error.stack,
+    });
     const safeCorrectionMessage = (
       error.status ||
       /^(Cannot reverse payment|Payment was already reversed|Payment has already been reversed|A reversal transaction cannot)/.test(error.message || '')

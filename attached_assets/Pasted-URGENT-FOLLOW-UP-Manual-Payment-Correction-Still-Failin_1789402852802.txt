@@ -1,0 +1,344 @@
+URGENT FOLLOW-UP — Manual Payment Correction Still Failing in Production
+
+The previous legacy payment-method normalization fix has been deployed, but the production payment correction problem is still occurring.
+
+We now have concrete production evidence.
+
+When Admin attempts to update the affected manual payment:
+
+PUT /api/enhanced-invoices/manual-payment/1839
+
+returns:
+
+500 Internal Server Error
+
+Frontend receives:
+
+{
+  "success": false,
+  "message": "Failed to update payment"
+}
+
+The failure is triggered from:
+
+ManualPayments.js
+updateManualPayment()
+
+This means the request is reaching the backend and failing inside the correction endpoint or its finance-ledger transaction.
+
+Do NOT make another speculative frontend fix.
+
+Do NOT hardcode payment ID 1839.
+
+Do NOT modify production data during diagnosis.
+
+Do NOT deploy automatically.
+
+Do NOT run migrations automatically.
+
+1. Reproduce the exact failing correction
+
+Investigate payment:
+
+manual payment ID: 1839
+
+Current Admin correction form shown in production:
+
+Amount: R2,000.00
+Payment Date: 05/01/2026
+For Month: November
+Year: 2026
+Payment Method: Manual entry
+Correction Reason: wrong amount
+Bank Reference: existing MANUAL-* reference
+
+The original payment being corrected was approximately R200 and Admin is trying to correct it to R2,000.
+
+Use the same data shape in a safe test fixture.
+
+Do not alter payment 1839 in production while investigating.
+
+2. Capture the REAL backend exception
+
+The current endpoint is swallowing the actual error and returning only:
+
+Failed to update payment
+
+Inspect:
+
+routes/enhanced-invoices.js
+services/financeLedger.js
+
+and every helper called by:
+
+PUT /api/enhanced-invoices/manual-payment/:id
+
+Reproduce the failure locally/dev and obtain the complete:
+
+exception type
+PostgreSQL error code if applicable
+constraint name
+SQL statement / operation that fails
+stack trace
+exact step of the reversal/replacement transaction
+
+Do not expose sensitive SQL/database errors to the browser in production.
+
+Server logs may contain the detailed error; client response must remain safe.
+
+3. Trace the correction transaction step-by-step
+
+Add safe development diagnostics around each stage:
+
+1. Load original payment
+2. Normalize payment method
+3. Resolve original allocation(s)
+4. Resolve invoice(s)
+5. Lock payment/invoice rows
+6. Create reversal transaction
+7. Reverse original allocation
+8. Restore invoice outstanding amount
+9. Build replacement payment
+10. Resolve target month/year invoice
+11. Allocate replacement amount
+12. Recalculate ledger
+13. Write audit event
+14. Commit
+15. Send Parent notification
+
+Identify exactly which numbered stage is throwing.
+
+4. Specifically inspect likely legacy-data compatibility problems
+
+The previous fix only addressed payment_method.
+
+Payment 1839 may contain other legacy fields that the newer immutable correction workflow assumes exist.
+
+Compare payment 1839's data shape, not personally identifiable values, with a recent payment that can be corrected successfully.
+
+Check:
+
+payment_method
+payment_channel
+manual_entry
+transaction_type
+invoice_id
+learner_id / student relationship
+allocation records
+amount
+allocated_amount
+payment month
+payment year
+payment date
+bank/reference fields
+created_by / admin ID
+reversal linkage
+parent transaction ID
+nullable fields introduced by newer migrations
+legacy rows created before Mini Phase 1 / Mini Phase 2.5
+
+Look specifically for NULL, missing, stale or differently named fields.
+
+5. Check database constraints
+
+A 500 during an otherwise valid request may be a PostgreSQL constraint failure.
+
+Inspect the relevant transaction/payment schema and check for:
+
+CHECK constraints
+enum constraints
+NOT NULL constraints
+foreign keys
+unique constraints
+transaction/payment-channel constraints
+reversal-related constraints
+
+In particular, verify that the reversal created by the correction workflow uses values accepted by the actual production-compatible schema.
+
+The previous fix stopped converting:
+
+manual_entry
+
+into:
+
+manual_entry_reversal
+
+Verify there are not equivalent incompatibilities in:
+
+transaction_type
+source
+payment_channel
+status
+allocation type
+audit action
+6. Check invoice allocation logic
+
+Admin is changing:
+
+R200 → R2,000
+
+The correction should:
+
+reverse the R200 allocation,
+restore the invoice by exactly R200,
+create the R2,000 replacement payment,
+allocate the new amount according to the selected invoice/month,
+leave any legitimate remainder/unallocated amount according to existing finance rules.
+
+Do not fail simply because the replacement amount differs from the original amount.
+
+Verify the algorithm supports:
+
+replacement > original
+replacement < original
+replacement = original
+7. Investigate Month / Year / Payment Date separately
+
+The production screenshot shows:
+
+Payment Date: 05/01/2026
+For Month: November
+Year: 2026
+
+Determine whether these are intentionally independent fields.
+
+If they are independent, do NOT introduce artificial validation requiring the payment date's calendar month to equal For Month.
+
+For Month represents the invoice/fee period being paid.
+
+Payment Date represents when payment occurred.
+
+A parent may pay a November invoice on a different date.
+
+However, verify that the backend does not incorrectly derive the target invoice from the payment date instead of For Month + Year.
+
+8. Preserve immutable finance history
+
+Do NOT solve this by:
+
+UPDATE payments SET amount = 2000 ...
+
+or equivalent.
+
+The correct process remains:
+
+Original R200 transaction
+      ↓
+immutable reversal of R200
+      ↓
+replacement R2,000 transaction
+      ↓
+new allocation(s)
+
+Historical financial records must remain auditable.
+
+9. Transaction atomicity
+
+The entire correction must remain inside one database transaction.
+
+If any part fails:
+
+ROLLBACK
+
+No partial reversal, allocation or audit record may remain.
+
+Parent notification must occur after commit, not before.
+
+10. Improve diagnostics
+
+For development/server logs, change the generic catch handling so the actual internal error is logged safely:
+
+console.error('Manual payment correction failed', {
+  paymentId,
+  error: error.message,
+  code: error.code,
+  constraint: error.constraint,
+  stack: error.stack
+});
+
+Do NOT log:
+
+parent personal information
+learner personal information
+bank details
+full payment references
+
+Browser/API response should remain safe, e.g.:
+
+{
+  "success": false,
+  "message": "Unable to correct this payment. Please try again or contact support."
+}
+11. Add a regression fixture matching payment 1839
+
+Create a safe test fixture with the same relevant legacy data characteristics as payment 1839.
+
+Test:
+
+old R200 manual payment
+↓
+Admin corrects to R2,000
+↓
+original remains in history
+↓
+reversal R200 created
+↓
+replacement R2,000 created
+↓
+correct invoice allocation
+↓
+correct paid total
+↓
+correct outstanding amount
+↓
+audit record exists
+↓
+transaction commits
+
+Also test:
+
+R2,000 → R200
+same amount but changed date/reference
+legacy EFT
+legacy manual
+legacy/null optional metadata
+partial invoice
+fully paid invoice
+replacement larger than outstanding
+replacement causing legitimate unallocated credit
+12. IMPORTANT — inspect production logs after the failed request
+
+Since a production request has already generated:
+
+PUT /api/enhanced-invoices/manual-payment/1839 → HTTP 500
+
+inspect the Railway/server logs corresponding to that request if available.
+
+The browser console only proves the endpoint returned 500.
+
+The server log should tell us why.
+
+Do not stop at the frontend Axios error.
+
+Final report required
+
+Do not tell me simply that it is fixed.
+
+Return:
+
+Exact backend exception causing HTTP 500
+Exact line/function where it failed
+Database error/constraint if applicable
+Why payment 1839 triggered it
+Whether other historical payments can be affected
+Why the previous payment-method normalization did not fully fix it
+Exact code change made
+How reversal/replacement now works for this case
+Tests added
+Test results
+Whether any migration is required
+Exact production verification steps
+
+Do not deploy automatically.
+
+Do not modify production payment 1839 while diagnosing.
