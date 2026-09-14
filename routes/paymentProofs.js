@@ -127,7 +127,7 @@ const parseSelectedObligations = (value) => {
       throw { status: 400, message: 'Each selected obligation must be an object' };
     }
     const result = {};
-    ['invoice_id', 'invoice_line_item_id', 'fee_id', 'assignment_id', 'service_key', 'category', 'amount'].forEach((key) => {
+    ['invoice_id', 'invoice_line_item_id', 'fee_id', 'assignment_id', 'service_key', 'category', 'amount', 'legacy_invoice_level'].forEach((key) => {
       if (item[key] != null) result[key] = item[key];
     });
     if (!result.invoice_id && !result.fee_id && !result.service_key) {
@@ -141,6 +141,25 @@ const parseSelectedObligations = (value) => {
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+const optionalPositiveId = (value, label) => {
+  if (value == null || value === '') return null;
+  const raw = String(value);
+  if (!/^[1-9]\d*$/.test(raw)) {
+    const error = new Error(`${label} must be a positive integer`);
+    error.status = 422;
+    error.safeMessage = `The selected payment item has an invalid ${label}. Please reload and try again.`;
+    throw error;
+  }
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed)) {
+    const error = new Error(`${label} is outside the supported integer range`);
+    error.status = 422;
+    error.safeMessage = `The selected payment item has an invalid ${label}. Please reload and try again.`;
+    throw error;
+  }
+  return parsed;
+};
+
 const resolveChild = async (parentId, childId) => {
   const q = childId
     ? `SELECT u.* FROM users u JOIN parent_students ps ON ps.student_id=u.id WHERE ps.parent_id=$1 AND u.id=$2 LIMIT 1`
@@ -162,22 +181,25 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
     const rawCategory = String(obligation.category || obligation.service_key || '').trim();
     const oneOffCategoryMatch = rawCategory.match(/^one_off:(\d+)$/);
     const feeId = obligation.fee_id != null
-      ? Number(obligation.fee_id)
-      : oneOffCategoryMatch ? Number(oneOffCategoryMatch[1]) : null;
+      ? optionalPositiveId(obligation.fee_id, 'fee ID')
+      : oneOffCategoryMatch ? optionalPositiveId(oneOffCategoryMatch[1], 'fee ID') : null;
+    const invoiceId = optionalPositiveId(obligation.invoice_id, 'invoice ID');
+    const invoiceLineItemId = optionalPositiveId(obligation.invoice_line_item_id, 'invoice line ID');
+    const assignmentId = optionalPositiveId(obligation.assignment_id, 'assignment ID');
     const category = feeId != null || rawCategory === 'one_off'
       ? 'one_off'
       : String(obligation.service_key || rawCategory).trim();
-    const params = [studentId];
-    const clauses = ['i.student_id = $1'];
-    const hasExactTarget = obligation.invoice_id != null || obligation.invoice_line_item_id != null;
+    const params = [optionalPositiveId(studentId, 'learner ID')];
+    const clauses = ['i.student_id = $1::integer'];
+    const hasExactTarget = invoiceId != null || invoiceLineItemId != null;
     if (!hasExactTarget) clauses.push('i.amount_paid < i.amount_due');
-    if (obligation.invoice_id != null) {
-      params.push(Number(obligation.invoice_id));
-      clauses.push(`i.id = $${params.length}`);
+    if (invoiceId != null) {
+      params.push(invoiceId);
+      clauses.push(`i.id = $${params.length}::integer`);
     }
-    if (obligation.invoice_line_item_id != null) {
-      params.push(Number(obligation.invoice_line_item_id));
-      clauses.push(`li.id = $${params.length}`);
+    if (invoiceLineItemId != null) {
+      params.push(invoiceLineItemId);
+      clauses.push(`li.id = $${params.length}::integer`);
     }
     if (feeId != null) {
       params.push(String(feeId));
@@ -185,21 +207,21 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
       params.push(Number(feeId));
       clauses.push(`EXISTS (
         SELECT 1 FROM student_fee_assignments fa
-        WHERE fa.student_id=i.student_id AND fa.fee_id=$${params.length}
+        WHERE fa.student_id=i.student_id AND fa.fee_id=$${params.length}::integer
       )`);
-      if (obligation.assignment_id != null) {
-        params.push(Number(obligation.assignment_id));
+      if (assignmentId != null) {
+        params.push(assignmentId);
         clauses.push(`li.metadata->>'assignment_id' = $${params.length}::text`);
         clauses.push(`EXISTS (
           SELECT 1 FROM student_fee_assignments fa
-          WHERE fa.id=$${params.length} AND fa.student_id=i.student_id AND fa.fee_id=$${params.length - 1}
+          WHERE fa.id=$${params.length}::integer AND fa.student_id=i.student_id AND fa.fee_id=$${params.length - 1}::integer
         )`);
       }
     } else if (category) {
       params.push(category);
       clauses.push(`li.service_key = $${params.length}`);
     }
-    const result = await executor.query(`
+    let result = await executor.query(`
       SELECT i.id, i.due_date, i.amount_due, i.amount_paid,
              li.id AS invoice_line_item_id, li.label,
              li.service_key, li.amount AS line_amount, li.metadata,
@@ -232,6 +254,51 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
       ORDER BY i.due_date ASC, i.id ASC
       LIMIT 1
     `, params);
+    // Some old monthly invoices predate line-item snapshots. They may be used
+    // as invoice-level Tuition obligations only when their own persisted
+    // description explicitly identifies Tuition. Current prices and enrollment
+    // flags are deliberately not consulted.
+    if (!result.rows.length && category === 'tuition' && invoiceLineItemId == null) {
+      const legacyParams = [params[0]];
+      const legacyClauses = [
+        'i.student_id = $1::integer',
+        'i.amount_paid < i.amount_due',
+        "COALESCE(i.description, '') ~* '\\m(tuition|school[[:space:]]+fees?)\\M'",
+        'NOT EXISTS (SELECT 1 FROM invoice_line_items existing_li WHERE existing_li.invoice_id=i.id)',
+      ];
+      if (invoiceId != null) {
+        legacyParams.push(invoiceId);
+        legacyClauses.push(`i.id = $${legacyParams.length}::integer`);
+      }
+      result = await executor.query(`
+        SELECT i.id, i.due_date, i.amount_due, i.amount_paid,
+               NULL::integer AS invoice_line_item_id,
+               'Legacy Tuition'::text AS label,
+               'tuition'::text AS service_key,
+               i.amount_due AS line_amount,
+               jsonb_build_object('legacy_invoice_level', true) AS metadata,
+               json_build_array(json_build_object(
+                 'line_type', 'charge', 'service_key', 'tuition',
+                 'amount', i.amount_due, 'is_included', false,
+                 'metadata', jsonb_build_object('legacy_invoice_level', true)
+               )) AS invoice_lines,
+               COALESCE((
+                 SELECT json_agg(json_build_object(
+                   'amount', pt.amount,
+                   'allocation_category', to_jsonb(pt)->>'allocation_category',
+                   'is_reversed', reversal.id IS NOT NULL
+                 ) ORDER BY pt.id)
+                 FROM payment_transactions pt
+                 LEFT JOIN payment_transactions reversal
+                   ON reversal.reverses_transaction_id=pt.id
+                 WHERE pt.invoice_id=i.id
+               ), '[]'::json) AS invoice_transactions
+        FROM invoices i
+        WHERE ${legacyClauses.join(' AND ')}
+        ORDER BY i.due_date ASC, i.id ASC
+        LIMIT 1
+      `, legacyParams);
+    }
     if (!result.rows.length) {
       let reason = `selector ${index + 1} (${rawCategory || `fee:${feeId}` || 'unknown'}) has no outstanding persisted invoice line`;
       let status = 422;
@@ -243,7 +310,7 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
         const assignment = await executor.query(`
           SELECT fa.id
           FROM student_fee_assignments fa
-          WHERE fa.student_id=$1 AND fa.fee_id=$2
+           WHERE fa.student_id=$1::integer AND fa.fee_id=$2::integer
           LIMIT 1
         `, [studentId, feeId]);
         if (assignment.rows.length) {
@@ -288,7 +355,9 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
       error.obligationCategory = ledgerCategory;
       throw error;
     }
-    const availableAmount = Number(invoiceCategoryBalances(
+    const availableAmount = metadata.legacy_invoice_level === true
+      ? Math.max(0, Number(line.amount_due) - Number(line.amount_paid))
+      : Number(invoiceCategoryBalances(
       invoiceLines,
       line.amount_due,
       invoiceTransactions,
@@ -312,9 +381,10 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
     }
     proposals.push({
       invoiceId: Number(line.id),
-      invoiceLineItemId: Number(line.invoice_line_item_id),
+      invoiceLineItemId: line.invoice_line_item_id == null ? null : Number(line.invoice_line_item_id),
       obligationId: feeId,
       ...(metadata.assignment_id != null ? { assignmentId: Number(metadata.assignment_id) } : {}),
+      ...(metadata.legacy_invoice_level === true ? { legacyInvoiceLevel: true } : {}),
       amount: obligation.amount == null ? null : Number(obligation.amount),
       category: ledgerCategory,
       availableAmount,
@@ -741,6 +811,33 @@ router.get('/:id/allocation-options', requireAdmin, async (req, res) => {
           label: `${line?.label || item.category} — ${String(invoice.due_date || '').slice(0, 10)} — R ${Number(item.amount).toFixed(2)}`,
         };
       }).filter(Boolean));
+    const legacyTuition = await db.query(`
+      SELECT i.id, i.due_date, i.reference_number,
+             GREATEST(i.amount_due - i.amount_paid, 0) AS outstanding
+      FROM invoices i
+      WHERE i.student_id=$1::integer
+        AND i.amount_paid < i.amount_due
+        AND i.status <> 'Carried Forward'
+        AND COALESCE(i.description, '') ~* '\\m(tuition|school[[:space:]]+fees?)\\M'
+        AND NOT EXISTS (
+          SELECT 1 FROM invoice_line_items li WHERE li.invoice_id=i.id
+        )
+      ORDER BY i.due_date ASC, i.id ASC
+    `, [Number(proof.student_id)]);
+    legacyTuition.rows.forEach((invoice) => options.push({
+      invoice_id: Number(invoice.id),
+      invoice_line_item_id: null,
+      fee_id: null,
+      assignment_id: null,
+      category: 'tuition',
+      service_key: 'tuition',
+      legacy_invoice_level: true,
+      amount: Number(invoice.outstanding),
+      due_date: invoice.due_date,
+      reference_number: invoice.reference_number,
+      label: `Tuition — ${String(invoice.due_date || '').slice(0, 10)} — R ${Number(invoice.outstanding).toFixed(2)} outstanding`,
+    }));
+    options.sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')));
     res.json({ options });
   } catch (error) {
     console.error('Payment allocation options error:', error);
@@ -867,6 +964,8 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     }
     console.error('Approve proof error:', {
       message: err.message,
+      code: err.code,
+      stage: err.financeStage || 'approval',
       obligationIndex: err.obligationIndex,
       obligationCategory: err.obligationCategory,
     });

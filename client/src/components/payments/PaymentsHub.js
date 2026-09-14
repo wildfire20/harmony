@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DollarSign, FileText, Receipt, BadgeDollarSign, Tag, CreditCard, Shield } from 'lucide-react';
+import { DollarSign, FileText, Receipt, BadgeDollarSign, Tag, CreditCard, Shield, ShieldCheck } from 'lucide-react';
 import { useTheme } from '../common/ThemeProvider';
 import PaymentDashboard from './PaymentDashboard';
 import ManualPayments from '../admin/ManualPayments';
@@ -7,6 +7,7 @@ import PendingPayments from '../admin/PendingPayments';
 import ServicePricingAdmin from '../admin/ServicePricingAdmin';
 import StudentFeeAssignment from '../admin/StudentFeeAssignment';
 import AuditLog from '../admin/AuditLog';
+import MissingChargeReconciliation from '../admin/MissingChargeReconciliation';
 
 const PaymentsHub = () => {
   const { theme } = useTheme();
@@ -24,6 +25,7 @@ const PaymentsHub = () => {
     { id: 'pending',         label: 'Pending Payments', icon: Receipt },
     { id: 'service-pricing', label: 'Service Pricing',  icon: BadgeDollarSign },
     { id: 'one-off-fees',    label: 'One-Off Fees',     icon: Tag },
+    { id: 'reconcile-charge', label: 'Reconcile Charge', icon: ShieldCheck },
     { id: 'audit-log',       label: 'Audit Log',        icon: Shield },
   ];
 
@@ -64,6 +66,7 @@ const PaymentsHub = () => {
         {activeTab === 'pending'         && <PendingPayments />}
         {activeTab === 'service-pricing' && <ServicePricingAdmin />}
         {activeTab === 'one-off-fees'    && <StudentFeeAssignment />}
+        {activeTab === 'reconcile-charge' && <MissingChargeReconciliation />}
         {activeTab === 'audit-log'       && <AuditLog />}
       </div>
     </div>

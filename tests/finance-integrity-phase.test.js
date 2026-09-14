@@ -73,6 +73,71 @@ test('proposed allocations stay category-isolated and leave excess as credit', a
   assert.equal(state.paid.get(2), 1200);
 });
 
+test('R4250 proof allocates R300 one-off and preserves R3950 as unallocated credit', async () => {
+  const state = { paid: 0, transactions: [], nextId: 1 };
+  const executor = {
+    async query(sql, params = []) {
+      if (sql.includes('FROM users')) return { rows: [{ id: 49, student_number: 'TEST-49' }] };
+      if (sql.includes('FROM invoices') && sql.includes('FOR UPDATE')) return { rows: [{
+        id: 8, student_number: 'TEST-49', reference_number: 'ONEOFF-8',
+        amount_due: 300, amount_paid: state.paid, outstanding_balance: 300 - state.paid,
+        due_date: '2026-09-30',
+      }] };
+      if (sql.includes('FROM invoice_line_items')) return { rows: [{
+        invoice_id: 8, line_type: 'charge', service_key: 'one_off_fee',
+        amount: 300, is_included: false, metadata: { category: 'one_off', fee_id: 5, assignment_id: 9 },
+      }] };
+      if (sql.includes('FROM payment_transactions pt')) return { rows: [] };
+      if (sql.includes('UPDATE invoices')) { state.paid = Number(params[0]); return { rows: [] }; }
+      if (sql.includes('INSERT INTO payment_transactions')) {
+        const id = state.nextId++;
+        state.transactions.push({ id, sql, params });
+        return { rows: [{ id }] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+  const result = await allocatePayment(executor, {
+    studentId: 49, amount: 4250, paymentDate: '2026-09-15',
+    paymentMethod: 'proof_of_payment', reference: 'PROOF-X',
+    allocationProposals: [{ invoiceId: 8, category: 'one_off', amount: 300 }],
+  });
+  assert.deepEqual(result.allocations.map((item) => [item.invoiceId, item.amount]), [[8, 300], [null, 3950]]);
+  assert.equal(state.paid, 300);
+});
+
+test('legacy line-less Tuition uses the authoritative invoice and oldest outstanding period', async () => {
+  const { resolvePaymentProposals } = require('../routes/paymentProofs');
+  let calls = 0;
+  const executor = { async query(sql) {
+    calls++;
+    if (calls === 1) return { rows: [] };
+    assert.match(sql, /legacy_invoice_level/);
+    return { rows: [{
+      id: 12, due_date: '2026-04-30', amount_due: 2350, amount_paid: 1400,
+      invoice_line_item_id: null, service_key: 'tuition', line_amount: 2350,
+      metadata: { legacy_invoice_level: true },
+      invoice_lines: [{ line_type: 'charge', service_key: 'tuition', amount: 2350, is_included: false, metadata: { legacy_invoice_level: true } }],
+      invoice_transactions: [],
+    }] };
+  } };
+  const proposals = await resolvePaymentProposals(executor, 49, [{ category: 'tuition', amount: 950 }]);
+  assert.deepEqual(proposals, [{
+    invoiceId: 12, invoiceLineItemId: null, obligationId: null,
+    legacyInvoiceLevel: true, amount: 950, category: 'tuition', availableAmount: 950,
+  }]);
+});
+
+test('malformed allocation IDs fail before PostgreSQL comparison', async () => {
+  const { resolvePaymentProposals } = require('../routes/paymentProofs');
+  await assert.rejects(
+    () => resolvePaymentProposals({ query: async () => assert.fail('database must not be queried') }, 49, [{
+      invoice_id: '8 OR 1=1', category: 'one_off', amount: 300,
+    }]),
+    (error) => error.status === 422 && /invalid invoice ID/.test(error.safeMessage),
+  );
+});
+
 test('R4200 proof resolves tuition, transport and one-off selectors to authoritative lines', async () => {
   const { resolvePaymentProposals } = require('../routes/paymentProofs');
   const executor = {

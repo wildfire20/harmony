@@ -188,12 +188,13 @@ async function createParentNotifications({
     const safeEvent = clean(eventType, 64);
     const safeTitle = clean(title, 180);
     const safeSummary = clean(summary, 500);
-    const safeDedupe = clean(dedupeKey, 240);
-    if (!safeEvent || !safeTitle || !safeSummary || !safeDedupe) return { created: 0 };
+    const defaultSafeDedupe = clean(dedupeKey, 240);
+    if (!safeEvent || !safeTitle || !safeSummary || !defaultSafeDedupe) return { created: 0 };
     const rows = recipients || await parentRecipients({ learnerId, parentIds, gradeId, classId, audience, executor });
     let created = 0;
     const createdRecipients = [];
     for (const recipient of rows) {
+      const safeDedupe = clean(recipient.notificationDedupeKey || defaultSafeDedupe, 240);
       // A recipient row is always linked at insertion time.  This also makes
       // a stale queued event harmless if a parent/learner was unlinked.
       const inserted = await executor.query(`
@@ -243,15 +244,16 @@ async function createParentNotifications({
 
 async function createOneOffFeeNotifications({ fee, learnerIds, executor }) {
   const rows = await parentRecipients({ learnerIds, audience: 'all', executor });
-  const recipients = rows.filter((row, index, all) =>
-    all.findIndex((other) => other.parent_id === row.parent_id) === index);
   return createParentNotifications({
     eventType: EVENT.ONE_OFF_FEE,
     title: 'New fee available',
     summary: 'A new one-off school fee has been added. Open Fees to view the details.',
     destination: 'fees',
     dedupeKey: `one-off-fee:${fee.id}`,
-    recipients,
+    recipients: rows.map((row) => ({
+      ...row,
+      notificationDedupeKey: `one-off-fee:${fee.id}:learner:${row.learner_id}`,
+    })),
     executor,
     deliver: false,
     required: true,
@@ -261,7 +263,10 @@ async function createOneOffFeeNotifications({ fee, learnerIds, executor }) {
 async function deliverOneOffFeeNotifications({ recipients = [] }) {
   const destination = destinationFor('fees');
   const url = portalUrl(destination);
-  for (const recipient of recipients) {
+  const parentRecipients = recipients.filter((row, index, all) =>
+    all.findIndex((other) => other.parent_id === row.parent_id) === index);
+  const emailedMailboxes = new Set();
+  for (const recipient of parentRecipients) {
     const deliveries = [
       deliverPush({
         parentId: recipient.parent_id,
@@ -272,7 +277,9 @@ async function deliverOneOffFeeNotifications({ recipients = [] }) {
         learnerId: recipient.learner_id,
       }),
     ];
-    if (url && recipient.email && recipient.email_verified_at) {
+    const mailbox = String(recipient.email || '').trim().toLowerCase();
+    if (url && recipient.email && recipient.email_verified_at && !emailedMailboxes.has(mailbox)) {
+      emailedMailboxes.add(mailbox);
       deliveries.push(sendEmail(
         recipient.email,
         'New Fee Added — Harmony Learning Institute',

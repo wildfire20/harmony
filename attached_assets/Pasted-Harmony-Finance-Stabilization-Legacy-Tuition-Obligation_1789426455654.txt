@@ -1,0 +1,543 @@
+Harmony Finance Stabilization — Legacy Tuition Obligations + Approval SQL Type Error + Multi-Parent Notifications
+
+We now have concrete production evidence for the remaining finance failures.
+
+Do not make speculative frontend changes.
+
+Do not deploy automatically.
+Do not run migrations automatically.
+Do not alter historical finance records silently.
+Do not hardcode HAR049, payment proof 7, or one-off fee IDs.
+
+The production finance-multi-allocation schema audit has already passed:
+
+selected_obligations: present
+allocation_category: present
+one-off unique index: present
+immutability trigger: present
+audit ok: true
+
+Therefore:
+
+DO NOT rerun finance_multi_allocation.sql.
+
+1. Confirmed production failures
+
+Railway logs show:
+
+selector 1 (boarding) has no outstanding persisted invoice line
+
+and:
+
+selector 1 (tuition) has no outstanding persisted invoice line
+
+These are controlled 422 validation failures.
+
+After Admin removes Tuition/Boarding and leaves only the valid one-off fee, approval then fails with:
+
+operator does not exist: integer = text
+
+This produces a 500.
+
+These are separate problems.
+
+Fix them separately.
+
+2. Read-only audit of the affected learner finance shape
+
+Before changing logic, inspect a safe/read-only equivalent of the affected production data shape.
+
+For the learner, determine:
+
+monthly invoices that exist
+invoice IDs
+invoice amount_due
+invoice amount_paid
+invoice outstanding balance
+invoice status
+persisted invoice_line_items
+tuition line presence
+boarding line presence
+transport line presence
+one-off line presence
+payment allocations
+service enrollment flags
+approved discount lines
+
+We specifically need to distinguish:
+
+A. authoritative monthly invoice exists with outstanding tuition,
+   but the old invoice has no invoice_line_items
+
+versus
+
+B. there is genuinely no financial obligation at all
+
+Do not treat those as the same case.
+
+3. Legacy Tuition compatibility
+
+Admin finance history already shows historical monthly tuition amounts and outstanding months.
+
+The allocator must not say:
+
+"Tuition has no outstanding charge"
+
+merely because an older legitimate tuition invoice predates invoice_line_items.
+
+If an old monthly invoice is authoritative and has:
+
+amount_due > amount_paid
+
+but has no line-item breakdown because it predates the newer finance model, support a controlled legacy tuition obligation.
+
+Requirements:
+
+use the existing invoice as the authoritative obligation
+use its real outstanding amount
+do not fabricate a new historical invoice
+do not invent historical service lines
+do not rewrite invoice history
+preserve immutable payment allocations
+
+Admin allocation target may display something like:
+
+Tuition — April 2026 — R950 outstanding
+
+even if that invoice is a legacy tuition-only invoice without invoice_line_items.
+
+This legacy fallback is allowed only where the historical invoice can safely be identified as tuition.
+
+New/current invoices must continue using persisted invoice lines.
+
+4. Oldest unpaid Tuition must work with legacy invoices
+
+Harmony's intended rule remains:
+
+oldest unpaid tuition first
+
+Example:
+
+April outstanding R950
+July outstanding R200
+August outstanding R2,350
+
+If Parent/Admin allocates Tuition:
+
+use the oldest legitimate outstanding tuition obligation first unless Admin explicitly retargets.
+
+Do not require an invoice_line_item_id for a historical tuition-only invoice if the invoice itself is the authoritative legacy obligation.
+
+Persist enough metadata to distinguish:
+
+normal line-item tuition allocation
+
+from:
+
+legacy invoice-level tuition allocation
+
+without weakening auditability.
+
+5. Boarding is different — do not infer historical charges from the checkbox
+
+A learner having:
+
+Boarding = enabled
+
+does NOT prove that an old Boarding charge existed.
+
+Therefore:
+
+do not fabricate historical Boarding charges from enrollment flags
+do not automatically backfill past Boarding months
+
+Instead investigate:
+
+Why does the learner currently have Boarding enabled,
+but no persisted Boarding charge line?
+
+Determine whether:
+
+Boarding began only recently
+current/future invoice generation failed
+Boarding is part of a bundle
+an included service should be zero-value
+historical invoices predate service-line tracking
+6. Fix current/future recurring service generation
+
+For current and future billing:
+
+if the learner is legitimately enrolled in a billable service such as:
+
+Boarding
+Transport
+Aftercare
+
+the normal invoice-generation process must persist the appropriate service line.
+
+Do not rely on the enrollment flag during payment approval.
+
+Payment approval should consume a charge that was already created by billing.
+
+If current billing failed to create a legitimate service charge, fix the invoice-generation path.
+
+7. Add controlled Admin reconciliation for genuinely missing service charges
+
+Admin needs a safe manual fallback when the school confirms that a service should have been billed but the historical ledger is missing the charge.
+
+Add or reuse an audited action such as:
+
+Reconcile Missing Charge
+
+Admin chooses:
+
+learner
+service
+billing period
+amount
+reason
+
+Require confirmation.
+
+Example:
+
+Service: Boarding
+Period: September 2026
+Amount: R1,600
+Reason: Learner boarded during September; service line was not generated.
+
+This must create an authoritative charge through the finance architecture.
+
+Do NOT directly edit an old invoice total with raw SQL.
+
+Do NOT silently create charges.
+
+Every reconciliation must be audited.
+
+8. Admin allocation dropdown behaviour
+
+The dropdown should contain:
+
+normal outstanding invoice-line obligations
+legitimate legacy tuition invoice obligations
+reconciled service obligations
+outstanding one-off obligations
+
+It should NOT contain:
+
+enrollment flags with no charge
+fully paid items
+unrelated learner items
+historical services that were never actually billed
+
+Example:
+
+Tuition — April 2026 — R950 outstanding
+Tuition — July 2026 — R200 outstanding
+Zoo Trip — R300 outstanding
+
+Boarding only appears if an authoritative Boarding obligation exists.
+
+9. Fix the current approval 500
+
+After Tuition and Boarding are removed, approval fails with:
+
+operator does not exist: integer = text
+
+This is a PostgreSQL type mismatch.
+
+Find the exact SQL query producing it.
+
+Return in the final report:
+
+file
+function
+SQL operation
+column type
+parameter type
+exact mismatched comparison
+
+Likely candidates include IDs arriving from JSON such as:
+
+invoice ID
+invoice line item ID
+one-off fee ID
+assignment ID
+learner ID
+
+But do not guess.
+
+Inspect PostgreSQL schema types and the actual query.
+
+10. Normalize IDs at the backend boundary
+
+JSON/form values may arrive as strings:
+
+"4"
+"123"
+
+while database IDs may be integers.
+
+Before SQL:
+
+validate ID format
+convert numeric IDs to actual integers
+reject malformed values
+
+Example:
+
+const feeId = Number.parseInt(value, 10);
+
+only after strict validation.
+
+Alternatively use explicit PostgreSQL casts where appropriate.
+
+Do not solve this by casting every database column to text.
+
+Preserve indexes and type safety.
+
+11. Test the exact one-off-only case
+
+Current payment:
+
+Total proof amount: R4,250
+One-off allocation: R300
+Unallocated: R3,950
+
+The architecture previously stated that legitimate payment excess may remain:
+
+unallocated / credit / review
+
+Therefore, if that remains the intended rule, approval should be able to:
+
+allocate R300 → one-off fee
+leave R3,950 unallocated
+
+without crashing.
+
+If business rules prohibit approving such a large unallocated balance, return a controlled business-validation response — not a 500.
+
+12. One-off status behaviour
+
+Current One-Off Details correctly shows:
+
+Milton — R300 due — R0 paid — PENDING_REVIEW
+
+while the Parent proof is pending.
+
+Preserve this.
+
+After successful Admin approval of the R300 allocation:
+
+Paid: R300
+Outstanding: R0
+Status: PAID
+
+and it must disappear from:
+
+Parent → Optional Fees to Include
+
+while remaining visible in:
+
+payment history
+receipt history
+reconciliation
+audit log
+13. Multi-parent email targeting is incomplete
+
+A learner may have multiple linked Parent accounts.
+
+Production example:
+
+Learner has Parent A and Parent B linked.
+
+Currently the one-off fee email is reaching one linked Parent but not the other.
+
+This must be fixed.
+
+For Parent-facing learner events such as a newly assigned one-off fee:
+
+resolve all active currently linked Parent accounts for the affected learner.
+
+For each linked Parent:
+
+create their own durable Parent notification
+send email if that Parent has a verified email
+
+Do not stop after the first Parent.
+
+Do not assume there is one "primary" Parent unless a separate business rule explicitly requires it.
+
+14. Email deduplication
+
+Support:
+
+Parent A + Parent B linked to one learner
+
+Both should receive the alert if both have verified email addresses.
+
+But prevent duplicate emails when:
+
+the same Parent is linked through multiple affected learners
+retry occurs
+assignment processing is repeated idempotently
+
+Deduplicate preferably by:
+
+event/fee ID + parent account ID
+
+If two Parent accounts intentionally use the same verified email address, avoid unnecessary duplicate identical emails to the same mailbox if appropriate, but preserve both portal notifications.
+
+Document the chosen behaviour.
+
+15. Email delivery happens after commit
+
+Continue using:
+
+create fee / assignment
+create durable notifications
+COMMIT
+↓
+Gmail delivery
+
+Gmail failure must not roll back finance/fee assignments.
+
+Log safe delivery failures.
+
+Never expose Parent email addresses in browser errors.
+
+16. Existing pending payments
+
+Existing pending payments created by the previous broken Parent selector logic must remain recoverable.
+
+Admin should be able to:
+
+remove invalid Boarding
+select legitimate legacy Tuition obligation(s)
+keep valid one-off allocation
+leave remainder unallocated where supported
+save with required reason
+approve
+
+Do not force deletion and resubmission unless absolutely necessary.
+
+17. Error handling
+
+Keep controlled finance conditions as:
+
+409 / 422
+
+with useful messages.
+
+Examples:
+
+Boarding has no billed outstanding charge for this learner.
+Tuition allocation target is no longer outstanding.
+This historical tuition invoice requires reconciliation.
+
+Unexpected SQL/type errors must remain server-side 500 with detailed safe logs.
+
+18. Ignore unrelated log warnings
+
+Railway logs also contain:
+
+AWS Node 20 future-support warning
+
+and expired JWT events.
+
+These are unrelated to this finance approval failure.
+
+Do not treat them as the root cause.
+
+19. Regression tests
+
+Add tests for:
+
+Legacy Tuition
+old invoice with outstanding amount
+no invoice_line_items
+safely recognized as legacy Tuition
+oldest unpaid selection
+partial payment
+full payment
+Current Tuition
+persisted Tuition line
+exact line allocation
+Boarding
+enrollment flag only + no charge → not payable
+persisted Boarding line → payable
+reconciled missing Boarding charge → payable
+One-off
+R300 pending
+approval
+status becomes Paid
+Parent payable choice disappears
+SQL ID typing
+
+Test allocation payload IDs arriving as:
+
+number
+numeric string
+malformed string
+null
+
+Numeric strings must normalize safely.
+
+Malformed IDs must return validation errors rather than PostgreSQL operator errors.
+
+Unallocated balance
+proof R4,250
+allocation R300
+unallocated R3,950
+
+Verify intended supported behaviour.
+
+Multiple Parents
+one learner linked to Parent A + Parent B
+both active
+both verified emails
+both receive one-off email
+both receive portal notification
+
+Also test:
+
+one Parent has no verified email
+Parent inactive
+same Parent linked to multiple affected learners
+retry/idempotency
+20. Production safety
+
+Do not silently backfill historical service charges.
+
+Do not alter existing approved payments.
+
+Do not rerun finance migrations.
+
+Do not reconstruct historical Boarding from the current checkbox.
+
+Do not modify production HAR049 during development testing.
+
+Final report required
+
+Return:
+
+Why historical Tuition appears outstanding in Admin history but has no persisted invoice line
+Legacy Tuition compatibility implemented
+Exact Boarding data condition
+Current/future Boarding invoice-generation behaviour
+Manual missing-charge reconciliation behaviour
+Exact SQL query causing integer = text
+Exact type mismatch
+Type-safe fix
+One-off-only approval behaviour with unallocated balance
+Multi-parent email root cause
+Multi-parent email fix
+Portal notification behaviour for multiple Parents
+Files changed
+Whether migration is required
+Tests added
+Test results
+Exact production verification steps
+
+Do not deploy automatically.
+Do not run migrations automatically.

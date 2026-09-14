@@ -7,8 +7,10 @@ Durable Parent Portal notifications are the source of truth. Every record belong
 
 Use stable event identities and database uniqueness for deduplication. Email and browser push are optional delivery channels and must never create duplicate durable records or roll back attendance, academic, invoice, payment, announcement, or document transactions.
 
+For one event affecting multiple learners, retain one durable notification per Parent/learner link, but deliver at most one email per Parent and one identical email per normalized mailbox.
+
 Notification destinations must be internal Parent Portal routes from a strict allowlist. Learner-specific actions select only a currently authorized linked learner before navigating.
 
-**Why:** Client-selected parent or learner IDs, arbitrary redirects, retry-created duplicates, and delivery failures can expose another learner's information or make important school records unreliable.
+**Why:** Client-selected parent or learner IDs, arbitrary redirects, retry-created duplicates, and delivery failures can expose another learner's information or make important school records unreliable. Collapsing recipients too early can also omit a linked Parent or lose learner-specific portal history.
 
-**How to apply:** Derive the parent from the Phase 2 session, validate current learner links in list/read/action flows, commit source records first, and process safe preview delivery independently.
+**How to apply:** Derive the parent from the Phase 2 session, validate current learner links in list/read/action flows, deduplicate durable rows by event/Parent/learner, deduplicate email separately by Parent then mailbox, commit source records first, and process safe preview delivery independently.

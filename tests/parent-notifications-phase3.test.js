@@ -562,8 +562,8 @@ test('review blocker contracts: post-update targeting, saved attendance rows, pa
     assert.match(source, /notifyPayment/);
   }
   const invoicesSource = fs.readFileSync(require.resolve('../routes/invoices'), 'utf8');
-  assert.equal((invoicesSource.match(/notifyInvoice\(\{/g) || []).length, 3,
-    'monthly generation, manual arrears, and carry-forward invoice writers notify parents');
+  assert.equal((invoicesSource.match(/notifyInvoice\(\{/g) || []).length, 4,
+    'monthly generation, manual arrears, missing-charge reconciliation, and carry-forward invoice writers notify parents');
   assert.equal((invoicesSource.match(/notifyPayment\(\{/g) || []).length, 1,
     'bank-statement payment writer notifies parents');
   const enhancedSource = fs.readFileSync(require.resolve('../routes/enhanced-invoices'), 'utf8');

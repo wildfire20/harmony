@@ -685,9 +685,22 @@ async function allocatePayment(executor, {
   };
   const total = money(amount);
   if (!Number.isFinite(total) || total <= 0) throw new Error('Payment amount must be positive');
-  const studentResult = await executor.query(
+  const queryAt = async (stage, sql, params) => {
+    try {
+      return await executor.query(sql, params);
+    } catch (error) {
+      error.financeStage = stage;
+      throw error;
+    }
+  };
+  const normalizedStudentId = Number(studentId);
+  if (!Number.isSafeInteger(normalizedStudentId) || normalizedStudentId <= 0) {
+    throw allocationError('Invalid learner ID', 'The learner attached to this payment is invalid.', 422);
+  }
+  const studentResult = await queryAt(
+    'load-learner',
     `SELECT id, student_number FROM users WHERE id = $1 AND role = 'student' FOR SHARE`,
-    [studentId],
+    [normalizedStudentId],
   );
   if (!studentResult.rows.length) throw new Error('Student not found');
   const student = studentResult.rows[0];
@@ -702,6 +715,7 @@ async function allocatePayment(executor, {
       invoiceId: Number(proposal.invoiceId ?? proposal.invoice_id),
       amount: proposal.amount == null ? null : money(proposal.amount),
       category: proposal.category || proposal.service_key || null,
+      legacyInvoiceLevel: proposal.legacyInvoiceLevel === true || proposal.legacy_invoice_level === true,
     })).filter((proposal) => Number.isSafeInteger(proposal.invoiceId) && proposal.invoiceId > 0)
     : null;
   if (proposals && proposals.length === 0) {
@@ -726,7 +740,7 @@ async function allocatePayment(executor, {
   const requestedInvoiceIds = proposals
     ? [...new Set(proposals.map((proposal) => proposal.invoiceId))]
     : null;
-  const invoiceResult = await executor.query(`
+  const invoiceResult = await queryAt('lock-invoices', `
     SELECT id, student_number, reference_number, amount_due, amount_paid,
            GREATEST(amount_due - amount_paid, 0) AS outstanding_balance,
            due_date
@@ -736,7 +750,7 @@ async function allocatePayment(executor, {
       AND ($3::integer[] IS NULL OR id = ANY($3::integer[]))
     ORDER BY due_date ASC, id ASC
     FOR UPDATE
-  `, [studentId, targetInvoiceId, requestedInvoiceIds]);
+  `, [normalizedStudentId, targetInvoiceId, requestedInvoiceIds]);
 
   const invoiceRowsById = new Map(invoiceResult.rows.map((invoice) => [Number(invoice.id), invoice]));
   if (proposals) {
@@ -751,13 +765,26 @@ async function allocatePayment(executor, {
   let categoryByInvoice = new Map();
   let allocationLineRows = [];
   if (proposals) {
-    const lineResult = await executor.query(`
+    const lineResult = await queryAt('load-invoice-lines', `
       SELECT invoice_id, line_type, service_key, amount, is_included, metadata
       FROM invoice_line_items
       WHERE invoice_id = ANY($1::integer[])
       ORDER BY invoice_id, id
     `, [requestedInvoiceIds]);
     allocationLineRows = lineResult.rows;
+    proposals.filter((proposal) => proposal.legacyInvoiceLevel).forEach((proposal) => {
+      const invoice = invoiceRowsById.get(proposal.invoiceId);
+      if (invoice && !allocationLineRows.some((line) => Number(line.invoice_id) === proposal.invoiceId)) {
+        allocationLineRows.push({
+          invoice_id: proposal.invoiceId,
+          line_type: 'charge',
+          service_key: 'tuition',
+          amount: invoice.amount_due,
+          is_included: false,
+          metadata: { legacy_invoice_level: true },
+        });
+      }
+    });
     const linesByInvoice = new Map();
     lineResult.rows.forEach((line) => {
       if (!linesByInvoice.has(Number(line.invoice_id))) linesByInvoice.set(Number(line.invoice_id), []);
@@ -773,7 +800,7 @@ async function allocatePayment(executor, {
   }
   const categoryRemaining = new Map();
   if (proposals) {
-    const priorResult = await executor.query(`
+    const priorResult = await queryAt('load-prior-allocations', `
       SELECT pt.invoice_id, pt.amount,
              to_jsonb(pt)->>'allocation_category' AS allocation_category,
              (reversal.id IS NOT NULL) AS is_reversed
@@ -842,7 +869,7 @@ async function allocatePayment(executor, {
     const newPaid = currentPaid + toApply;
     const due = money(invoice.amount_due);
     const status = newPaid > due ? 'Overpaid' : due === 0 ? 'Paid' : newPaid >= due ? 'Paid' : 'Partial';
-    await executor.query(`
+    await queryAt('update-invoice-balance', `
       UPDATE invoices
       SET amount_paid = $1, status = $2, updated_at = CURRENT_TIMESTAMP
       WHERE id = $3
@@ -854,7 +881,7 @@ async function allocatePayment(executor, {
         nonNegative(categoryCap - toApply),
       );
     }
-    const tx = proposals ? await executor.query(`
+    const tx = proposals ? await queryAt('insert-allocation-event', `
       INSERT INTO payment_transactions
         (invoice_id, student_id, student_number, reference_number, reference,
          amount, transaction_date, payment_date, description, payment_method,
@@ -862,12 +889,12 @@ async function allocatePayment(executor, {
       VALUES ($1,$2,$3,$4,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12)
       RETURNING id
     `, [
-      invoice.id, studentId, student.student_number, ref, toApply.toFixed(2),
+      invoice.id, normalizedStudentId, student.student_number, ref, toApply.toFixed(2),
       date, description || null, paymentMethod, recordedBy || null,
       transactionMonth || new Date(invoice.due_date).getUTCMonth() + 1,
       transactionYear || new Date(invoice.due_date).getUTCFullYear(),
       proposal?.category || null,
-    ]) : await executor.query(`
+    ]) : await queryAt('insert-allocation-event', `
       INSERT INTO payment_transactions
         (invoice_id, student_id, student_number, reference_number, reference,
          amount, transaction_date, payment_date, description, payment_method,
@@ -875,7 +902,7 @@ async function allocatePayment(executor, {
       VALUES ($1,$2,$3,$4,$4,$5,$6,$6,$7,$8,$9,$10,$11)
       RETURNING id
     `, [
-      invoice.id, studentId, student.student_number, ref, toApply.toFixed(2),
+      invoice.id, normalizedStudentId, student.student_number, ref, toApply.toFixed(2),
       date, description || null, paymentMethod, recordedBy || null,
       transactionMonth || new Date(invoice.due_date).getUTCMonth() + 1,
       transactionYear || new Date(invoice.due_date).getUTCFullYear(),
@@ -893,7 +920,7 @@ async function allocatePayment(executor, {
   }
 
   if (remaining > 0) {
-    const tx = await executor.query(`
+    const tx = await queryAt('insert-unallocated-credit', `
       INSERT INTO payment_transactions
         (invoice_id, student_id, student_number, reference_number, reference,
          amount, transaction_date, payment_date, description, payment_method,
@@ -901,7 +928,7 @@ async function allocatePayment(executor, {
       VALUES (NULL,$1,$2,$3,$3,$4,$5,$5,$6,$7,$8)
       RETURNING id
     `, [
-      studentId, student.student_number, ref, remaining.toFixed(2), date,
+      normalizedStudentId, student.student_number, ref, remaining.toFixed(2), date,
       description || 'Unallocated overpayment', paymentMethod, recordedBy || null,
     ]);
     allocations.push({ transactionId: tx.rows[0].id, invoiceId: null, amount: remaining });

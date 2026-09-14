@@ -37,6 +37,7 @@ export default function ParentPaymentProof({ child, embedded = false }) {
   const [oneOffFees, setOneOffFees] = useState([]);
   const [selectedFees, setSelectedFees] = useState([]);
   const [payableServices, setPayableServices] = useState([]);
+  const applicableServices = payableServices;
   const [selectedServices, setSelectedServices] = useState([]);
   const [banking, setBanking] = useState(null);
 
@@ -319,14 +320,14 @@ export default function ParentPaymentProof({ child, embedded = false }) {
           </div>
 
           {/* Monthly service rates */}
-          {payableServices.length > 0 && (
+          {applicableServices.length > 0 && (
             <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
               <div>
                 <p className="text-sm font-semibold text-gray-700">Monthly Service Rates</p>
                 <p className="text-xs text-gray-400 mt-0.5">Tick the services you are paying for this month</p>
               </div>
               <div className="space-y-2">
-                {payableServices.map(price => {
+                {applicableServices.map(price => {
                   const checked = selectedServices.some(s => s.service_key === price.service_key);
                   return (
                     <label key={price.service_key} className={`parent-fee-choice ${checked ? 'is-selected' : ''}`}>

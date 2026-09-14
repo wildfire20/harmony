@@ -17,6 +17,19 @@ const {
 const { parseInvoiceListQuery, appendPeriodFilters } = require('../utils/invoiceQuery');
 
 const router = express.Router();
+const RECONCILABLE_SERVICES = new Map([
+  ['tuition', 'Tuition'],
+  ['boarding', 'Boarding'],
+  ['transport', 'Transport'],
+  ['aftercare', 'Aftercare'],
+]);
+
+const positiveInteger = (value) => {
+  const raw = String(value == null ? '' : value);
+  if (!/^[1-9]\d*$/.test(raw)) return null;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+};
 
 // Configure multer for CSV uploads
 const upload = multer({
@@ -295,6 +308,110 @@ router.post('/recalculate-status', [
     console.error('Recalculate status error:', error);
     res.status(500).json({ success: false, message: 'Failed to recalculate statuses', error: error.message });
   }
+});
+
+// Audited correction for a service that should have been billed but has no
+// authoritative persisted charge. It creates a new immutable invoice snapshot;
+// it never edits or backfills an old invoice.
+router.post('/reconcile-missing-charge', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+], async (req, res) => {
+  const studentId = positiveInteger(req.body?.student_id);
+  const serviceKey = String(req.body?.service_key || '').trim().toLowerCase();
+  const amount = Number(req.body?.amount);
+  const billingPeriod = String(req.body?.billing_period || '').trim();
+  const reason = String(req.body?.reason || '').trim();
+  if (!studentId || !RECONCILABLE_SERVICES.has(serviceKey) ||
+      !Number.isFinite(amount) || amount <= 0 ||
+      !/^\d{4}-(0[1-9]|1[0-2])$/.test(billingPeriod) ||
+      reason.length < 10 || reason.length > 500) {
+    return res.status(422).json({
+      success: false,
+      message: 'Learner, service, billing period, positive amount, and a reason of 10–500 characters are required.',
+    });
+  }
+
+  const client = await db.pool.connect();
+  let invoice;
+  try {
+    await client.query('BEGIN');
+    const learner = (await client.query(`
+      SELECT id, student_number, first_name, last_name
+      FROM users
+      WHERE id=$1::integer AND role='student' AND is_active=true
+      FOR SHARE
+    `, [studentId])).rows[0];
+    if (!learner) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Active learner not found' });
+    }
+    const [year, month] = billingPeriod.split('-').map(Number);
+    const dueDate = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+    const label = RECONCILABLE_SERVICES.get(serviceKey);
+    const reference = `RECON-${learner.student_number}-${serviceKey.toUpperCase()}-${billingPeriod}`;
+    invoice = (await client.query(`
+      INSERT INTO invoices
+        (student_id, student_number, amount_due, due_date, status,
+         reference_number, description, created_by, created_at)
+      VALUES ($1::integer,$2,$3,$4::date,'Unpaid',$5,$6,$7::integer,NOW())
+      RETURNING *
+    `, [
+      studentId, learner.student_number, amount.toFixed(2), dueDate, reference,
+      `Reconciled ${label} charge — ${billingPeriod}`, Number(req.user.id),
+    ])).rows[0];
+    await client.query(`
+      INSERT INTO invoice_line_items
+        (invoice_id, line_type, service_key, label, description,
+         quantity, unit_amount, amount, is_included, metadata)
+      VALUES ($1::integer,'charge',$2,$3,$4,1,$5,$5,false,$6::jsonb)
+    `, [
+      Number(invoice.id), serviceKey, label, reason, amount.toFixed(2),
+      JSON.stringify({
+        source: 'admin_missing_charge_reconciliation',
+        billing_period: billingPeriod,
+      }),
+    ]);
+    await logAudit({
+      executor: client,
+      required: true,
+      userId: req.user.id,
+      userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role,
+      action: 'missing_charge_reconciled',
+      entityType: 'invoice',
+      entityId: invoice.id,
+      details: {
+        student_id: studentId,
+        service_key: serviceKey,
+        billing_period: billingPeriod,
+        amount: Number(amount.toFixed(2)),
+        reason,
+      },
+      ipAddress: getIp(req),
+    });
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Missing charge reconciliation error:', {
+      message: error.message,
+      code: error.code,
+      service: serviceKey,
+    });
+    return res.status(500).json({ success: false, message: 'Failed to reconcile missing charge' });
+  } finally {
+    client.release();
+  }
+  await Promise.allSettled([notifyInvoice({
+    invoiceId: invoice.id,
+    learnerId: studentId,
+    amount: invoice.amount_due,
+  })]);
+  return res.status(201).json({
+    success: true,
+    message: `${RECONCILABLE_SERVICES.get(serviceKey)} charge reconciled and added to the ledger`,
+    invoice,
+  });
 });
 
 // Manual arrears entry: admin creates an arrears invoice for a specific student
