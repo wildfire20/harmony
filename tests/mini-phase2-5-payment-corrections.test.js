@@ -224,6 +224,12 @@ test('reversal restores the invoice and blocks a second effective reversal', asy
   assert.equal(second.alreadyReversed, true);
 });
 
+test('reversal keeps the original payment channel for legacy schema compatibility', async () => {
+  const ledgerSource = fs.readFileSync(path.join(__dirname, '../services/financeLedger.js'), 'utf8');
+  assert.match(ledgerSource, /payment\.payment_method \|\| 'manual_entry', recordedBy/);
+  assert.doesNotMatch(ledgerSource, /\$\{payment\.payment_method \|\| 'manual_entry'\}_reversal/);
+});
+
 test('reversal fails closed when the invoice balance cannot support the compensation', async () => {
   const executor = correctionExecutor({ invoicePaid: 100, originalAmount: 500 });
   await assert.rejects(

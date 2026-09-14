@@ -81,7 +81,8 @@ const ManualPayments = () => {
         resetPaymentForm();
       },
       onError: (error) => {
-        toast.error(error.response?.data?.message || 'Failed to update payment');
+        const message = error.response?.data?.message || 'Failed to update payment';
+        toast.error(message, { duration: 7000 });
       }
     }
   );

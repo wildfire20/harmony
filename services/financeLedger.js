@@ -788,7 +788,10 @@ async function reversePayment(executor, { transactionId, recordedBy, description
     payment.reference_number || payment.reference || `PAYMENT-${payment.id}-REV`,
     payment.id, (-amount).toFixed(2), payment.payment_date, payment.transaction_date,
     description || `Reversal of payment ${payment.id}`,
-    `${payment.payment_method || 'manual_entry'}_reversal`, recordedBy || null,
+    // Keep the validated payment channel unchanged. Reversal identity is
+    // authoritative in reverses_transaction_id; suffixing the channel can
+    // exceed legacy VARCHAR/check constraints in older production schemas.
+    payment.payment_method || 'manual_entry', recordedBy || null,
     payment.month, payment.year,
   ]);
   } catch (error) {

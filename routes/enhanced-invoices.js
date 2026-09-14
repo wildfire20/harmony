@@ -1567,10 +1567,13 @@ router.put('/manual-payment/:paymentId', [
 
   } catch (error) {
     console.error('Edit payment error:', error);
+    const safeCorrectionMessage = (
+      error.status ||
+      /^(Cannot reverse payment|Payment was already reversed|Payment has already been reversed|A reversal transaction cannot)/.test(error.message || '')
+    ) ? error.message : 'Failed to update payment';
     res.status(error.status || 500).json({
       success: false,
-      message: 'Failed to update payment',
-      error: error.message
+      message: safeCorrectionMessage
     });
   }
 });
