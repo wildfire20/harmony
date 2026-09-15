@@ -169,6 +169,19 @@ export const adminAPI = {
   }),
   createDiscountAssignment: (data) => api.post('/admin/discount-assignments', data),
   deactivateDiscountAssignment: (id) => api.post(`/admin/discount-assignments/${id}/deactivate`),
+  getServiceEnrollments: (params) => api.get('/admin/service-enrollments', { params }),
+  getStudentServiceEnrollments: (studentId, params) => api.get(
+    `/admin/students/${studentId}/service-enrollments`, { params },
+  ),
+  createServiceEnrollment: (data, idempotencyKey) => api.post('/admin/service-enrollments', data, {
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+  }),
+  endServiceEnrollment: (id, effectiveEnd) => api.post(
+    `/admin/service-enrollments/${id}/end`, { effective_end: effectiveEnd },
+  ),
+  getMonthlyBillingReadiness: (period) => api.get('/admin/monthly-billing-readiness', {
+    params: { period },
+  }),
   deleteStudent: (id) => api.delete(`/admin/students/${id}`),
   exportCredentials: (params) => api.get('/admin/students/export-credentials', { 
     params, 

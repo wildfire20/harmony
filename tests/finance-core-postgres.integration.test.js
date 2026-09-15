@@ -230,6 +230,19 @@ async function applyFinanceCoreMigration(pool, schema) {
   }
 }
 
+async function applyFinanceOperationsReadinessMigration(pool, schema) {
+  const migration = fs.readFileSync(
+    path.join(__dirname, '..', 'migrations', 'finance_operations_readiness_v3.sql'), 'utf8',
+  );
+  const client = await pool.connect();
+  try {
+    await client.query(`SET search_path TO ${quoteIdentifier(schema)}`);
+    await client.query(migration);
+  } finally {
+    client.release();
+  }
+}
+
 function scopedDatabase(pool, schema) {
   const connect = async () => {
     const client = await pool.connect();
@@ -330,6 +343,17 @@ async function runSuite() {
     }
 
     await applyFinanceCoreMigration(pool, schema);
+    await applyFinanceOperationsReadinessMigration(pool, schema);
+    const readinessVersion = (await pool.query(`
+      SELECT version FROM ${quoteIdentifier(schema)}.finance_schema_versions
+      WHERE schema_key = 'finance_operations_readiness'
+    `)).rows[0];
+    assert.equal(readinessVersion.version, 3);
+    const architectureVersion = (await pool.query(`
+      SELECT version FROM ${quoteIdentifier(schema)}.finance_schema_versions
+      WHERE schema_key = 'finance_core_architecture'
+    `)).rows[0];
+    assert.equal(architectureVersion.version, 3);
 
     for (const scriptName of ['audit-finance-core.js', 'preflight-finance-core.js']) {
       const operatorPostMigration = runFinanceOperatorScript(scriptName, operatorUrl);
@@ -404,14 +428,41 @@ async function runSuite() {
         (2, NULL, 'parent@finance-gate.test', 'Test', 'Parent', 'parent', 1),
         (4, NULL, 'second-parent@finance-gate.test', 'Second', 'Parent', 'parent', 1),
         (3, 'FIN-GATE-001', 'learner@finance-gate.test', 'Finance', 'Learner', 'student', 1);
+      INSERT INTO users
+        (id, student_number, email, first_name, last_name, role, grade_id, is_active)
+      VALUES
+        (90, 'FIN-GATE-OVERLAP', 'overlap@finance-gate.test',
+         'Overlap', 'Learner', 'student', 1, false);
       INSERT INTO parent_students (parent_id, student_id) VALUES (2, 3), (4, 3);
       INSERT INTO learner_discount_assignments
         (student_id, discount_type, calculation_method, amount,
          applicable_service_key, reason, starts_on)
       VALUES
-        (3, 'custom', 'fixed', 100, 'tuition',
-         'Approved gate discount', '2029-01-01');
+        (3, 'sibling', 'fixed', 100, 'tuition',
+         'Approved sibling gate discount', '2029-01-01');
     `);
+    await database.query(`
+      INSERT INTO service_enrollments
+        (student_id, service_key, effective_start, effective_end, state, idempotency_key)
+      VALUES (90, 'tuition', '2028-01-01', '2028-12-31', 'ended', 'db-ended-baseline')
+    `);
+    await assert.rejects(
+      database.query(`
+        INSERT INTO service_enrollments
+          (student_id, service_key, effective_start, effective_end, state, idempotency_key)
+        VALUES (90, 'tuition', '2028-06-01', '2029-01-31', 'active', 'db-ended-active-overlap')
+      `),
+      /overlap/i,
+    );
+    await assert.rejects(
+      database.query(`
+        INSERT INTO service_enrollments
+          (student_id, service_key, effective_start, effective_end, state, idempotency_key)
+        VALUES (90, 'tuition', '2028-06-01', '2028-09-30', 'ended', 'db-ended-ended-overlap')
+      `),
+      /overlap/i,
+    );
+    await database.query('DELETE FROM service_enrollments WHERE student_id=90');
 
     const app = express();
     app.use(express.json());
@@ -455,6 +506,32 @@ async function runSuite() {
     assert.deepEqual(enrollmentResponse.body.map((row) => row.effective_end), [
       null, null, null, null,
     ]);
+    // Ended rows remain historical billing evidence through their inclusive
+    // effective_end, while cancelled rows are the only non-effective state.
+    const endedHistorical = await enrollmentRepository.createEnrollment({
+      studentId: 3,
+      serviceKey: 'transport',
+      effectiveStart: '2028-10-01',
+      effectiveEnd: '2028-12-31',
+      state: 'ended',
+      idempotencyKey: 'gate-transport-ended',
+    }, database);
+    assert.equal(endedHistorical.state, 'ended');
+    const endedPeriod = await enrollmentRepository.listEffectiveEnrollments(
+      3, '2028-12', database,
+    );
+    assert.ok(endedPeriod.some((row) =>
+      row.id === endedHistorical.id && row.effective_end === '2028-12-31'));
+    await assert.rejects(
+      enrollmentRepository.createEnrollment({
+        studentId: 3,
+        serviceKey: 'transport',
+        effectiveStart: '2028-12-15',
+        effectiveEnd: '2029-01-10',
+        idempotencyKey: 'gate-transport-overlap-ended',
+      }, database),
+      /overlaps/i,
+    );
 
     const generated = await request(
       server, 'POST', '/api/invoices/generate-monthly',
@@ -485,6 +562,124 @@ async function runSuite() {
       ['tuition', 'discount', 100],
     ]);
     assert.equal(Number(monthlyInvoice.amount_due), 5050);
+    // Isolated A-E fixture: exercise each service/bundle/discount combination
+    // in one synthetic month while keeping the original release-gate learner
+    // above as the persisted multi-service baseline.
+    await database.query(`
+      UPDATE service_prices
+      SET billing_mode='bundle_component', bundle_key='boarding-package'
+      WHERE service_key IN ('tuition', 'aftercare');
+      UPDATE service_prices
+      SET billing_mode='bundle', bundle_key='boarding-package',
+          amount=1600, included_service_keys='["tuition","aftercare"]'::jsonb
+      WHERE service_key='boarding';
+      INSERT INTO users
+        (id, student_number, email, first_name, last_name, role, grade_id)
+      VALUES
+        (10, 'FIN-GATE-A', 'a@finance-gate.test', 'A', 'Tuition', 'student', 1),
+        (11, 'FIN-GATE-B', 'b@finance-gate.test', 'B', 'Transport', 'student', 1),
+        (12, 'FIN-GATE-C', 'c@finance-gate.test', 'C', 'Boarding', 'student', 1),
+        (13, 'FIN-GATE-D', 'd@finance-gate.test', 'D', 'Sibling', 'student', 1),
+        (14, 'FIN-GATE-E', 'e@finance-gate.test', 'E', 'Service Discount', 'student', 1);
+      INSERT INTO service_enrollments
+        (student_id, service_key, effective_start, idempotency_key)
+      VALUES
+        (10, 'tuition', '2029-02-01', 'synthetic-a-tuition'),
+        (11, 'tuition', '2029-02-01', 'synthetic-b-tuition'),
+        (11, 'transport', '2029-02-01', 'synthetic-b-transport'),
+        (12, 'boarding', '2029-02-01', 'synthetic-c-boarding'),
+        (12, 'tuition', '2029-02-01', 'synthetic-c-tuition'),
+        (12, 'aftercare', '2029-02-01', 'synthetic-c-aftercare'),
+        (12, 'transport', '2029-02-01', 'synthetic-c-transport'),
+        (13, 'tuition', '2029-02-01', 'synthetic-d-tuition'),
+        (14, 'tuition', '2029-02-01', 'synthetic-e-tuition'),
+        (14, 'transport', '2029-02-01', 'synthetic-e-transport');
+      INSERT INTO learner_discount_assignments
+        (student_id, discount_type, calculation_method, amount,
+         applicable_service_key, reason, starts_on)
+      VALUES
+        (13, 'sibling', 'fixed', 100, 'tuition', 'Synthetic sibling', '2029-02-01'),
+        (14, 'custom', 'fixed', 75, 'transport', 'Synthetic transport service discount', '2029-02-01');
+    `);
+    const synthetic = await financeCommands.generateMonthlyInvoices({
+      month: 2, year: 2029, idempotencyKey: 'synthetic-a-to-e-2029-02',
+      actor: { id: 1, name: 'Test Admin', role: 'admin' },
+    });
+    const syntheticInvoices = (await database.query(`
+      SELECT id, student_id, amount_due, billing_period::text AS billing_period,
+             invoice_kind, invoice_source, finance_origin
+      FROM invoices
+      WHERE id = ANY($1::integer[])
+      ORDER BY student_id
+    `, [synthetic.invoices.map((invoice) => invoice.id)])).rows
+      .filter((invoice) => Number(invoice.student_id) >= 10);
+    assert.equal(syntheticInvoices.length, 5);
+    assert.ok(syntheticInvoices.every((invoice) =>
+      invoice.billing_period === '2029-02-01' &&
+      invoice.invoice_kind === 'monthly' &&
+      invoice.invoice_source === 'monthly_generation' &&
+      invoice.finance_origin === 'canonical'));
+    assert.deepEqual(syntheticInvoices.map((invoice) => [
+      Number(invoice.student_id), Number(invoice.amount_due),
+    ]), [
+      [10, 2350], [11, 3000], [12, 2250], [13, 2250], [14, 2925],
+    ]);
+    const syntheticLines = (await database.query(`
+      SELECT i.student_id, l.service_key, l.line_type, l.amount, l.is_included,
+             l.metadata
+      FROM invoices i
+      JOIN invoice_line_items l ON l.invoice_id=i.id
+      WHERE i.id = ANY($1::integer[])
+      ORDER BY i.student_id, l.id
+    `, [syntheticInvoices.map((invoice) => invoice.id)])).rows;
+    const cLines = syntheticLines.filter((line) => Number(line.student_id) === 12);
+    assert.deepEqual(cLines.map((line) => [
+      line.service_key, line.line_type, Number(line.amount), line.is_included,
+    ]), [
+      ['boarding', 'charge', 1600, false],
+      ['tuition', 'charge', 0, true],
+      ['aftercare', 'charge', 0, true],
+      ['transport', 'charge', 650, false],
+    ]);
+    assert.equal(syntheticLines.filter((line) =>
+      Number(line.student_id) === 13 && line.line_type === 'discount').length, 1);
+    assert.equal(syntheticLines.filter((line) =>
+      Number(line.student_id) === 14 && line.line_type === 'discount' &&
+      line.service_key === 'transport').length, 1);
+    const syntheticExport = await request(
+      server, 'GET', '/api/reports/student-payment-history/FIN-GATE-C?format=excel',
+      undefined, { 'x-test-role': 'admin' },
+    );
+    assert.equal(syntheticExport.status, 200);
+    const syntheticWorkbook = new (require('exceljs').Workbook)();
+    await syntheticWorkbook.xlsx.load(syntheticExport.body);
+    const syntheticExportText = JSON.stringify(
+      syntheticWorkbook.getWorksheet('Invoice Breakdown').getSheetValues(),
+    );
+    assert.match(syntheticExportText, /Boarding/);
+    assert.match(syntheticExportText, /Transport/);
+    assert.match(syntheticExportText, /Included/);
+    // The command-level preflight is authoritative even when the HTTP UX
+    // preflight is bypassed: ending tuition after January preserves the
+    // historical January service while making February atomic-fail before any
+    // invoice write.
+    await database.query(`
+      UPDATE service_enrollments
+      SET state='ended', effective_end='2029-01-31', updated_at=CURRENT_TIMESTAMP
+      WHERE student_id=3 AND service_key='tuition' AND effective_start='2029-01-01'
+    `);
+    await assert.rejects(
+      financeCommands.generateMonthlyInvoices({
+        month: 2, year: 2029, idempotencyKey: 'command-readiness-block-2029-02',
+        actor: { id: 1, name: 'Test Admin', role: 'admin' },
+      }),
+      (error) => error.status === 409 && /not ready/i.test(error.message),
+    );
+    await database.query(`
+      UPDATE service_enrollments
+      SET state='active', effective_end=NULL, updated_at=CURRENT_TIMESTAMP
+      WHERE student_id=3 AND service_key='tuition' AND effective_start='2029-01-01'
+    `);
     await assert.rejects(
       database.query(`
         INSERT INTO invoices
@@ -560,12 +755,17 @@ async function runSuite() {
     `, [oneOffInvoice.id])).rows[0];
 
     const initialPayables = await payable.getPayableObligations(3, database, { asOf: '2029-01-15' });
-    assert.deepEqual(initialPayables.filter((row) => row.is_payable).map((row) => row.category), [
+    const originalScenarioInvoiceIds = new Set([
+      Number(monthlyInvoice.id), Number(legacyInvoice.id), Number(oneOffInvoice.id),
+    ]);
+    const originalScenarioPayables = initialPayables.filter((row) =>
+      row.is_payable && originalScenarioInvoiceIds.has(Number(row.invoice_id)));
+    assert.deepEqual(originalScenarioPayables.map((row) => row.category), [
       'boarding', 'tuition', 'boarding', 'transport', 'aftercare', 'one_off',
     ]);
-    assert.equal(initialPayables.filter((row) => row.is_payable).length, 6);
-    const tuition = initialPayables.find((row) => row.category === 'tuition');
-    const oneOff = initialPayables.find((row) => row.category === 'one_off');
+    assert.equal(originalScenarioPayables.length, 6);
+    const tuition = originalScenarioPayables.find((row) => row.category === 'tuition');
+    const oneOff = originalScenarioPayables.find((row) => row.category === 'one_off');
     const mixedAmount = Number(tuition.amount_outstanding) + Number(oneOff.amount_outstanding);
     const selection = [
       {
@@ -654,16 +854,22 @@ async function runSuite() {
     const afterApproval = await payable.getPayableObligations(3, database, { asOf: '2029-01-15' });
     assert.equal(afterApproval.find((row) => row.obligation_id === tuition.obligation_id).status, 'PAID');
     assert.equal(afterApproval.find((row) => row.obligation_id === oneOff.obligation_id).status, 'PAID');
-    assert.equal(afterApproval.filter((row) => row.is_payable).length, 4);
+    assert.equal(afterApproval.filter((row) =>
+      row.is_payable && originalScenarioInvoiceIds.has(Number(row.invoice_id))).length, 4);
     const ledgerResponse = await request(
       server, 'GET', '/api/reports/student-payment-history/FIN-GATE-001',
       undefined, { 'x-test-role': 'admin' },
     );
     assert.equal(ledgerResponse.status, 200);
     assert.equal(Number(ledgerResponse.body.summary.totalPaid), mixedAmount);
+    const expectedOutstanding = (await database.query(`
+      SELECT COALESCE(SUM(GREATEST(amount_due - amount_paid, 0)), 0) AS total
+      FROM invoices
+      WHERE student_id=3 AND status <> 'Carried Forward'
+    `)).rows[0].total;
     assert.equal(
       Number(ledgerResponse.body.summary.totalOutstanding),
-      10 + 5050 - Number(tuition.amount_outstanding),
+      Number(expectedOutstanding),
     );
 
     const workbookResponse = await request(
@@ -677,6 +883,16 @@ async function runSuite() {
     await workbook.xlsx.load(workbookResponse.body);
     assert.ok(workbook.getWorksheet('Monthly School Account'));
     assert.ok(workbook.getWorksheet('One-Off Fees'));
+    const exportedBreakdown = [];
+    workbook.getWorksheet('Invoice Breakdown').eachRow((row) => {
+      exportedBreakdown.push(row.values);
+    });
+    const exportedText = JSON.stringify(exportedBreakdown);
+    assert.match(exportedText, /Tuition/);
+    assert.match(exportedText, /Boarding/);
+    assert.match(exportedText, /Transport/);
+    assert.match(exportedText, /Aftercare/);
+    assert.match(exportedText, /Sibling discount/);
 
     const reversal = await financeCommands.reversePayment({
       transactionId: approval.body.transaction_ids[0],
@@ -953,7 +1169,7 @@ async function runSuite() {
 }
 
 if (databaseUrl) {
-  test('Finance core PostgreSQL isolated release-gate scenario', { timeout: 180000 }, runSuite);
+  test('Finance core PostgreSQL isolated release-gate scenario', { timeout: 270000 }, runSuite);
 } else {
   test('Finance core PostgreSQL integration requires FINANCE_TEST_DATABASE_URL', {
     skip: 'Use the explicit finance integration runner with FINANCE_TEST_DATABASE_URL',

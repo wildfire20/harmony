@@ -2,6 +2,7 @@ const db = require('../config/database');
 
 const SERVICE_KEYS = Object.freeze(['tuition', 'boarding', 'transport', 'aftercare']);
 const SERVICE_KEY_SET = new Set(SERVICE_KEYS);
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_.:/-]{8,180}$/;
 
 function normalizeServiceKey(value) {
   const key = String(value || '').trim().toLowerCase();
@@ -23,6 +24,25 @@ function normalizeDate(value, field) {
   return text;
 }
 
+function normalizeIdempotencyKey(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const key = String(value).trim();
+  if (!IDEMPOTENCY_KEY_PATTERN.test(key)) {
+    const error = new Error('Invalid idempotency key');
+    error.code = 'INVALID_IDEMPOTENCY_KEY';
+    error.status = 400;
+    throw error;
+  }
+  return key;
+}
+
+function idempotencyConflict(message = 'Idempotency key was already used with a different enrollment payload') {
+  const error = new Error(message);
+  error.code = 'IDEMPOTENCY_CONFLICT';
+  error.status = 409;
+  return error;
+}
+
 function periodBounds(period) {
   const text = String(period || '').trim();
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(text)) {
@@ -42,7 +62,7 @@ async function listEffectiveEnrollments(studentId, period, executor = db) {
            state, idempotency_key, created_at, updated_at
     FROM service_enrollments
     WHERE student_id = $1::integer
-      AND state = 'active'
+      AND state <> 'cancelled'
       AND effective_start <= $2::date
       AND (effective_end IS NULL OR effective_end >= $3::date)
     ORDER BY service_key, effective_start, id
@@ -61,7 +81,7 @@ async function listEffectiveEnrollmentsForStudents(studentIds, period, executor 
            state, idempotency_key, created_at, updated_at
     FROM service_enrollments
     WHERE student_id = ANY($1::integer[])
-      AND state = 'active'
+      AND state <> 'cancelled'
       AND effective_start <= $2::date
       AND (effective_end IS NULL OR effective_end >= $3::date)
     ORDER BY student_id, service_key, effective_start, id
@@ -103,10 +123,20 @@ async function createEnrollment(input, executor = db) {
   if (!['active', 'ended', 'cancelled'].includes(state)) {
     throw new Error('Invalid service enrollment state');
   }
-  const rawIdempotencyKey = input?.idempotencyKey ?? input?.idempotency_key;
-  const idempotencyKey = rawIdempotencyKey == null || String(rawIdempotencyKey).trim() === ''
-    ? null
-    : String(rawIdempotencyKey).trim();
+  const idempotencyKey = normalizeIdempotencyKey(
+    input?.idempotencyKey ?? input?.idempotency_key,
+  );
+
+  // Callers that pass a transaction-bound client hold this lock through the
+  // overlap check and insert, including ended historical rows (the database
+  // exclusion constraint only covers state=active on older installations).
+  await executor.query(
+    `SELECT pg_advisory_xact_lock(
+       hashtext('harmony:service-enrollment-overlap'),
+       hashtext($1)
+     )`,
+    [`${studentId}:${serviceKey}`],
+  );
 
   if (idempotencyKey) {
     const existingByKey = await executor.query(`
@@ -117,7 +147,36 @@ async function createEnrollment(input, executor = db) {
       FROM service_enrollments
       WHERE idempotency_key = $1
     `, [idempotencyKey]);
-    if (existingByKey.rows.length) return existingByKey.rows[0];
+    if (existingByKey.rows.length) {
+      const existing = existingByKey.rows[0];
+      if (Number(existing.student_id) !== studentId ||
+          String(existing.service_key).toLowerCase() !== serviceKey ||
+          String(existing.effective_start).slice(0, 10) !== effectiveStart ||
+          (existing.effective_end ? String(existing.effective_end).slice(0, 10) : null) !== effectiveEnd) {
+        throw idempotencyConflict();
+      }
+      return existing;
+    }
+  }
+
+  const sameIdentity = await executor.query(`
+    SELECT id, student_id, service_key,
+           effective_start::text AS effective_start,
+           effective_end::text AS effective_end,
+           state, idempotency_key, created_at, updated_at
+    FROM service_enrollments
+    WHERE student_id = $1::integer AND service_key = $2
+      AND effective_start = $3::date
+    FOR SHARE
+  `, [studentId, serviceKey, effectiveStart]);
+  if (sameIdentity.rows.length) {
+    const existing = sameIdentity.rows[0];
+    const storedEnd = existing.effective_end
+      ? String(existing.effective_end).slice(0, 10) : null;
+    if (storedEnd !== effectiveEnd) throw idempotencyConflict(
+      'An enrollment already exists for this learner/service/start with a different end date',
+    );
+    return existing;
   }
 
   // A caller may use this repository with a transaction-bound client.  The
@@ -128,7 +187,7 @@ async function createEnrollment(input, executor = db) {
     FROM service_enrollments
     WHERE student_id = $1::integer
       AND service_key = $2
-      AND state = 'active'
+      AND state <> 'cancelled'
       AND effective_start <= COALESCE($4::date, 'infinity'::date)
       AND COALESCE(effective_end, 'infinity'::date) >= $3::date
       AND NOT (effective_start = $3::date AND idempotency_key IS NOT DISTINCT FROM $5)
@@ -158,7 +217,15 @@ async function createEnrollment(input, executor = db) {
     WHERE student_id = $1::integer AND service_key = $2
       AND effective_start = $3::date
   `, [studentId, serviceKey, effectiveStart]);
-  return existing.rows[0] || null;
+  if (!existing.rows[0]) return null;
+  const stored = existing.rows[0];
+  const storedEnd = stored.effective_end ? String(stored.effective_end).slice(0, 10) : null;
+  if (storedEnd !== effectiveEnd) {
+    throw idempotencyConflict(
+      'An enrollment already exists for this learner/service/start with a different end date',
+    );
+  }
+  return stored;
 }
 
 async function endEnrollment(id, effectiveEnd, executor = db) {
@@ -179,6 +246,7 @@ module.exports = {
   SERVICE_KEYS,
   normalizeServiceKey,
   normalizeDate,
+  normalizeIdempotencyKey,
   periodBounds,
   listEffectiveEnrollments,
   listEffectiveEnrollmentsForStudents,

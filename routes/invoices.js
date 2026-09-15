@@ -23,6 +23,7 @@ const {
   CORRECTION_SOURCE, resolveLegacyClassification,
 } = require('../services/legacyClassification');
 const financeCommands = require('../services/financeCommandService');
+const { getMonthlyBillingReadiness } = require('../services/monthlyBillingReadiness');
 
 const router = express.Router();
 const RECONCILABLE_SERVICES = new Map([
@@ -112,6 +113,17 @@ router.post('/generate-monthly', [
     }
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const readiness = await getMonthlyBillingReadiness(
+      `${req.body.year}-${String(req.body.month).padStart(2, '0')}`,
+    );
+    if (!readiness.ready) {
+      return res.status(409).json({
+        success: false,
+        code: 'MONTHLY_BILLING_NOT_READY',
+        message: 'Monthly billing is blocked until all finance readiness failures are resolved.',
+        readiness,
+      });
+    }
     const result = await financeCommands.generateMonthlyInvoices({
       month: Number(req.body.month),
       year: Number(req.body.year),
@@ -385,7 +397,8 @@ router.post('/generate-monthly', [
     res.status(error.status || 500).json({
       success: false,
       message: 'Failed to generate invoices',
-      error: error.message 
+      error: error.message,
+      ...(error.readiness ? { readiness: error.readiness } : {}),
     });
   }
 });

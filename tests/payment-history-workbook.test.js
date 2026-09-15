@@ -23,7 +23,9 @@ test('payment-history workbook uses meaningful cells and canonical pending one-o
       carry_forward_history: false, status: 'Unpaid', net_due: 1200,
       amount_due: 1200, amount_paid: 0, allocated_effective_payments: 0,
       outstanding_balance: 1200, credit: 0, gross_charges: 1200,
-      discount_lines: [], discount_total: 0, charge_totals: { one_off: 1200 },
+      discount_lines: [{ id: 504, line_type: 'discount', service_key: 'tuition',
+        label: 'Sibling discount', amount: 100 }],
+      discount_total: 100, charge_totals: { one_off: 1200, tuition: 1000, boarding: 1000 },
       payment_review_flags: [], review_required: false,
       service_charge_lines: [], one_off_charge_lines: [{
         id: 501, line_type: 'charge', service_key: 'one_off_fee',
@@ -33,6 +35,15 @@ test('payment-history workbook uses meaningful cells and canonical pending one-o
       line_items: [{
         id: 501, line_type: 'charge', service_key: 'one_off_fee',
         label: 57, description: 57, amount: 1200, metadata: { category: 'one_off', fee_id: 4 },
+      }, {
+        id: 502, line_type: 'charge', service_key: 'tuition',
+        label: 'Tuition', description: 'Monthly tuition', amount: 1000,
+      }, {
+        id: 503, line_type: 'charge', service_key: 'boarding',
+        label: 'Boarding', description: 'Monthly boarding', amount: 1000,
+      }, {
+        id: 504, line_type: 'discount', service_key: 'tuition',
+        label: 'Sibling discount', description: 'Approved sibling discount', amount: 100,
       }],
     }],
     transactions: [{
@@ -84,4 +95,12 @@ test('payment-history workbook uses meaningful cells and canonical pending one-o
   assert.ok(values.includes('unallocated_payment'));
   assert.equal(values.some((value) => value === 41 || value === '41'), false);
   assert.equal(values.some((value) => value === 57 || value === '57'), false);
+  const breakdown = workbook.getWorksheet('Invoice Breakdown');
+  const breakdownRows = [];
+  breakdown.eachRow((row) => breakdownRows.push(row.values));
+  const breakdownText = JSON.stringify(breakdownRows);
+  assert.match(breakdownText, /Tuition/);
+  assert.match(breakdownText, /Boarding/);
+  assert.match(breakdownText, /Sibling discount/);
+  assert.match(breakdownText, /-100/);
 });

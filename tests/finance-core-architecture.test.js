@@ -57,6 +57,19 @@ test('finance-core migration is additive, idempotent, and does not backfill hist
   ]);
 });
 
+test('finance readiness v3 broadens overlap enforcement without rewriting v2', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'migrations', 'finance_operations_readiness_v3.sql'),
+    'utf8',
+  );
+  assert.match(source, /non-cancelled service enrollments/);
+  assert.match(source, /state <> 'cancelled'/g);
+  assert.match(source, /DROP INDEX IF EXISTS service_enrollments_period_idx/);
+  assert.match(source, /VALUES \('finance_operations_readiness', 3\)/);
+  assert.match(source, /VALUES \('finance_core_architecture', 3\)/);
+  assert.match(source, /CREATE OR REPLACE FUNCTION prevent_service_enrollment_overlap/);
+});
+
 test('effective enrollment period bounds include an enrollment crossing the month', async () => {
   assert.deepEqual(periodBounds('2027-02'), {
     start: '2027-02-01',
@@ -110,7 +123,7 @@ test('enrollment repository rejects historical guessing and is idempotent by ide
   const executor = {
     async query(sql, values) {
       calls.push({ sql, values });
-      if (/WHERE idempotency_key/.test(sql) || (
+      if (/WHERE idempotency_key/.test(sql) || /FOR SHARE/.test(sql) || (
         /FROM service_enrollments\s+WHERE student_id/.test(sql) && /LIMIT 1/.test(sql)
       )) {
         return { rows: [] };

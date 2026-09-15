@@ -22,6 +22,7 @@ const {
 const {
   getBillingEnrollmentsForLearners,
 } = require('./serviceEnrollmentService');
+const { getMonthlyBillingReadiness } = require('./monthlyBillingReadiness');
 const {
   acquireInvoiceObligationLocks,
   invoiceObligationLockKeys,
@@ -116,8 +117,11 @@ const idempotencyDetails = (value) => {
 const derivedIdempotencyKey = (prefix, value) =>
   `${prefix}:${crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 32)}`;
 
-async function withTransaction(work, executor = null) {
+async function withTransaction(work, executor = null, isolationLevel = null) {
   if (executor) {
+    if (isolationLevel) {
+      await executor.query(`SET TRANSACTION ISOLATION LEVEL ${isolationLevel}`);
+    }
     await executor.query(
       `SELECT set_config('harmony.finance_command', 'canonical', true)`,
     );
@@ -125,7 +129,9 @@ async function withTransaction(work, executor = null) {
   }
   const client = await db.pool.connect();
   try {
-    await client.query('BEGIN');
+    await client.query(isolationLevel
+      ? `BEGIN ISOLATION LEVEL ${isolationLevel}`
+      : 'BEGIN');
     await client.query(
       `SELECT set_config('harmony.finance_command', 'canonical', true)`,
     );
@@ -1489,6 +1495,19 @@ async function generateMonthlyInvoices(options = {}) {
       `SELECT pg_advisory_xact_lock(hashtext('harmony-monthly-invoices'), $1::integer)`,
       [year * 100 + month],
     );
+    // This is the authoritative preflight. It runs after the period lock and
+    // on the same transaction-bound executor as all invoice writes, so a
+    // concurrent enrollment/configuration change cannot bypass generation.
+    const readiness = await getMonthlyBillingReadiness(period, executor);
+    if (!readiness.ready) {
+      const error = new FinanceCommandError(
+        `Monthly billing is not ready for ${period}`,
+        409,
+        'Monthly billing is blocked until finance readiness failures are resolved.',
+      );
+      error.readiness = readiness;
+      throw error;
+    }
     const prior = await findCompletedCommand(executor, 'invoice_generate', operationKey);
     if (prior) {
       const invoiceIds = (prior.details?.invoice_ids || []).map(Number).filter(Number.isInteger);
@@ -1725,7 +1744,7 @@ async function generateMonthlyInvoices(options = {}) {
       teacherDiscountsApplied: teacherDiscountCount,
       month, year, dueDate,
     };
-  }, options.executor);
+  }, options.executor, 'REPEATABLE READ');
 }
 
 module.exports = {

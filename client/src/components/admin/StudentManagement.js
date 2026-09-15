@@ -17,6 +17,14 @@ const StudentManagement = () => {
   const [discountAssignments, setDiscountAssignments] = useState([]);
   const [discountLoading, setDiscountLoading] = useState(false);
   const [discountSaving, setDiscountSaving] = useState(false);
+  const [serviceEnrollments, setServiceEnrollments] = useState([]);
+  const [serviceLoading, setServiceLoading] = useState(false);
+  const [serviceSaving, setServiceSaving] = useState(false);
+  const [serviceForm, setServiceForm] = useState({
+    service_key: 'tuition',
+    effective_start: new Date().toISOString().slice(0, 10),
+    effective_end: '',
+  });
   const [discountForm, setDiscountForm] = useState({
     discount_type: 'custom',
     calculation_method: 'fixed',
@@ -29,6 +37,7 @@ const StudentManagement = () => {
   });
   const queryClient = useQueryClient();
   const formRef = useRef(null);
+  const discountFormRef = useRef(null);
   const searchInputRef = useRef(null);
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm();
@@ -61,6 +70,7 @@ const StudentManagement = () => {
   useEffect(() => {
     if (!editingStudent?.id) {
       setDiscountAssignments([]);
+      setServiceEnrollments([]);
       return;
     }
     setDiscountLoading(true);
@@ -73,6 +83,16 @@ const StudentManagement = () => {
           : (error.response?.data?.message || 'Failed to load discount assignments'));
       })
       .finally(() => setDiscountLoading(false));
+    setServiceLoading(true);
+    adminAPI.getStudentServiceEnrollments(editingStudent.id)
+      .then((response) => setServiceEnrollments(response.data?.enrollments || []))
+      .catch((error) => {
+        const status = error.response?.status;
+        toast.error(status === 503
+          ? 'Service enrollments require the finance core migration.'
+          : (error.response?.data?.message || 'Failed to load finance services'));
+      })
+      .finally(() => setServiceLoading(false));
   }, [editingStudent?.id]);
 
   // Fetch students with improved query invalidation
@@ -220,6 +240,31 @@ const StudentManagement = () => {
   const displayedStudents = showArchived ? archivedStudents : students;
   const grades = gradesData?.data?.grades || [];
   const classes = classesData?.data?.classes || [];
+  const serviceDisplayRows = ['tuition', 'boarding', 'transport', 'aftercare'].map((serviceKey) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const candidates = serviceEnrollments.filter((item) => item.service_key === serviceKey &&
+      item.state !== 'cancelled' &&
+      item.effective_start);
+    const enrollment = candidates.find((item) =>
+      item.effective_start <= today &&
+      (!item.effective_end || item.effective_end >= today)) ||
+      candidates.sort((left, right) => right.effective_start.localeCompare(left.effective_start))[0];
+    const effective = enrollment &&
+      enrollment.state !== 'cancelled' &&
+      enrollment.effective_start <= today &&
+      (!enrollment.effective_end || enrollment.effective_end >= today);
+    return {
+      serviceKey,
+      enrollment,
+      status: effective ? 'Active' : 'Not enrolled',
+    };
+  });
+  const unresolvedLegacyDiscounts = editingStudent && (
+    (editingStudent.has_sibling_discount &&
+      !discountAssignments.some((item) => item.discount_type === 'sibling' && item.is_active)) ||
+    (editingStudent.has_teacher_discount &&
+      !discountAssignments.some((item) => item.discount_type === 'staff' && item.is_active))
+  );
 
   // Debug logging
   console.log('Grades data:', gradesData);
@@ -303,6 +348,42 @@ const StudentManagement = () => {
       toast.error(status === 503
         ? 'Discount assignments require the Mini Phase 1 finance migration.'
         : (error.response?.data?.message || 'Failed to deactivate discount assignment'));
+    }
+  };
+
+  const createServiceEnrollment = async (event) => {
+    event.preventDefault();
+    if (!editingStudent) return;
+    setServiceSaving(true);
+    try {
+      const response = await adminAPI.createServiceEnrollment({
+        student_id: editingStudent.id,
+        ...serviceForm,
+        effective_end: serviceForm.effective_end || undefined,
+      });
+      setServiceEnrollments((current) => [...current, response.data.enrollment]);
+      setServiceForm((current) => ({ ...current, effective_end: '' }));
+      toast.success('Finance service enrollment created');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to create finance service enrollment');
+    } finally {
+      setServiceSaving(false);
+    }
+  };
+
+  const endServiceEnrollment = async (enrollment) => {
+    const endDate = window.prompt(
+      'Enter the explicit service end date (YYYY-MM-DD):',
+      new Date().toISOString().slice(0, 10),
+    );
+    if (!endDate) return;
+    try {
+      const response = await adminAPI.endServiceEnrollment(enrollment.id, endDate);
+      setServiceEnrollments((current) => current.map((item) =>
+        item.id === enrollment.id ? response.data.enrollment : item));
+      toast.success('Finance service enrollment ended');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to end finance service enrollment');
     }
   };
 
@@ -688,15 +769,15 @@ const StudentManagement = () => {
                             </div>
                             {/* Enrollment Flags */}
                             <div>
-                              <p className="text-sm font-semibold text-gray-700 mb-2">Services &amp; Enrollment Flags</p>
-                              <p className="text-xs text-gray-500 mb-2">These flags describe enrollment only. Legacy discount indicators below do not create new financial discounts.</p>
+                              <p className="text-sm font-semibold text-gray-700 mb-2">Legacy service indicators (not billing)</p>
+                              <p className="text-xs text-gray-500 mb-2">These old flags are display-only and never create a bill. Use the Finance Services section below for dated billing enrollment. Legacy discount indicators do not create new financial discounts.</p>
                               <div className="student-enrollment-controls">
                                 {[
                                   { field: 'is_boarder', label: 'Boarding' },
                                   { field: 'uses_transport', label: 'Transport' },
                                   { field: 'uses_aftercare', label: 'Aftercare' },
-                                  { field: 'has_sibling_discount', label: 'Legacy sibling indicator (display only)' },
-                                  { field: 'has_teacher_discount', label: "Legacy staff-child indicator (display only)" },
+                                  { field: 'has_sibling_discount', label: 'Legacy sibling discount indicator (not billing)' },
+                                  { field: 'has_teacher_discount', label: "Legacy staff-child discount indicator (not billing)" },
                                 ].map(({ field, label }) => (
                                   <label key={field} className="student-enrollment-control">
                                     <input
@@ -709,9 +790,81 @@ const StudentManagement = () => {
                                 ))}
                               </div>
                             </div>
-                            <div className="border border-indigo-100 bg-indigo-50 rounded-md p-3">
+                            <div className="border border-emerald-100 bg-emerald-50 rounded-md p-3">
+                              <p className="text-sm font-semibold text-emerald-800">Finance Services</p>
+                              <p className="text-xs text-emerald-700 mt-1 mb-3">Only these explicit effective dates are used for monthly billing. Start and end actions never change legacy flags.</p>
+                              {serviceLoading ? (
+                                <p className="text-xs text-gray-500">Loading finance services…</p>
+                              ) : (
+                                <div className="space-y-2 mb-3">
+                                  {serviceDisplayRows.map(({ serviceKey, enrollment, status }) => (
+                                    <div key={serviceKey} className="flex flex-wrap items-center justify-between gap-2 bg-white rounded px-2 py-1.5 text-xs">
+                                      <span>
+                                        <strong>{serviceKey}</strong>{' '}
+                                        <span className={enrollment ? 'text-green-700' : 'text-gray-500'}>{status}</span>{' '}
+                                        {enrollment
+                                          ? `${enrollment.effective_start} → ${enrollment.effective_end || 'open-ended'}`
+                                          : '— → —'}
+                                      </span>
+                                      {enrollment && status === 'Active' && enrollment.state === 'active' && (
+                                        <button
+                                          type="button"
+                                          onClick={() => endServiceEnrollment(enrollment)}
+                                          className="text-red-600 hover:text-red-800 underline"
+                                        >
+                                          End service
+                                        </button>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <select
+                                  value={serviceForm.service_key}
+                                  onChange={(event) => setServiceForm((current) => ({ ...current, service_key: event.target.value }))}
+                                  className="px-2 py-1.5 border rounded text-sm"
+                                >
+                                  <option value="tuition">Tuition</option>
+                                  <option value="boarding">Boarding</option>
+                                  <option value="transport">Transport</option>
+                                  <option value="aftercare">Aftercare</option>
+                                </select>
+                                <input
+                                  type="date" required value={serviceForm.effective_start}
+                                  onChange={(event) => setServiceForm((current) => ({ ...current, effective_start: event.target.value }))}
+                                  className="px-2 py-1.5 border rounded text-sm"
+                                  aria-label="Finance service start date"
+                                />
+                                <input
+                                  type="date" value={serviceForm.effective_end}
+                                  onChange={(event) => setServiceForm((current) => ({ ...current, effective_end: event.target.value }))}
+                                  className="px-2 py-1.5 border rounded text-sm"
+                                  aria-label="Finance service end date"
+                                />
+                              </div>
+                              <button
+                                type="button" onClick={createServiceEnrollment} disabled={serviceSaving}
+                                className="mt-2 bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 disabled:opacity-50"
+                              >
+                                {serviceSaving ? 'Saving…' : 'Start finance service'}
+                              </button>
+                            </div>
+                            <div ref={discountFormRef} className="border border-indigo-100 bg-indigo-50 rounded-md p-3">
                               <p className="text-sm font-semibold text-indigo-800">Approved discount assignments</p>
-                              <p className="text-xs text-indigo-700 mt-1 mb-3">Only assignments approved here affect newly generated invoices.</p>
+                              <p className="text-xs text-indigo-700 mt-1 mb-3">Only assignments approved here affect newly generated invoices. A legacy indicator with no assignment is unresolved: create an explicit assignment below with an intentional value; no value is inferred.</p>
+                              {unresolvedLegacyDiscounts && (
+                                <div className="mb-3 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+                                  Legacy discount indicator requires review; it is not billed automatically.
+                                  <button
+                                    type="button"
+                                    onClick={() => discountFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                                    className="ml-2 font-semibold underline"
+                                  >
+                                    Create explicit assignment
+                                  </button>
+                                </div>
+                              )}
                               {discountLoading ? (
                                 <p className="text-xs text-gray-500">Loading assignments…</p>
                               ) : (

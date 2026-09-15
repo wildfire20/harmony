@@ -180,7 +180,7 @@ async function runFinanceCorePreflight(client) {
       ON right_side.student_id = left_side.student_id
      AND right_side.service_key = left_side.service_key
      AND right_side.id > left_side.id
-    WHERE left_side.state = 'active' AND right_side.state = 'active'
+    WHERE left_side.state <> 'cancelled' AND right_side.state <> 'cancelled'
       AND left_side.effective_start <= COALESCE(right_side.effective_end, 'infinity'::date)
       AND right_side.effective_start <= COALESCE(left_side.effective_end, 'infinity'::date)
     ORDER BY left_side.student_id, left_side.service_key, left_side.id

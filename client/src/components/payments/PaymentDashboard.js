@@ -55,6 +55,8 @@ const PaymentDashboard = () => {
     month: new Date().getMonth() + 1,
     year: new Date().getFullYear()
   });
+  const [billingReadiness, setBillingReadiness] = useState(null);
+  const [billingReadinessLoading, setBillingReadinessLoading] = useState(false);
 
   // Ghost invoice modal states
   const [showGhostModal, setShowGhostModal] = useState(false);
@@ -225,6 +227,33 @@ const PaymentDashboard = () => {
       setUploadLoading(false);
     }
   };
+
+  const fetchBillingReadiness = async () => {
+    const period = `${generateForm.year}-${String(generateForm.month).padStart(2, '0')}`;
+    setBillingReadinessLoading(true);
+    try {
+      const response = await fetch(`/api/admin/monthly-billing-readiness?period=${period}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Could not check billing readiness');
+      setBillingReadiness(data);
+    } catch (error) {
+      setBillingReadiness({
+        ready: false,
+        hardFailures: [{ code: 'readiness_unavailable', message: error.message }],
+      });
+    } finally {
+      setBillingReadinessLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showGenerateModal && isAdmin) {
+      setBillingReadiness(null);
+      fetchBillingReadiness();
+    }
+  }, [showGenerateModal, generateForm.month, generateForm.year]);
 
   const handleExportCSV = async () => {
     try {
@@ -1158,6 +1187,37 @@ const PaymentDashboard = () => {
                 enrollment, configured bundles, and active approved discounts.
                 No manual amount is entered here.
               </div>
+              <div className={`rounded-md border p-3 text-sm ${
+                billingReadiness?.ready
+                  ? 'bg-green-50 border-green-200 text-green-800'
+                  : 'bg-amber-50 border-amber-200 text-amber-900'
+              }`}>
+                <div className="flex items-center justify-between gap-2">
+                  <strong>Billing readiness</strong>
+                  <button
+                    type="button"
+                    onClick={fetchBillingReadiness}
+                    disabled={billingReadinessLoading}
+                    className="text-xs underline disabled:opacity-50"
+                  >
+                    {billingReadinessLoading ? 'Checking…' : 'Check again'}
+                  </button>
+                </div>
+                {billingReadinessLoading || !billingReadiness ? (
+                  <p className="mt-1">Checking readiness for this period…</p>
+                ) : billingReadiness.ready ? (
+                  <p className="mt-1">Ready for {generateForm.year}-{String(generateForm.month).padStart(2, '0')}.</p>
+                ) : (
+                  <div className="mt-1">
+                    <p>Not ready — generation is blocked until these hard failures are resolved.</p>
+                    <ul className="list-disc ml-5 mt-1">
+                      {(billingReadiness?.hardFailures || []).slice(0, 5).map((failure, index) => (
+                        <li key={`${failure.code}-${index}`}>{failure.message}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
 
               <div className="flex justify-end space-x-3 pt-4">
                 <button
@@ -1168,7 +1228,7 @@ const PaymentDashboard = () => {
                 </button>
                 <button
                   onClick={handleGenerateInvoices}
-                  disabled={uploadLoading}
+                  disabled={uploadLoading || billingReadinessLoading || !billingReadiness || !billingReadiness.ready}
                   className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
                 >
                   {uploadLoading ? 'Generating...' : 'Generate Invoices'}

@@ -241,7 +241,9 @@ function enrolledServiceKeys(student, enrollmentRows) {
     ]);
   }
   return new Set(enrollmentRows
-    .filter((row) => row && row.state === 'active')
+    // Ended rows remain authoritative for months through effective_end.
+    // Only explicitly cancelled rows are excluded from historical billing.
+    .filter((row) => row && row.state !== 'cancelled')
     .map((row) => String(row.service_key || '').toLowerCase())
     .filter((key) => ['tuition', 'boarding', 'transport', 'aftercare'].includes(key)));
 }

@@ -9,8 +9,288 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { logAudit, getIp } = require('../utils/auditLogger');
 const { generateKidFriendlyPassword } = require('../utils/passwordGenerator');
 const { isStudentPortalEnabled } = require('../config/features');
+const serviceEnrollment = require('../services/serviceEnrollmentService');
+const { getMonthlyBillingReadiness } = require('../services/monthlyBillingReadiness');
 
 const router = express.Router();
+
+function enrollmentActor(req) {
+  return {
+    userId: req.user.id,
+    userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+    userRole: req.user.role,
+    ipAddress: getIp(req),
+  };
+}
+
+const adminFinanceAccess = [authenticate, authorize('admin', 'super_admin')];
+
+function enrollmentIdempotencyConflict(message) {
+  const error = new Error(message);
+  error.code = 'IDEMPOTENCY_CONFLICT';
+  error.status = 409;
+  return error;
+}
+
+/*
+ * Explicit service enrollment administration.  These endpoints never update
+ * users.is_boarder/uses_transport/uses_aftercare: those columns are retained
+ * as legacy display indicators and are not billing inputs.
+ */
+router.get('/service-enrollments', adminFinanceAccess, async (req, res) => {
+  try {
+    const studentId = req.query.student_id == null ? null : Number(req.query.student_id);
+    if (studentId != null && (!Number.isSafeInteger(studentId) || studentId < 1)) {
+      return res.status(400).json({ success: false, message: 'student_id must be a positive integer' });
+    }
+    let rows;
+    if (studentId != null && req.query.period) {
+      serviceEnrollment.periodBounds(req.query.period);
+      rows = await serviceEnrollment.listEffectiveEnrollments(studentId, req.query.period);
+    } else if (studentId != null) {
+      rows = await serviceEnrollment.listEnrollments(studentId);
+    } else {
+      rows = (await db.query(`
+        SELECT id, student_id, service_key, effective_start::text AS effective_start,
+               effective_end::text AS effective_end, state, idempotency_key,
+               created_at, updated_at
+        FROM service_enrollments
+        ORDER BY student_id, effective_start, service_key, id
+      `)).rows;
+    }
+    return res.json({ success: true, enrollments: rows });
+  } catch (error) {
+    if (error.code === '42P01') {
+      return res.status(503).json({
+        success: false,
+        message: 'Service enrollments are unavailable until the finance core migration is applied',
+      });
+    }
+    return res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+router.get('/students/:studentId/service-enrollments', adminFinanceAccess, async (req, res) => {
+  try {
+    const studentId = Number(req.params.studentId);
+    if (!Number.isSafeInteger(studentId) || studentId < 1) {
+      return res.status(400).json({ success: false, message: 'Invalid learner ID' });
+    }
+    const learner = await db.query(
+      `SELECT id FROM users WHERE id=$1::integer AND role='student'`,
+      [studentId],
+    );
+    if (!learner.rows.length) return res.status(404).json({ success: false, message: 'Learner not found' });
+    const rows = req.query.period
+      ? await serviceEnrollment.listEffectiveEnrollments(studentId, req.query.period)
+      : await serviceEnrollment.listEnrollments(studentId);
+    return res.json({ success: true, enrollments: rows });
+  } catch (error) {
+    if (error.code === '42P01') return res.status(503).json({
+      success: false, message: 'Service enrollments are unavailable until the finance core migration is applied',
+    });
+    return res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/service-enrollments', adminFinanceAccess, async (req, res) => {
+  const studentId = Number(req.body?.student_id ?? req.body?.studentId);
+  const serviceKey = req.body?.service_key ?? req.body?.serviceKey;
+  let effectiveStart = req.body?.effective_start ?? req.body?.effectiveStart;
+  let effectiveEnd = req.body?.effective_end ?? req.body?.effectiveEnd;
+  let idempotencyKey;
+  try {
+    idempotencyKey = serviceEnrollment.normalizeIdempotencyKey(
+      req.get('Idempotency-Key') || req.body?.idempotency_key ||
+      req.body?.idempotencyKey,
+    );
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+  if (!Number.isSafeInteger(studentId) || studentId < 1 || !serviceKey || !effectiveStart) {
+    return res.status(400).json({
+      success: false,
+      message: 'student_id, service_key and explicit effective_start are required',
+    });
+  }
+  try {
+    effectiveStart = serviceEnrollment.normalizeDate(effectiveStart, 'effectiveStart');
+    effectiveEnd = effectiveEnd
+      ? serviceEnrollment.normalizeDate(effectiveEnd, 'effectiveEnd') : null;
+    if (effectiveEnd && effectiveEnd < effectiveStart) {
+      return res.status(400).json({
+        success: false, message: 'effectiveEnd cannot precede effectiveStart',
+      });
+    }
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+  const client = await db.pool.connect();
+  let created = false;
+  try {
+    await client.query('BEGIN');
+    const learner = await client.query(
+      `SELECT id, student_number FROM users
+       WHERE id=$1::integer AND role='student' AND is_active=true FOR SHARE`,
+      [studentId],
+    );
+    if (!learner.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Active learner not found' });
+    }
+    // Serialize retries and identity races alike.  The database uniqueness and
+    // overlap constraints remain the authority; this lock only ensures that a
+    // replay does not emit a second audit event.
+    await client.query(
+      `SELECT pg_advisory_xact_lock(
+         hashtext('harmony:service-enrollment'),
+         hashtext($1)
+       )`,
+      [idempotencyKey
+        ? `key:${String(idempotencyKey).trim()}`
+        : `identity:${studentId}:${String(serviceKey).trim().toLowerCase()}:${effectiveStart}`],
+    );
+    let existing = null;
+    if (idempotencyKey) {
+      existing = await client.query(
+        `SELECT id, student_id, service_key, effective_start::text AS effective_start,
+                effective_end::text AS effective_end, state, idempotency_key,
+                created_at, updated_at
+         FROM service_enrollments WHERE idempotency_key=$1`,
+        [String(idempotencyKey).trim()],
+      );
+      if (existing.rows[0]) {
+        const stored = existing.rows[0];
+        const storedEnd = stored.effective_end
+          ? String(stored.effective_end).slice(0, 10) : null;
+        if (Number(stored.student_id) !== studentId ||
+            String(stored.service_key).toLowerCase() !== String(serviceKey).trim().toLowerCase() ||
+            String(stored.effective_start).slice(0, 10) !== String(effectiveStart).slice(0, 10) ||
+            storedEnd !== (effectiveEnd ? String(effectiveEnd).slice(0, 10) : null)) {
+          throw enrollmentIdempotencyConflict(
+            'Idempotency key was already used with a different enrollment payload',
+          );
+        }
+      }
+    }
+    let existingIdentity = null;
+    if (!existing?.rows?.length) {
+      // The identity index also makes retries safe when the caller omitted a
+      // key.  Treat the row as an idempotent replay rather than emitting a
+      // second audit event for an unchanged enrollment.
+      existingIdentity = await client.query(
+        `SELECT id, student_id, service_key, effective_start::text AS effective_start,
+                effective_end::text AS effective_end, state, idempotency_key,
+                created_at, updated_at
+         FROM service_enrollments
+         WHERE student_id=$1::integer AND service_key=$2 AND effective_start=$3::date`,
+        [studentId, String(serviceKey).trim().toLowerCase(), effectiveStart],
+      );
+      if (existingIdentity.rows[0]) {
+        const storedEnd = existingIdentity.rows[0].effective_end
+          ? String(existingIdentity.rows[0].effective_end).slice(0, 10) : null;
+        const requestedEnd = effectiveEnd ? String(effectiveEnd).slice(0, 10) : null;
+        if (storedEnd !== requestedEnd) {
+          throw enrollmentIdempotencyConflict(
+            'An enrollment already exists for this learner/service/start with a different end date',
+          );
+        }
+      }
+    }
+    const enrollment = existing?.rows?.[0] || existingIdentity?.rows?.[0] ||
+      await serviceEnrollment.enrollLearner({
+        studentId, serviceKey, effectiveStart, effectiveEnd, idempotencyKey,
+      }, client);
+    created = !existing?.rows?.length && !existingIdentity?.rows?.length;
+    if (!enrollment) throw new Error('Unable to create service enrollment');
+    if (created) {
+      await logAudit({
+        ...enrollmentActor(req),
+        action: 'service_enrollment_created',
+        entityType: 'service_enrollment',
+        entityId: enrollment.id,
+        details: {
+          student_id: studentId, service_key: enrollment.service_key,
+          effective_start: enrollment.effective_start, effective_end: enrollment.effective_end,
+          idempotency_key: enrollment.idempotency_key || null,
+        },
+        executor: client,
+        required: true,
+      });
+    }
+    await client.query('COMMIT');
+    return res.status(created ? 201 : 200).json({
+      success: true, idempotent: !created, enrollment,
+    });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error.code === '42P01') return res.status(503).json({
+      success: false, message: 'Service enrollments are unavailable until the finance core migration is applied',
+    });
+    if (error.code === '23P01' || /overlap/i.test(error.message || '')) {
+      return res.status(409).json({ success: false, message: 'An active enrollment overlaps the requested effective period' });
+    }
+    if (error.code === 'IDEMPOTENCY_CONFLICT') {
+      return res.status(409).json({
+        success: false, code: 'IDEMPOTENCY_CONFLICT', message: error.message,
+      });
+    }
+    return res.status(400).json({ success: false, message: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/service-enrollments/:id/end', adminFinanceAccess, async (req, res) => {
+  const enrollmentId = Number(req.params.id);
+  const effectiveEnd = req.body?.effective_end ?? req.body?.effectiveEnd;
+  if (!Number.isSafeInteger(enrollmentId) || enrollmentId < 1 || !effectiveEnd) {
+    return res.status(400).json({
+      success: false, message: 'enrollment ID and explicit effective_end are required',
+    });
+  }
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const ended = await serviceEnrollment.endLearnerEnrollment(enrollmentId, effectiveEnd, client);
+    if (!ended) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Active service enrollment not found' });
+    }
+    await logAudit({
+      ...enrollmentActor(req),
+      action: 'service_enrollment_ended',
+      entityType: 'service_enrollment',
+      entityId: ended.id,
+      details: {
+        student_id: ended.student_id, service_key: ended.service_key,
+        effective_start: ended.effective_start, effective_end: ended.effective_end,
+      },
+      executor: client,
+      required: true,
+    });
+    await client.query('COMMIT');
+    return res.json({ success: true, enrollment: ended });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error.code === '42P01') return res.status(503).json({
+      success: false, message: 'Service enrollments are unavailable until the finance core migration is applied',
+    });
+    return res.status(400).json({ success: false, message: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+router.get(['/monthly-billing-readiness', '/finance/monthly-readiness'], adminFinanceAccess, async (req, res) => {
+  try {
+    const period = String(req.query.period || '').trim();
+    const readiness = await getMonthlyBillingReadiness(period);
+    return res.status(200).json({ success: true, ...readiness });
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+});
 
 // Explicit learner discount assignments. These endpoints are additive and
 // intentionally separate from the legacy user boolean flags: generation must
@@ -719,7 +999,9 @@ router.get('/students', [
              u.grade_id, u.class_id, u.is_active, u.created_at,
              COALESCE(u.is_boarder, false) AS is_boarder,
              COALESCE(u.uses_transport, false) AS uses_transport,
-             COALESCE(u.uses_aftercare, false) AS uses_aftercare,
+              COALESCE(u.uses_aftercare, false) AS uses_aftercare,
+              COALESCE(u.has_sibling_discount, false) AS has_sibling_discount,
+              COALESCE(u.has_teacher_discount, false) AS has_teacher_discount,
              g.name as grade_name, c.name as class_name
       FROM users u
       LEFT JOIN grades g ON u.grade_id = g.id

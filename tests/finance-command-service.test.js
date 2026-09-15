@@ -15,7 +15,7 @@ const commandSource = fs.readFileSync(
 );
 
 test('finance command service owns transaction boundaries and canonical locks', () => {
-  assert.match(commandSource, /await client\.query\('BEGIN'\)/);
+  assert.match(commandSource, /BEGIN ISOLATION LEVEL \$\{isolationLevel\}/);
   assert.match(commandSource, /await client\.query\('COMMIT'\)/);
   assert.match(commandSource, /await client\.query\('ROLLBACK'\)/);
   assert.match(commandSource, /set_config\('harmony\.finance_command', 'canonical', true\)/);
@@ -43,6 +43,23 @@ test('withTransaction commits successful commands and rolls back failures', asyn
   assert.deepEqual(calls, [
     `SELECT set_config('harmony.finance_command', 'canonical', true)`,
   ]);
+});
+
+test('repeatable-read isolation is established before canonical monthly work', async () => {
+  const calls = [];
+  const executor = {
+    async query(sql) {
+      calls.push(sql);
+      return { rows: [] };
+    },
+  };
+  await withTransaction(async () => 'ok', executor, 'REPEATABLE READ');
+  assert.equal(calls[0], 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+  assert.equal(
+    calls[1],
+    `SELECT set_config('harmony.finance_command', 'canonical', true)`,
+  );
+  assert.ok(commandSource.includes("}, options.executor, 'REPEATABLE READ');"));
 });
 
 test('final ledger verification rejects stale invoice status', async () => {

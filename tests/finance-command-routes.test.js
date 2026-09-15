@@ -154,6 +154,11 @@ test('monthly billing route delegates the complete period command', async () => 
       };
     },
   });
+  mock('../services/monthlyBillingReadiness', {
+    getMonthlyBillingReadiness: async () => ({
+      period: '2029-02', ready: true, hardFailures: [], warnings: [],
+    }),
+  });
   mock('../utils/auditLogger', {
     logAudit: async () => {},
     getIp: () => '127.0.0.1',
