@@ -397,12 +397,16 @@ async function runFinanceCoreAudit(client, options = {}) {
     FROM invoices i
     JOIN invoice_line_items line ON line.invoice_id = i.id
     WHERE COALESCE(i.finance_origin, 'unknown') <> 'canonical'
+      AND COALESCE(
+        i.billing_period,
+        date_trunc('month', i.due_date)::date
+      ) >= ($1 || '-01')::date
       AND (
         line.metadata->>'source' = 'legacy_invoice_reconciliation'
         OR line.metadata->>'legacy_reconciliation' IN ('true', 'TRUE')
       )
     ORDER BY i.due_date, i.id, line.id
-  `);
+  `, [currentPeriod]);
   checks.currentFutureLegacyFallbacks = { count: currentFutureLegacyLines.length };
   currentFutureLegacyLines.forEach((row) => findings.push({
     section: 'current_future_legacy_fallbacks',
@@ -558,7 +562,9 @@ async function runFinanceCoreAudit(client, options = {}) {
     WHERE reversal.reverses_transaction_id IS NOT NULL
       AND (original.id IS NULL
            OR reversal.id = original.id
-           OR reversal.amount <= 0
+            OR reversal.amount >= 0
+            OR original.amount <= 0
+            OR ROUND((reversal.amount + original.amount)::numeric, 2) <> 0
            OR reversal.student_id IS DISTINCT FROM original.student_id
            OR reversal.invoice_id IS DISTINCT FROM original.invoice_id
            OR (

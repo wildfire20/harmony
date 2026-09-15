@@ -13,3 +13,4 @@
 - [PostgreSQL date expression typing](postgres-date-expression-typing.md) — explicitly cast nullable bound date parameters inside SQL expressions such as COALESCE.
 - [Legacy finance category isolation](legacy-finance-category-isolation.md) — partially paid multi-service invoices without category events must fail closed; never infer old allocation ownership.
 - [Canonical finance core](canonical-finance-core.md) — future billing uses effective enrollments, immutable snapshots/events, normalized proof identities, and one guarded command layer.
+- [Finance date-only boundaries](finance-date-only-boundaries.md) — PostgreSQL financial DATE fields must cross read boundaries as canonical text, never timezone-converted Date objects.

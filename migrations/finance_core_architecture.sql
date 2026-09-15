@@ -323,6 +323,7 @@ DECLARE
   target_proof INTEGER;
   target_line_invoice INTEGER;
   target_fee_learner INTEGER;
+  target_proposal INTEGER;
   proposal_record RECORD;
 BEGIN
   SELECT student_id INTO proof_learner
@@ -361,12 +362,13 @@ BEGIN
     END IF;
   END IF;
 
-  IF TG_TABLE_NAME = 'payment_proof_allocations' AND NEW.proposal_id IS NOT NULL THEN
+  target_proposal := NULLIF(to_jsonb(NEW)->>'proposal_id', '')::integer;
+  IF TG_TABLE_NAME = 'payment_proof_allocations' AND target_proposal IS NOT NULL THEN
     SELECT proof_id, learner_id, invoice_id, invoice_line_item_id,
            fee_assignment_id, category
       INTO proposal_record
     FROM payment_proof_allocation_proposals
-    WHERE id = NEW.proposal_id;
+    WHERE id = target_proposal;
     IF proposal_record.proof_id IS DISTINCT FROM NEW.proof_id
        OR proposal_record.learner_id IS DISTINCT FROM NEW.learner_id
        OR proposal_record.invoice_id IS DISTINCT FROM NEW.invoice_id
@@ -374,7 +376,7 @@ BEGIN
        OR proposal_record.fee_assignment_id IS DISTINCT FROM NEW.fee_assignment_id
        OR proposal_record.category IS DISTINCT FROM NEW.category THEN
       RAISE EXCEPTION 'Proof allocation % does not match proposal %',
-        NEW.id, NEW.proposal_id;
+        NEW.id, target_proposal;
     END IF;
   END IF;
   RETURN NEW;

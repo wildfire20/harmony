@@ -36,7 +36,9 @@ function periodBounds(period) {
 async function listEffectiveEnrollments(studentId, period, executor = db) {
   const bounds = periodBounds(period);
   const result = await executor.query(`
-    SELECT id, student_id, service_key, effective_start, effective_end,
+    SELECT id, student_id, service_key,
+           effective_start::text AS effective_start,
+           effective_end::text AS effective_end,
            state, idempotency_key, created_at, updated_at
     FROM service_enrollments
     WHERE student_id = $1::integer
@@ -53,7 +55,9 @@ async function listEffectiveEnrollmentsForStudents(studentIds, period, executor 
   if (!ids.length) return [];
   const bounds = periodBounds(period);
   const result = await executor.query(`
-    SELECT id, student_id, service_key, effective_start, effective_end,
+    SELECT id, student_id, service_key,
+           effective_start::text AS effective_start,
+           effective_end::text AS effective_end,
            state, idempotency_key, created_at, updated_at
     FROM service_enrollments
     WHERE student_id = ANY($1::integer[])
@@ -67,7 +71,9 @@ async function listEffectiveEnrollmentsForStudents(studentIds, period, executor 
 
 async function listEnrollments(studentId, executor = db) {
   const result = await executor.query(`
-    SELECT id, student_id, service_key, effective_start, effective_end,
+    SELECT id, student_id, service_key,
+           effective_start::text AS effective_start,
+           effective_end::text AS effective_end,
            state, idempotency_key, created_at, updated_at
     FROM service_enrollments
     WHERE student_id = $1::integer
@@ -104,7 +110,9 @@ async function createEnrollment(input, executor = db) {
 
   if (idempotencyKey) {
     const existingByKey = await executor.query(`
-      SELECT id, student_id, service_key, effective_start, effective_end,
+      SELECT id, student_id, service_key,
+             effective_start::text AS effective_start,
+             effective_end::text AS effective_end,
              state, idempotency_key, created_at, updated_at
       FROM service_enrollments
       WHERE idempotency_key = $1
@@ -135,12 +143,16 @@ async function createEnrollment(input, executor = db) {
       (student_id, service_key, effective_start, effective_end, state, idempotency_key)
     VALUES ($1::integer, $2, $3::date, $4::date, $5, $6)
     ON CONFLICT (student_id, service_key, effective_start) DO NOTHING
-    RETURNING id, student_id, service_key, effective_start, effective_end,
+    RETURNING id, student_id, service_key,
+              effective_start::text AS effective_start,
+              effective_end::text AS effective_end,
               state, idempotency_key, created_at, updated_at
   `, [studentId, serviceKey, effectiveStart, effectiveEnd, state, idempotencyKey]);
   if (inserted.rows.length) return inserted.rows[0];
   const existing = await executor.query(`
-    SELECT id, student_id, service_key, effective_start, effective_end,
+    SELECT id, student_id, service_key,
+           effective_start::text AS effective_start,
+           effective_end::text AS effective_end,
            state, idempotency_key, created_at, updated_at
     FROM service_enrollments
     WHERE student_id = $1::integer AND service_key = $2
@@ -155,7 +167,9 @@ async function endEnrollment(id, effectiveEnd, executor = db) {
     UPDATE service_enrollments
     SET effective_end = $2::date, state = 'ended', updated_at = CURRENT_TIMESTAMP
     WHERE id = $1::integer AND state = 'active'
-    RETURNING id, student_id, service_key, effective_start, effective_end,
+    RETURNING id, student_id, service_key,
+              effective_start::text AS effective_start,
+              effective_end::text AS effective_end,
               state, idempotency_key, created_at, updated_at
   `, [Number(id), end]);
   return result.rows[0] || null;

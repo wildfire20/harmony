@@ -19,6 +19,21 @@ const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const nonNegative = (value) => Math.max(0, money(value));
 const INVOICE_STATUSES = ['Unpaid', 'Partial', 'Paid', 'Overpaid', 'Carried Forward'];
 
+function dateOnlyParts(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return {
+      year: value.getFullYear(),
+      month: value.getMonth() + 1,
+      day: value.getDate(),
+    };
+  }
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+}
+
 function invoiceStatus(amountDue, amountPaid, originalStatus) {
   if (originalStatus === 'Carried Forward') return originalStatus;
   const due = money(amountDue);
@@ -574,9 +589,9 @@ async function getStudentLedger(studentId, executor = db) {
     });
     const legacyMetadata = legacyLine?.metadata || {};
     const paymentReviewFlags = [];
-    const invoiceDate = row.due_date ? new Date(row.due_date) : null;
-    const invoiceMonth = invoiceDate && invoiceDate.getUTCMonth() + 1;
-    const invoiceYear = invoiceDate && invoiceDate.getUTCFullYear();
+    const invoiceDate = dateOnlyParts(row.due_date);
+    const invoiceMonth = invoiceDate?.month;
+    const invoiceYear = invoiceDate?.year;
     for (const transaction of paymentRowsByInvoice.get(row.id) || []) {
       if (transaction.month != null && transaction.year != null &&
           invoiceDate &&
@@ -882,7 +897,7 @@ async function allocatePayment(executor, {
   let allocationLineRows = [];
   if (proposals) {
     const lineResult = await queryAt('load-invoice-lines', `
-      SELECT invoice_id, line_type, service_key, amount, is_included, metadata
+      SELECT id, invoice_id, line_type, service_key, amount, is_included, metadata
       FROM invoice_line_items
       WHERE invoice_id = ANY($1::integer[])
       ORDER BY invoice_id, id
@@ -1007,8 +1022,8 @@ async function allocatePayment(executor, {
     `, [
       invoice.id, normalizedStudentId, student.student_number, ref, toApply.toFixed(2),
       date, description || null, paymentMethod, recordedBy || null,
-      transactionMonth || new Date(invoice.due_date).getUTCMonth() + 1,
-      transactionYear || new Date(invoice.due_date).getUTCFullYear(),
+      transactionMonth || dateOnlyParts(invoice.due_date)?.month,
+      transactionYear || dateOnlyParts(invoice.due_date)?.year,
       proposal?.category || null,
     ]) : await queryAt('insert-allocation-event', `
       INSERT INTO payment_transactions
@@ -1020,8 +1035,8 @@ async function allocatePayment(executor, {
     `, [
       invoice.id, normalizedStudentId, student.student_number, ref, toApply.toFixed(2),
       date, description || null, paymentMethod, recordedBy || null,
-      transactionMonth || new Date(invoice.due_date).getUTCMonth() + 1,
-      transactionYear || new Date(invoice.due_date).getUTCFullYear(),
+      transactionMonth || dateOnlyParts(invoice.due_date)?.month,
+      transactionYear || dateOnlyParts(invoice.due_date)?.year,
     ]);
     allocations.push({
       transactionId: tx.rows[0].id,
@@ -1113,9 +1128,7 @@ async function reversePayment(executor, { transactionId, recordedBy, description
       // replacement carries the remaining balance, so undoing an old
       // allocation increases the successor's amount_due rather than trying
       // to make the historical invoice visible again.
-      const sourceYear = invoice.due_date
-        ? new Date(invoice.due_date).getUTCFullYear()
-        : payment.year;
+      const sourceYear = dateOnlyParts(invoice.due_date)?.year || payment.year;
       let successorResult;
       if (invoice.carried_forward_to_invoice_id != null) {
         successorResult = await executor.query(`

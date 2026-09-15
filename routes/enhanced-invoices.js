@@ -31,10 +31,16 @@ const { getPayableObligations } = require('../services/payableObligations');
 
 function dateOnly(value) {
   if (value == null || value === '') return '';
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return '';
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
   const raw = String(value);
   if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+  return '';
 }
 
 function spreadsheetText(value) {
@@ -903,10 +909,8 @@ router.get('/student-payment-history/:studentNumber', [
       if (!inv.counted_in_totals && !inv.carry_forward_history &&
           inv.status !== 'Carried Forward') return;
       if (!inv.due_date) return;
-      const date = new Date(inv.due_date);
-      const year = date.getUTCFullYear();
-      const monthIndex = date.getUTCMonth();
-      const monthNum = monthIndex + 1;
+      const [year, monthNum] = dateOnly(inv.due_date).split('-').map(Number);
+      const monthIndex = monthNum - 1;
       const paymentStatus = paymentStatusForInvoice(inv);
       const oneOffLines = inv.one_off_charge_lines || [];
       const recurringLines = inv.service_charge_lines || [];
@@ -1338,7 +1342,7 @@ router.get('/student-payment-history/:studentNumber', [
         const lines = invoice.line_items || [];
         const base = {
           invoiceId: invoice.id,
-          dueDate: invoice.due_date ? new Date(invoice.due_date).toISOString().slice(0, 10) : '',
+          dueDate: dateOnly(invoice.due_date),
           gross: invoice.gross_charges,
           discountTotal: invoice.discount_total,
           netDue: invoice.net_due,

@@ -26,6 +26,19 @@ const financeCommands = require('../services/financeCommandService');
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin = [authenticate, authorize('admin', 'super_admin')];
 
+function dateOnly(value) {
+  if (value == null || value === '') return '';
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return '';
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  const raw = String(value);
+  return /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : '';
+}
+
 // ─── Multer setup (memory for S3 or durable database storage) ────────────────
 const storage = multer.memoryStorage();
 const MAX_RECEIPT_SIZE = 10 * 1024 * 1024;
@@ -437,7 +450,7 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
     if (availableAmount <= 0 || Number(line.amount_paid) >= Number(line.amount_due)) {
       const error = new Error(`selector ${index + 1} (${ledgerCategory}) is already fully paid`);
       error.status = 409;
-      error.safeMessage = `${categoryLabel}${line.due_date ? ` for ${String(line.due_date).slice(0, 10)}` : ''} is already fully paid. Remove or retarget this allocation before approving.`;
+      error.safeMessage = `${categoryLabel}${line.due_date ? ` for ${dateOnly(line.due_date)}` : ''} is already fully paid. Remove or retarget this allocation before approving.`;
       error.obligationIndex = index;
       error.obligationCategory = ledgerCategory;
       throw error;

@@ -276,8 +276,11 @@ async function runSuite() {
         (3, 'FIN-GATE-001', 'learner@finance-gate.test', 'Finance', 'Learner', 'student', 1);
       INSERT INTO parent_students (parent_id, student_id) VALUES (2, 3), (4, 3);
       INSERT INTO learner_discount_assignments
-        (student_id, discount_type, calculation_method, amount, reason, starts_on)
-      VALUES (3, 'custom', 'fixed', 100, 'Approved gate discount', '2029-01-01');
+        (student_id, discount_type, calculation_method, amount,
+         applicable_service_key, reason, starts_on)
+      VALUES
+        (3, 'custom', 'fixed', 100, 'tuition',
+         'Approved gate discount', '2029-01-01');
     `);
 
     const app = express();
@@ -316,6 +319,12 @@ async function runSuite() {
     assert.deepEqual(enrollmentResponse.body.map((row) => row.service_key), [
       'aftercare', 'boarding', 'transport', 'tuition',
     ]);
+    assert.deepEqual(enrollmentResponse.body.map((row) => row.effective_start), [
+      '2029-01-01', '2029-01-01', '2029-01-01', '2029-01-01',
+    ]);
+    assert.deepEqual(enrollmentResponse.body.map((row) => row.effective_end), [
+      null, null, null, null,
+    ]);
 
     const generated = await request(
       server, 'POST', '/api/invoices/generate-monthly',
@@ -325,10 +334,12 @@ async function runSuite() {
     assert.equal(generated.body.summary.invoicesCreated, 1);
     const monthlyInvoice = generated.body.invoices[0];
     const monthlyMetadata = (await database.query(`
-      SELECT billing_period, invoice_kind, invoice_source, finance_origin
+      SELECT billing_period::text AS billing_period,
+             invoice_kind, invoice_source, finance_origin
       FROM invoices WHERE id=$1
     `, [monthlyInvoice.id])).rows[0];
-    assert.equal(String(monthlyMetadata.billing_period).slice(0, 10), '2029-01-01');
+    assert.equal(monthlyMetadata.billing_period, '2029-01-01');
+    assert.equal(monthlyInvoice.billing_period, '2029-01-01');
     assert.equal(monthlyMetadata.invoice_kind, 'monthly');
     assert.equal(monthlyMetadata.invoice_source, 'monthly_generation');
     assert.equal(monthlyMetadata.finance_origin, 'canonical');
@@ -387,15 +398,15 @@ async function runSuite() {
     `)).rows[0];
     const legacyLine = (await database.query(`
       INSERT INTO invoice_line_items
-        (invoice_id, line_type, service_key, label, amount, metadata)
-      VALUES ($1, 'charge', 'tuition', 'Legacy tuition', 10,
+        (invoice_id, line_type, service_key, label, unit_amount, amount, metadata)
+      VALUES ($1, 'charge', 'tuition', 'Legacy tuition', 10, 10,
         '{"source":"legacy_invoice_reconciliation","category":"tuition"}'::jsonb)
       RETURNING id
     `, [legacyInvoice.id])).rows[0];
     await database.query(`
       INSERT INTO invoice_line_items
-        (invoice_id, line_type, service_key, label, amount, is_included, metadata)
-      VALUES ($1, 'charge', 'boarding', 'Corrected legacy classification', 0, true,
+        (invoice_id, line_type, service_key, label, unit_amount, amount, is_included, metadata)
+      VALUES ($1, 'charge', 'boarding', 'Corrected legacy classification', 0, 0, true,
         jsonb_build_object(
           'source', 'legacy_classification_correction',
           'target_line_id', $2::text,
@@ -420,9 +431,9 @@ async function runSuite() {
 
     const initialPayables = await payable.getPayableObligations(3, database, { asOf: '2029-01-15' });
     assert.deepEqual(initialPayables.filter((row) => row.is_payable).map((row) => row.category), [
-      'tuition', 'boarding', 'transport', 'aftercare', 'one_off',
+      'boarding', 'tuition', 'boarding', 'transport', 'aftercare', 'one_off',
     ]);
-    assert.equal(initialPayables.filter((row) => row.is_payable).length, 5);
+    assert.equal(initialPayables.filter((row) => row.is_payable).length, 6);
     const tuition = initialPayables.find((row) => row.category === 'tuition');
     const oneOff = initialPayables.find((row) => row.category === 'one_off');
     const mixedAmount = Number(tuition.amount_outstanding) + Number(oneOff.amount_outstanding);
@@ -513,14 +524,17 @@ async function runSuite() {
     const afterApproval = await payable.getPayableObligations(3, database, { asOf: '2029-01-15' });
     assert.equal(afterApproval.find((row) => row.obligation_id === tuition.obligation_id).status, 'PAID');
     assert.equal(afterApproval.find((row) => row.obligation_id === oneOff.obligation_id).status, 'PAID');
-    assert.equal(afterApproval.filter((row) => row.is_payable).length, 3);
+    assert.equal(afterApproval.filter((row) => row.is_payable).length, 4);
     const ledgerResponse = await request(
       server, 'GET', '/api/reports/student-payment-history/FIN-GATE-001',
       undefined, { 'x-test-role': 'admin' },
     );
     assert.equal(ledgerResponse.status, 200);
     assert.equal(Number(ledgerResponse.body.summary.totalPaid), mixedAmount);
-    assert.equal(Number(ledgerResponse.body.summary.totalOutstanding), 5050 - Number(tuition.amount_outstanding));
+    assert.equal(
+      Number(ledgerResponse.body.summary.totalOutstanding),
+      10 + 5050 - Number(tuition.amount_outstanding),
+    );
 
     const workbookResponse = await request(
       server, 'GET', '/api/reports/student-payment-history/FIN-GATE-001?format=excel',
@@ -611,7 +625,8 @@ async function runSuite() {
 
     // A correction reverses the immutable manual event and records its
     // replacement against a different exact category.
-    const boarding = restored.find((row) => row.category === 'boarding');
+    const boarding = restored.find((row) =>
+      row.category === 'boarding' && Number(row.invoice_id) === Number(monthlyInvoice.id));
     const correction = await financeCommands.correctPayment({
       transactionId: manualOne.transactionIds[0], studentId: 3, amount: 100,
       paymentDate: '2029-01-15', paymentMethod: 'manual_entry',

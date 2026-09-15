@@ -46,10 +46,16 @@ const positiveInteger = (value) => {
 
 function dateOnly(value) {
   if (value == null || value === '') return '';
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return '';
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
   const raw = String(value);
   if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+  return '';
 }
 
 function csvText(value) {
@@ -674,7 +680,7 @@ router.post('/:id/classify-legacy', [
       amount_paid: String(invoice.amount_paid),
       outstanding_balance: String(invoice.outstanding_balance ?? outstanding),
       overpaid_amount: String(invoice.overpaid_amount ?? Math.max(amountPaid - amountDue, 0)),
-      due_date: invoice.due_date == null ? null : String(invoice.due_date).slice(0, 10),
+      due_date: invoice.due_date == null ? null : dateOnly(invoice.due_date),
       reference_number: invoice.reference_number || null,
       status: invoice.status || null,
     };
@@ -748,7 +754,7 @@ router.post('/:id/classify-legacy', [
       headerSnapshot.amount_paid === String(after.amount_paid) &&
       headerSnapshot.outstanding_balance === String(after.outstanding_balance) &&
       headerSnapshot.overpaid_amount === String(after.overpaid_amount) &&
-      headerSnapshot.due_date === (after.due_date == null ? null : String(after.due_date).slice(0, 10)) &&
+      headerSnapshot.due_date === (after.due_date == null ? null : dateOnly(after.due_date)) &&
       headerSnapshot.reference_number === (after.reference_number || null) &&
       headerSnapshot.status === (after.status || null);
     const afterAllocationResult = await client.query(`
@@ -997,7 +1003,7 @@ router.post('/:id/correct-legacy-classification', [
       String(after.amount_paid) === String(invoice.amount_paid) &&
       String(after.outstanding_balance) === String(invoice.outstanding_balance) &&
       String(after.overpaid_amount) === String(invoice.overpaid_amount) &&
-      String(after.due_date).slice(0, 10) === String(invoice.due_date).slice(0, 10) &&
+      dateOnly(after.due_date) === dateOnly(invoice.due_date) &&
       (after.reference_number || null) === (invoice.reference_number || null) &&
       (after.status || null) === (invoice.status || null);
     if (!unchanged || !ledgerMatch ||
@@ -1376,9 +1382,9 @@ router.get('/', [
     paymentRows.forEach((payment) => {
       const invoice = result.rows.find((item) => Number(item.id) === Number(payment.invoice_id));
       if (!invoice || payment.month == null || payment.year == null || !invoice.due_date) return;
-      const date = new Date(invoice.due_date);
-      if (Number(payment.month) === date.getUTCMonth() + 1 &&
-          Number(payment.year) === date.getUTCFullYear()) return;
+      const [invoiceYear, invoiceMonth] = dateOnly(invoice.due_date).split('-').map(Number);
+      if (Number(payment.month) === invoiceMonth &&
+          Number(payment.year) === invoiceYear) return;
       if (!flagsByInvoice.has(Number(invoice.id))) flagsByInvoice.set(Number(invoice.id), []);
       flagsByInvoice.get(Number(invoice.id)).push({
         type: 'transaction_month_mismatch',

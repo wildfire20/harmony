@@ -27,6 +27,7 @@ const {
   invoiceObligationLockKeys,
   normaliseCategory,
 } = require('./invoiceObligationLocks');
+const { resolveLegacyClassification } = require('./legacyClassification');
 
 const COMMAND_LOCK_NAMESPACE = 'harmony:finance-command:v1';
 
@@ -244,7 +245,10 @@ async function validateExactObligations(executor, studentId, obligations) {
       );
     }
     if (obligation.invoice_line_item_id != null) {
-      const line = (linesByInvoice.get(obligation.invoice_id) || [])
+      const effectiveLines = resolveLegacyClassification(
+        linesByInvoice.get(obligation.invoice_id) || [],
+      ).lines;
+      const line = effectiveLines
         .find((row) => Number(row.id) === obligation.invoice_line_item_id);
       if (!line || line.line_type !== 'charge' || line.is_included) {
         throw new FinanceCommandError(
@@ -804,7 +808,7 @@ async function retargetProof(options = {}) {
       throw new FinanceCommandError('Only pending proofs may be retargeted', 409);
     }
     const locks = obligations || [];
-    await acquireInvoiceObligationLocks(executor, proof.student_id, descriptorsFor(proof.student_id, locks));
+    await acquireInvoiceObligationLocks(executor, descriptorsFor(proof.student_id, locks));
     if (obligations?.length) await validateExactObligations(executor, proof.student_id, obligations);
     const normalized = await normalizedProofTablesAvailable(executor);
     let normalizedRows = [];
@@ -898,7 +902,7 @@ async function reversePayment(options = {}) {
     `, [transactionId])).rows[0];
     if (!payment) throw new FinanceCommandError('Payment not found', 404);
     if (payment.invoice_id != null) {
-      await acquireInvoiceObligationLocks(executor, payment.student_id, [{
+      await acquireInvoiceObligationLocks(executor, [{
         invoiceId: payment.invoice_id,
         studentId: payment.student_id,
         lineId: 'legacy',
@@ -972,7 +976,6 @@ async function applyCredit(options = {}) {
     if (obligations?.length) {
       await acquireInvoiceObligationLocks(
         executor,
-        source.student_id,
         descriptorsFor(source.student_id, obligations),
       );
       const targetIds = [...new Set(obligations.map((item) => item.invoice_id).filter(Boolean))];
@@ -1057,7 +1060,7 @@ async function correctPayment(options = {}) {
     `, [transactionId])).rows[0];
     if (!payment) throw new FinanceCommandError('Payment not found', 404);
     if (payment.invoice_id != null) {
-      await acquireInvoiceObligationLocks(executor, payment.student_id, [{
+      await acquireInvoiceObligationLocks(executor, [{
         invoiceId: payment.invoice_id, studentId: payment.student_id,
         lineId: 'legacy', category: null,
       }]);
@@ -1266,7 +1269,7 @@ async function carryForward(options = {}) {
     }
     // Lock in deterministic order so two carry-forward requests cannot
     // manufacture competing successors.
-    await acquireInvoiceObligationLocks(executor, studentId,
+    await acquireInvoiceObligationLocks(executor,
       sourceIds.map((invoiceId) => ({ invoiceId, studentId, lineId: 'legacy' })));
     const sources = (await executor.query(`
       SELECT id, student_id, student_number, amount_due, amount_paid, status
@@ -1358,7 +1361,7 @@ async function carryForwardBatch(options = {}) {
           'The arrears preview is stale. Reload it before carrying forward.',
         );
       }
-      await acquireInvoiceObligationLocks(executor, studentId,
+      await acquireInvoiceObligationLocks(executor,
         candidateSources.map((source) => ({ invoiceId: source.id, studentId })));
       const sources = (await executor.query(`
         SELECT id
@@ -1411,7 +1414,7 @@ async function carryForwardBatch(options = {}) {
 }
 
 async function verifyExistingCanonicalMonthlyInvoice(executor, invoice, periodStart) {
-  const period = String(invoice.billing_period || '').slice(0, 10);
+  const period = String(invoice.billing_period || '');
   if (period !== periodStart || invoice.invoice_kind !== 'monthly' ||
       invoice.invoice_source !== 'monthly_generation' ||
       invoice.finance_origin !== 'canonical') {
@@ -1538,7 +1541,9 @@ async function generateMonthlyInvoices(options = {}) {
     }
 
     const existingRows = (await executor.query(`
-      SELECT * FROM invoices
+      SELECT i.*, i.billing_period::text AS billing_period,
+             i.due_date::text AS due_date
+      FROM invoices i
       WHERE billing_period=$1::date AND invoice_kind='monthly'
       ORDER BY id
       FOR UPDATE
@@ -1633,7 +1638,8 @@ async function generateMonthlyInvoices(options = {}) {
            reference_number, description, created_by, created_at)
         VALUES ($1,$2,$3,$4,'Unpaid',$5::date,'monthly',$6,$7,$8,$9,$10,NOW())
         ON CONFLICT DO NOTHING
-        RETURNING *
+        RETURNING invoices.*, billing_period::text AS billing_period,
+                  due_date::text AS due_date
       `, [
         student.id, student.student_number, amountDue.toFixed(2), dueDate, periodStart,
         'monthly_generation',
@@ -1645,7 +1651,9 @@ async function generateMonthlyInvoices(options = {}) {
       let invoice = inserted.rows[0];
       if (!invoice) {
         invoice = (await executor.query(`
-          SELECT * FROM invoices
+          SELECT i.*, i.billing_period::text AS billing_period,
+                 i.due_date::text AS due_date
+          FROM invoices i
           WHERE student_id=$1 AND billing_period=$2::date AND invoice_kind='monthly'
           FOR UPDATE
         `, [student.id, periodStart])).rows[0];
