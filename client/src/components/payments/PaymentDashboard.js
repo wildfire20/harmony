@@ -226,6 +226,7 @@ const PaymentDashboard = () => {
       if (filters.status) queryParams.append('status', filters.status);
       if (filters.month) queryParams.append('month', filters.month);
       if (filters.year) queryParams.append('year', filters.year);
+      if (filters.studentNumber) queryParams.append('studentNumber', filters.studentNumber);
 
       const response = await fetch(`/api/invoices/export/csv?${queryParams}`, {
         headers: {
@@ -504,8 +505,26 @@ const PaymentDashboard = () => {
     }).format(amount || 0);
   };
 
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US');
+  // PostgreSQL DATE values are calendar dates, not instants. Parse their
+  // components and format an explicit UTC date so the browser timezone cannot
+  // move the displayed day backwards or forwards. Timestamp fields should
+  // continue to use their zoned formatting at the call site.
+  const formatDateOnly = (dateString, options = {}) => {
+    const match = String(dateString || '').slice(0, 10).match(
+      /^(\d{4})-(\d{2})-(\d{2})$/,
+    );
+    if (!match) return '—';
+    const [, year, month, day] = match;
+    const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+    if (
+      date.getUTCFullYear() !== Number(year) ||
+      date.getUTCMonth() !== Number(month) - 1 ||
+      date.getUTCDate() !== Number(day)
+    ) return '—';
+    return new Intl.DateTimeFormat('en-US', {
+      ...options,
+      timeZone: 'UTC',
+    }).format(date);
   };
 
   const getStatusBadge = (status) => {
@@ -856,7 +875,7 @@ const PaymentDashboard = () => {
                             )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {formatDate(invoice.due_date)}
+                            {formatDateOnly(invoice.due_date)}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             {getStatusBadge(invoice.status)}
@@ -879,7 +898,7 @@ const PaymentDashboard = () => {
                               <div className="flex flex-wrap gap-x-4 gap-y-1">
                                 {invoice.line_items.map((line) => (
                                   <span key={line.id || `${invoice.id}-${line.label}`} className={line.line_type === 'discount' ? 'text-emerald-700' : 'text-gray-600'}>
-                                    {line.is_included ? 'Included · ' : ''}{line.label}: {line.line_type === 'discount' ? '-' : ''}{formatCurrency(line.amount)}
+                                    {(line.included ?? line.is_included) ? 'Included · ' : ''}{line.label}: {line.line_type === 'discount' ? '-' : ''}{formatCurrency(line.amount)}
                                   </span>
                                 ))}
                               </div>
@@ -1046,8 +1065,8 @@ const PaymentDashboard = () => {
                             <span className="ml-2 text-xs text-gray-400">({inv.student_number})</span>
                           </p>
                           <p className="text-xs text-gray-500">
-                            Invoice month: {new Date(inv.due_date).toLocaleString('default', { month: 'long', year: 'numeric' })}
-                            {' · '}Enrolled: {new Date(inv.enrollment_month).toLocaleString('default', { month: 'long', year: 'numeric' })}
+                            Invoice month: {formatDateOnly(inv.due_date, { month: 'long', year: 'numeric' })}
+                            {' · '}Enrolled: {formatDateOnly(inv.enrollment_month, { month: 'long', year: 'numeric' })}
                           </p>
                           <p className="text-xs text-gray-400">
                             Amount: R{parseFloat(inv.amount_due).toFixed(2)} · Status: {inv.status}

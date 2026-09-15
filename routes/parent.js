@@ -16,6 +16,7 @@ const {
   PARENT_OTP_RESEND_COOLDOWN_SECONDS, PARENT_OTP_DAILY_RESEND_LIMIT,
 } = require('../services/parentAuth');
 const { getStudentLedger } = require('../services/financeLedger');
+const { getPayableObligations } = require('../services/payableObligations');
 const { buildParentRollout } = require('../services/parentRollout');
 const {
   isParentSelfActivationEnabled,
@@ -331,6 +332,26 @@ router.get('/invoices', requireParent, async (req, res) => {
   } catch (err) {
     if (err.status) return res.status(err.status).json({ message: err.message });
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ─── GET /api/parent/payable-obligations ─────────────────────────────────────
+// Payment choices are a projection of persisted invoice evidence.  This is
+// deliberately separate from the invoice presentation endpoint so Parent
+// Submit Proof and Admin allocation review can consume the same identities.
+router.get('/payable-obligations', requireParent, async (req, res) => {
+  try {
+    const child = await resolveChild(req.user.id, req.query.child_id);
+    if (!child) return res.json({ obligations: [], child: null });
+    const all = await getPayableObligations(child.id);
+    res.json({
+      obligations: all.filter((obligation) => obligation.visible),
+      child,
+    });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message });
+    console.error('Parent payable obligations error:', err);
+    res.status(500).json({ message: 'Server error loading payable obligations' });
   }
 });
 

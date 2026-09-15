@@ -11,12 +11,7 @@ function optionalInteger(value, { name, min, max }) {
 }
 
 function parseInvoiceListQuery(query = {}) {
-  const status = query.status || undefined;
-  if (status && !INVOICE_STATUSES.includes(status)) {
-    throw new Error('Invalid invoice status filter');
-  }
-  const month = optionalInteger(query.month, { name: 'month', min: 1, max: 12 });
-  const year = optionalInteger(query.year, { name: 'year', min: 1900, max: 2200 });
+  const filters = parseInvoiceFilterQuery(query);
   const page = optionalInteger(query.page == null ? 1 : query.page, {
     name: 'page', min: 1, max: Number.MAX_SAFE_INTEGER,
   });
@@ -27,14 +22,29 @@ function parseInvoiceListQuery(query = {}) {
   const requestedOrder = String(query.sortOrder || 'DESC').toUpperCase();
   const sortOrder = ['ASC', 'DESC'].includes(requestedOrder) ? requestedOrder : 'DESC';
   return {
-    status,
-    month,
-    year,
-    studentNumber: query.studentNumber ? String(query.studentNumber).trim() : undefined,
+    ...filters,
     page,
     limit,
     sortBy,
     sortOrder,
+  };
+}
+
+// Period/learner/status filters are deliberately parsed once and reused by
+// list, summary, and export endpoints. In particular, year must not depend on
+// month being present.
+function parseInvoiceFilterQuery(query = {}) {
+  const status = query.status || undefined;
+  if (status && !INVOICE_STATUSES.includes(status)) {
+    throw new Error('Invalid invoice status filter');
+  }
+  const month = optionalInteger(query.month, { name: 'month', min: 1, max: 12 });
+  const year = optionalInteger(query.year, { name: 'year', min: 1900, max: 2200 });
+  return {
+    status,
+    month,
+    year,
+    studentNumber: query.studentNumber ? String(query.studentNumber).trim() : undefined,
   };
 }
 
@@ -53,6 +63,7 @@ function appendPeriodFilters(clauses, params, dateExpression, { month, year } = 
 
 module.exports = {
   INVOICE_STATUSES,
+  parseInvoiceFilterQuery,
   parseInvoiceListQuery,
   appendPeriodFilters,
 };

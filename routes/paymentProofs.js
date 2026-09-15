@@ -13,6 +13,7 @@ const {
   invoiceAllocationCategories,
   invoiceCategoryBalances,
 } = require('../services/financeLedger');
+const { getPayableObligations } = require('../services/payableObligations');
 const { detectType } = require('../services/admissionsDocumentService');
 const { notifyPayment } = require('../services/parentNotificationService');
 
@@ -127,16 +128,45 @@ const parseSelectedObligations = (value) => {
       throw { status: 400, message: 'Each selected obligation must be an object' };
     }
     const result = {};
-    ['invoice_id', 'invoice_line_item_id', 'fee_id', 'assignment_id', 'service_key', 'category', 'amount', 'legacy_invoice_level'].forEach((key) => {
+    ['obligation_id', 'invoice_id', 'invoice_line_item_id', 'fee_id', 'assignment_id', 'service_key', 'category', 'amount', 'legacy_invoice_level'].forEach((key) => {
       if (item[key] != null) result[key] = item[key];
     });
     if (!result.invoice_id && !result.fee_id && !result.service_key) {
       throw { status: 400, message: 'Each selected obligation must identify an invoice, fee, or service' };
     }
-    if (result.amount != null && (!Number.isFinite(Number(result.amount)) || Number(result.amount) <= 0)) {
-      throw { status: 400, message: 'Selected obligation amounts must be positive' };
+    if (!Object.prototype.hasOwnProperty.call(item, 'amount') ||
+        item.amount == null ||
+        !Number.isFinite(Number(item.amount)) ||
+        Number(item.amount) <= 0) {
+      throw {
+        status: 422,
+        message: 'Every selected obligation must include a finite positive amount',
+      };
     }
+    result.amount = Number(item.amount);
     return result;
+  });
+};
+
+const validateExplicitObligationAmounts = (obligations) => {
+  if (obligations == null) return;
+  if (!Array.isArray(obligations)) {
+    const error = new Error('Stored selected obligations must be an array or null automatic mode');
+    error.status = 422;
+    error.safeMessage = 'The stored allocation plan is invalid. Reload and review the payment before approving.';
+    throw error;
+  }
+  if (obligations.length === 0) return;
+  obligations.forEach((obligation, index) => {
+    if (!obligation || !Object.prototype.hasOwnProperty.call(obligation, 'amount') ||
+        obligation.amount == null ||
+        !Number.isFinite(Number(obligation.amount)) ||
+        Number(obligation.amount) <= 0) {
+      const error = new Error(`Selected obligation ${index + 1} must have a finite positive amount`);
+      error.status = 422;
+      error.safeMessage = 'Every selected obligation must include a finite positive amount.';
+      throw error;
+    }
   });
 };
 
@@ -174,7 +204,12 @@ const resolveChild = async (parentId, childId) => {
 };
 
 const resolvePaymentProposals = async (executor, studentId, obligations) => {
-  if (!Array.isArray(obligations) || obligations.length === 0) return null;
+  if (obligations == null) return null;
+  if (!Array.isArray(obligations)) {
+    validateExplicitObligationAmounts(obligations);
+  }
+  if (obligations.length === 0) return null;
+  validateExplicitObligationAmounts(obligations);
   const proposals = [];
   for (let index = 0; index < obligations.length; index += 1) {
     const obligation = obligations[index];
@@ -393,12 +428,36 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
   return proposals;
 };
 
-const applyPaymentToInvoices = async (executor, studentId, amount, proofId, adminId, obligations = []) => {
+const applyPaymentToInvoices = async (executor, studentId, amount, proofId, adminId, obligations = null) => {
   let selected = obligations;
   if (typeof selected === 'string') {
     try { selected = JSON.parse(selected); } catch (_) {
       throw new Error('Stored payment obligation proposal is invalid');
     }
+  }
+  // An explicitly empty proposal is an intentional unallocated payment. Do
+  // not pass [] to allocatePayment: that helper treats omitted proposals as
+  // oldest-unpaid automatic allocation and rejects an empty proposal.
+  if (Array.isArray(selected) && selected.length === 0) {
+    const learner = await executor.query(
+      `SELECT student_number FROM users WHERE id=$1 AND role='student' FOR SHARE`,
+      [studentId],
+    );
+    if (!learner.rows.length) throw new Error('Student not found');
+    const date = new Date().toISOString().slice(0, 10);
+    const reference = `PROOF-${proofId}`;
+    const tx = await executor.query(`
+      INSERT INTO payment_transactions
+        (invoice_id, student_id, student_number, reference_number, reference,
+         amount, transaction_date, payment_date, description, payment_method,
+         recorded_by)
+      VALUES (NULL,$1,$2,$3,$3,$4,$5,$5,$6,'proof_of_payment',$7)
+      RETURNING id
+    `, [
+      studentId, learner.rows[0].student_number, reference, Number(amount).toFixed(2),
+      date, `Approved proof of payment (Ref #${proofId})`, adminId || null,
+    ]);
+    return [tx.rows[0].id];
   }
   const allocationProposals = await resolvePaymentProposals(executor, studentId, selected);
   const result = await allocatePayment(executor, {
@@ -414,6 +473,7 @@ const applyPaymentToInvoices = async (executor, studentId, amount, proofId, admi
 };
 
 const validateResolvedPlan = (resolved, paymentAmount) => {
+  validateExplicitObligationAmounts(resolved);
   const total = Number(paymentAmount);
   const specifiedTotal = resolved.reduce((sum, proposal) => (
     proposal.amount == null ? sum : sum + Number(proposal.amount)
@@ -440,6 +500,8 @@ const validateResolvedPlan = (resolved, paymentAmount) => {
 };
 
 const normaliseStoredObligations = (resolved) => resolved.map((proposal) => ({
+  obligation_id: `invoice:${proposal.invoiceId}:${proposal.invoiceLineItemId == null
+    ? 'legacy' : `line:${proposal.invoiceLineItemId}`}`,
   invoice_id: proposal.invoiceId,
   invoice_line_item_id: proposal.invoiceLineItemId,
   ...(proposal.obligationId != null ? { fee_id: proposal.obligationId } : {}),
@@ -447,6 +509,74 @@ const normaliseStoredObligations = (resolved) => resolved.map((proposal) => ({
   category: proposal.category,
   amount: proposal.amount,
 }));
+
+/*
+ * Resolve the submitted identity against the same read model shown to Parent
+ * and Admin. The existing row-lock resolver remains the final race-safe check;
+ * this check prevents an otherwise valid-looking stale proposal from being
+ * approved after its canonical obligation became settled or reserved.
+ */
+const validateCanonicalSelections = async (executor, studentId, obligations, options = {}) => {
+  if (!Array.isArray(obligations) || obligations.length === 0) return;
+  validateExplicitObligationAmounts(obligations);
+  const canonical = await getPayableObligations(studentId, executor, options);
+  obligations.forEach((selection, index) => {
+    const requestedCategory = String(selection.category || selection.service_key || '')
+      .replace(/^one_off:\d+$/, 'one_off');
+    const requestedInvoice = selection.invoice_id == null ? null : Number(selection.invoice_id);
+    const requestedLine = selection.invoice_line_item_id == null ? null : Number(selection.invoice_line_item_id);
+    const requestedFee = selection.fee_id == null ? null : Number(selection.fee_id);
+    const target = canonical.find((obligation) => (
+      (selection.obligation_id && obligation.obligation_id === selection.obligation_id) ||
+      (requestedInvoice != null && obligation.invoice_id === requestedInvoice &&
+        (requestedLine == null || obligation.invoice_line_item_id === requestedLine) &&
+        (requestedFee == null || obligation.one_off_fee_id === requestedFee) &&
+        (!requestedCategory || obligation.category === requestedCategory))
+    ));
+    if (!target) {
+      const error = new Error(`selector ${index + 1} does not identify a current payable obligation`);
+      error.status = 409;
+      error.safeMessage = 'One of the selected payment items is no longer payable. Reload the payment choices and retarget it.';
+      throw error;
+    }
+    if (!target.is_payable) {
+      const error = new Error(`selector ${index + 1} is ${target.status}`);
+      error.status = 409;
+      error.safeMessage = target.status === 'PENDING_REVIEW'
+        ? 'One of the selected payment items is already pending admin review.'
+        : target.status === 'REQUIRES_RECONCILIATION'
+          ? 'One of the selected payment items requires reconciliation before it can be paid.'
+          : 'One of the selected payment items is already settled.';
+      throw error;
+    }
+    if (selection.amount != null && Number(selection.amount) > target.amount_outstanding + 0.005) {
+      const error = new Error(`selector ${index + 1} exceeds canonical outstanding amount`);
+      error.status = 422;
+      error.safeMessage = `${target.label} has only R ${Number(target.amount_outstanding).toFixed(2)} outstanding.`;
+      throw error;
+    }
+  });
+};
+
+const approvalUnallocatedDisposition = (selectedObligations, paymentAmount, body = {}) => {
+  const explicitAllocation = Array.isArray(selectedObligations);
+  const selectedAmount = explicitAllocation
+    ? selectedObligations.reduce((sum, item) => sum + (item.amount == null ? 0 : Number(item.amount)), 0)
+    : Number(paymentAmount);
+  const unallocatedAmount = explicitAllocation
+    ? Math.max(0, Number(paymentAmount) - selectedAmount)
+    : 0;
+  const acknowledged = body.unallocated_acknowledged === true ||
+    body.unallocated_acknowledged === 'true';
+  const reason = boundedText(body.unallocated_reason, 500, 'Unallocated credit reason');
+  if (unallocatedAmount > 0.009 && (!acknowledged || !reason)) {
+    const error = new Error('Unallocated credit requires explicit acknowledgement and reason');
+    error.status = 422;
+    error.safeMessage = `R ${unallocatedAmount.toFixed(2)} of this payment is not allocated. Confirm the unallocated credit and provide a reason before approving.`;
+    throw error;
+  }
+  return { explicitAllocation, unallocatedAmount, acknowledged, reason };
+};
 
 // ─── POST /api/payment-proofs  (parent submits proof) ────────────────────────
 router.post('/', requireParent, uploadReceipt, async (req, res) => {
@@ -789,56 +919,27 @@ router.get('/:id/allocation-options', requireAdmin, async (req, res) => {
       [req.params.id],
     )).rows[0];
     if (!proof) return res.status(404).json({ message: 'Submission not found' });
-    const ledger = await getStudentLedger(proof.student_id);
-    const options = (ledger?.invoices || []).flatMap((invoice) =>
-      (invoice.category_balances || []).filter((item) => Number(item.amount) > 0).map((item) => {
-        const line = (invoice.line_items || []).find((candidate) => (
-          item.category === 'one_off'
-            ? candidate.metadata?.category === 'one_off' || candidate.metadata?.fee_id != null
-            : candidate.line_type === 'charge' && !candidate.included &&
-              Number(candidate.amount) > 0 && candidate.service_key === item.category
-        ));
-        if (!line) return null;
-        return {
-          invoice_id: invoice.id,
-          invoice_line_item_id: line?.id || null,
-          fee_id: item.category === 'one_off' ? Number(line?.metadata?.fee_id) || null : null,
-          assignment_id: item.category === 'one_off' ? Number(line?.metadata?.assignment_id) || null : null,
-          category: item.category,
-          amount: item.amount,
-          due_date: invoice.due_date,
-          reference_number: invoice.reference_number,
-          label: `${line?.label || item.category} — ${String(invoice.due_date || '').slice(0, 10)} — R ${Number(item.amount).toFixed(2)}`,
-        };
-      }).filter(Boolean));
-    const legacyTuition = await db.query(`
-      SELECT i.id, i.due_date, i.reference_number,
-             GREATEST(i.amount_due - i.amount_paid, 0) AS outstanding
-      FROM invoices i
-      WHERE i.student_id=$1::integer
-        AND i.amount_paid < i.amount_due
-        AND i.status <> 'Carried Forward'
-        AND COALESCE(i.description, '') ~* '\\m(tuition|school[[:space:]]+fees?)\\M'
-        AND NOT EXISTS (
-          SELECT 1 FROM invoice_line_items li WHERE li.invoice_id=i.id
-        )
-      ORDER BY i.due_date ASC, i.id ASC
-    `, [Number(proof.student_id)]);
-    legacyTuition.rows.forEach((invoice) => options.push({
-      invoice_id: Number(invoice.id),
-      invoice_line_item_id: null,
-      fee_id: null,
-      assignment_id: null,
-      category: 'tuition',
-      service_key: 'tuition',
-      legacy_invoice_level: true,
-      amount: Number(invoice.outstanding),
-      due_date: invoice.due_date,
-      reference_number: invoice.reference_number,
-      label: `Tuition — ${String(invoice.due_date || '').slice(0, 10)} — R ${Number(invoice.outstanding).toFixed(2)} outstanding`,
+    const obligations = await getPayableObligations(proof.student_id, db, {
+      excludePaymentId: proof.id,
+    });
+    const options = obligations.filter((obligation) => obligation.is_payable).map((obligation) => ({
+      obligation_id: obligation.obligation_id,
+      invoice_id: obligation.invoice_id,
+      invoice_line_item_id: obligation.invoice_line_item_id,
+      fee_id: obligation.one_off_fee_id,
+      assignment_id: obligation.assignment_id,
+      category: obligation.category,
+      service_key: obligation.service_key,
+      legacy_invoice_level: obligation.obligation_type === 'legacy_invoice',
+      amount: obligation.amount_outstanding,
+      due_date: obligation.due_date,
+      reference_number: obligation.reference_number,
+      label: `${obligation.label} — ${obligation.category === 'one_off'
+        ? obligation.due_date_label || obligation.due_date
+        : obligation.billing_period_label || obligation.billing_period || obligation.due_date
+      } — R ${Number(obligation.amount_outstanding).toFixed(2)} outstanding`,
     }));
-    options.sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')));
-    res.json({ options });
+    res.json({ options, automatic_destination: options[0] || null });
   } catch (error) {
     console.error('Payment allocation options error:', error);
     res.status(500).json({ message: 'Could not load allocation options' });
@@ -851,7 +952,8 @@ router.put('/:id/allocations', requireAdmin, async (req, res) => {
     const reason = boundedText(req.body?.reason, 500, 'Adjustment reason');
     if (!reason) return res.status(400).json({ message: 'An allocation adjustment reason is required' });
     const obligations = parseSelectedObligations(req.body?.obligations);
-    if (!obligations.length) return res.status(400).json({ message: 'At least one allocation is required' });
+    const unallocatedAcknowledged = req.body?.unallocated_acknowledged === true ||
+      req.body?.unallocated_acknowledged === 'true';
     client = await db.pool.connect();
     await client.query('BEGIN');
     const proof = (await client.query(
@@ -866,6 +968,39 @@ router.put('/:id/allocations', requireAdmin, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json({ message: 'Only pending submissions can be adjusted' });
     }
+    if (!obligations.length) {
+      if (!unallocatedAcknowledged) {
+        await client.query('ROLLBACK');
+        return res.status(422).json({
+          message: 'Confirm that the full payment will remain unallocated credit before saving an empty allocation.',
+        });
+      }
+      await client.query(
+        `UPDATE pending_payments SET selected_obligations='[]'::jsonb WHERE id=$1`,
+        [proof.id],
+      );
+      await logAudit({
+        executor: client, required: true,
+        userId: req.user.id,
+        userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        userRole: req.user.role,
+        action: 'payment_allocation_adjust',
+        entityType: 'payment_proof',
+        entityId: proof.id,
+        details: {
+          reason,
+          previous: proof.selected_obligations || null,
+          proposed: [],
+          explicit_unallocated: true,
+        },
+        ipAddress: getIp(req),
+      });
+      await client.query('COMMIT');
+      return res.json({ message: 'Payment will be recorded as unallocated credit', obligations: [] });
+    }
+    await validateCanonicalSelections(client, proof.student_id, obligations, {
+      excludePaymentId: proof.id,
+    });
     const resolved = await resolvePaymentProposals(client, proof.student_id, obligations);
     validateResolvedPlan(resolved, proof.amount);
     const storedObligations = normaliseStoredObligations(resolved);
@@ -918,13 +1053,34 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     }
 
     const admin_note = boundedText(req.body?.admin_note, 2000, 'Admin note');
+    try {
+      validateExplicitObligationAmounts(proof.selected_obligations);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      return res.status(error.status || 422).json({ message: error.safeMessage || error.message });
+    }
+    let disposition;
+    try {
+      disposition = approvalUnallocatedDisposition(
+        proof.selected_obligations, proof.amount, req.body || {},
+      );
+    } catch (error) {
+      await client.query('ROLLBACK');
+      return res.status(error.status || 422).json({ message: error.safeMessage || error.message });
+    }
+    const {
+      unallocatedAmount, acknowledged: unallocatedAcknowledged, reason: unallocatedReason,
+    } = disposition;
+    await validateCanonicalSelections(client, proof.student_id, proof.selected_obligations || [], {
+      excludePaymentId: proof.id,
+    });
     const txIds = await applyPaymentToInvoices(
       client,
       proof.student_id,
       proof.amount,
       proof.id,
       req.user.id,
-      proof.selected_obligations || [],
+      proof.selected_obligations,
     );
 
     await client.query(`
@@ -937,7 +1093,15 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
       userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
       userRole: req.user.role, action: 'payment_proof_approve',
       entityType: 'payment_proof', entityId: proof.id,
-      details: { summary: `Approved payment proof of R${proof.amount}`, amount: proof.amount, student_id: proof.student_id, admin_note: admin_note || null },
+      details: {
+        summary: `Approved payment proof of R${proof.amount}`,
+        amount: proof.amount,
+        student_id: proof.student_id,
+        admin_note: admin_note || null,
+        unallocated_amount: unallocatedAmount,
+        unallocated_acknowledged: unallocatedAcknowledged,
+        unallocated_reason: unallocatedReason || null,
+      },
       ipAddress: getIp(req), executor: client, required: true
     });
     await client.query('COMMIT');
@@ -1033,3 +1197,7 @@ module.exports.detectReceiptType = detectReceiptType;
 module.exports.MAX_RECEIPT_SIZE = MAX_RECEIPT_SIZE;
 module.exports.isAllowedReceiptName = isAllowedReceiptName;
 module.exports.validateResolvedPlan = validateResolvedPlan;
+module.exports.applyPaymentToInvoices = applyPaymentToInvoices;
+module.exports.approvalUnallocatedDisposition = approvalUnallocatedDisposition;
+module.exports.parseSelectedObligations = parseSelectedObligations;
+module.exports.validateExplicitObligationAmounts = validateExplicitObligationAmounts;

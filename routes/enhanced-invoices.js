@@ -14,6 +14,10 @@ const router = express.Router();
 
 const normalizeManualPaymentMethod = (value) => {
   const method = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  // These are provenance-bearing channels, not generic manual methods. Keep
+  // them intact during correction unless the Admin explicitly supplies a
+  // different method (and the correction reason is audited below).
+  if (['proof_of_payment', 'bank_import'].includes(method)) return method;
   if (['manual_entry', 'manual', 'manual_payment'].includes(method)) return 'manual_entry';
   if (['cash'].includes(method)) return 'cash';
   if (['bank_transfer', 'bank', 'eft', 'electronic_transfer'].includes(method)) return 'bank_transfer';
@@ -22,6 +26,30 @@ const normalizeManualPaymentMethod = (value) => {
 };
 const { logAudit, getIp } = require('../utils/auditLogger');
 const { allocatePayment, getStudentLedger, reversePayment } = require('../services/financeLedger');
+
+function dateOnly(value) {
+  if (value == null || value === '') return '';
+  const raw = String(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+}
+
+function spreadsheetText(value) {
+  const text = String(value == null ? '' : value);
+  return /^[=+\-@]/.test(text) ? `'${text}` : text;
+}
+
+function paymentStatusForInvoice(invoice, asOf = new Date()) {
+  const due = Number(invoice.net_due ?? invoice.amount_due) || 0;
+  const paid = Number(invoice.allocated_effective_payments ?? invoice.amount_paid) || 0;
+  if (paid > due) return 'Overpaid';
+  if (due <= 0 || paid >= due) return 'Paid';
+  if (paid > 0) return 'Partial';
+  const dueDate = dateOnly(invoice.due_date);
+  const today = dateOnly(asOf);
+  return dueDate && dueDate < today ? 'Overdue / Missed' : 'Due / Unpaid';
+}
 
 // Configure multer for CSV and PDF uploads
 const upload = multer({
@@ -787,6 +815,7 @@ router.get('/student-payment-history/:studentNumber', [
     // month can disagree with the invoice it was allocated to (HAR049).
     const authoritativeLedger = await getStudentLedger(student.id);
     const monthlyHistory = [];
+    const oneOffHistory = [];
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 
                     'July', 'August', 'September', 'October', 'November', 'December'];
     authoritativeLedger.invoices.forEach(inv => {
@@ -796,8 +825,27 @@ router.get('/student-payment-history/:studentNumber', [
       const year = date.getUTCFullYear();
       const monthIndex = date.getUTCMonth();
       const monthNum = monthIndex + 1;
-      const normalStatus = (inv.status || '').toLowerCase();
-      monthlyHistory.push({
+      const paymentStatus = paymentStatusForInvoice(inv);
+      const oneOffLines = inv.one_off_charge_lines || [];
+      const recurringLines = inv.service_charge_lines || [];
+      // One-off obligations belong on their own report. A pure one-off invoice
+      // must never appear as an ordinary monthly school-account row.
+      oneOffLines.forEach((line) => {
+        oneOffHistory.push({
+          invoiceId: inv.id,
+          fee: line.label || line.description || 'One-off fee',
+          description: line.description || '',
+          dueDate: dateOnly(inv.due_date),
+          amount: Number(line.amount) || 0,
+          amountPaid: oneOffLines.length === 1 && !recurringLines.length
+            ? inv.allocated_effective_payments : 0,
+          outstanding: oneOffLines.length === 1 && !recurringLines.length
+            ? inv.outstanding_balance : Number(line.amount) || 0,
+          status: paymentStatus,
+          reference: inv.reference_number || '-',
+        });
+      });
+      if (!oneOffLines.length || recurringLines.length) monthlyHistory.push({
         invoiceId: inv.id,
         year,
         month: months[monthIndex],
@@ -809,19 +857,15 @@ router.get('/student-payment-history/:studentNumber', [
         grossCharges: inv.gross_charges,
          serviceCharges: inv.charge_totals || {},
          serviceChargeLines: inv.service_charge_lines || [],
-         oneOffChargeLines: inv.one_off_charge_lines || [],
+         oneOffChargeLines: oneOffLines,
         discountLines: inv.discount_lines,
         discountTotal: inv.discount_total,
         netDue: inv.net_due,
         allocatedPayments: inv.allocated_effective_payments,
         reviewFlags: inv.payment_review_flags,
         reviewRequired: inv.review_required,
-        status: inv.status,
-        paymentStatus: 
-          normalStatus === 'overpaid' ? 'Overpaid' :
-          normalStatus === 'paid' ? 'Paid' :
-          normalStatus === 'partial' ? 'Partial Payment' :
-          normalStatus === 'carried forward' ? 'Carried Forward' : 'Missed Payment',
+         status: paymentStatus,
+         paymentStatus,
         reference: inv.reference_number || '-'
       });
     });
@@ -831,13 +875,17 @@ router.get('/student-payment-history/:studentNumber', [
       if (a.year !== b.year) return a.year - b.year;
       return a.monthNumber - b.monthNumber;
     });
+    oneOffHistory.sort((a, b) => {
+      const dateCompare = String(a.dueDate).localeCompare(String(b.dueDate));
+      return dateCompare || Number(a.invoiceId) - Number(b.invoiceId);
+    });
     
     const totalDue = authoritativeLedger.totals.totalDue;
     const totalPaid = authoritativeLedger.totals.totalPaid;
     const totalOutstanding = authoritativeLedger.totals.outstanding;
     const activeInvoices = authoritativeLedger.invoices.filter((invoice) => invoice.counted_in_totals);
     const missedCount = activeInvoices.filter((invoice) =>
-      invoice.outstanding_balance > 0 && invoice.amount_paid <= 0).length;
+      paymentStatusForInvoice(invoice) === 'Overdue / Missed').length;
     const paidCount = activeInvoices.filter((invoice) =>
       invoice.status === 'Paid' || invoice.status === 'Overpaid').length;
     const historicalPaymentReview = authoritativeLedger.transactions
@@ -867,11 +915,14 @@ router.get('/student-payment-history/:studentNumber', [
         unallocated: authoritativeLedger.totals.unallocated,
         missedPayments: missedCount,
         completedPayments: paidCount,
-        totalMonths: monthlyHistory.filter(m => m.amountDue > 0).length,
+        totalMonths: new Set(monthlyHistory
+          .filter((month) => month.grossCharges > 0)
+          .map((month) => `${month.year}-${month.monthNumber}`)).size,
         credit: authoritativeLedger.totals.credit,
         netOutstanding: authoritativeLedger.totals.netOutstanding,
       },
       monthlyHistory,
+      oneOffHistory,
       serviceComponents: authoritativeLedger.service_components,
       paymentTransactions: authoritativeLedger.transactions,
       historicalPaymentReview,
@@ -888,7 +939,7 @@ router.get('/student-payment-history/:studentNumber', [
       workbook.creator = 'Harmony Learning Institute';
       workbook.created = new Date();
       
-      const worksheet = workbook.addWorksheet('Payment History');
+      const worksheet = workbook.addWorksheet('Monthly School Account');
       
       // Try to add school logo
       let logoRowOffset = 0;
@@ -1045,7 +1096,7 @@ router.get('/student-payment-history/:studentNumber', [
         row.values = [
           month.year,
           month.month,
-           Object.entries(month.serviceCharges || {}).map(([key, value]) => `${key}: R${Number(value).toFixed(2)}`).join('; '),
+           spreadsheetText(Object.entries(month.serviceCharges || {}).map(([key, value]) => `${key}: R${Number(value).toFixed(2)}`).join('; ')),
            month.grossCharges,
            -(month.discountLines || []).reduce((sum, line) => sum + Number(line.amount || 0), 0),
            month.amountDue,
@@ -1054,7 +1105,7 @@ router.get('/student-payment-history/:studentNumber', [
            month.credit,
            month.paymentStatus,
            (month.reviewFlags || []).map((flag) => flag.type).join(', '),
-           month.reference
+            spreadsheetText(month.reference)
         ];
         
         // Format currency columns
@@ -1069,10 +1120,10 @@ router.get('/student-payment-history/:studentNumber', [
          const statusCell = row.getCell(10);
          if (month.paymentStatus === 'Paid' || month.paymentStatus === 'Overpaid') {
           statusCell.font = { color: { argb: 'FF16A34A' } };
-        } else if (month.paymentStatus === 'Missed Payment') {
+         } else if (month.paymentStatus === 'Overdue / Missed') {
           statusCell.font = { bold: true, color: { argb: 'FFDC2626' } };
            row.getCell(8).font = { bold: true, color: { argb: 'FFDC2626' } };
-        } else if (month.paymentStatus === 'Partial Payment') {
+         } else if (month.paymentStatus === 'Partial') {
           statusCell.font = { color: { argb: 'FFEA580C' } };
         }
         
@@ -1088,6 +1139,54 @@ router.get('/student-payment-history/:studentNumber', [
         
         rowNum++;
       });
+
+      // One-off fees are intentionally presented separately from the recurring
+      // school account, even when they share the same invoice period.
+      const oneOffWorksheet = workbook.addWorksheet('One-Off Fees');
+      oneOffWorksheet.addRow([
+        'Fee', 'Description', 'Invoice', 'Due Date', 'Amount Due',
+        'Paid', 'Outstanding', 'Status', 'Reference',
+      ]).font = { bold: true };
+      oneOffHistory.forEach((fee) => {
+        const row = oneOffWorksheet.addRow([
+          spreadsheetText(fee.fee),
+          spreadsheetText(fee.description),
+          fee.invoiceId,
+          fee.dueDate,
+          fee.amount,
+          fee.amountPaid,
+          fee.outstanding,
+          spreadsheetText(fee.status),
+          spreadsheetText(fee.reference),
+        ]);
+        [5, 6, 7].forEach((column) => { row.getCell(column).numFmt = 'R #,##0.00'; });
+      });
+      oneOffWorksheet.columns = [
+        { width: 24 }, { width: 36 }, { width: 12 }, { width: 14 },
+        { width: 14 }, { width: 14 }, { width: 14 }, { width: 18 }, { width: 22 },
+      ];
+
+      const transactionsWorksheet = workbook.addWorksheet('Payment Transactions Audit');
+      transactionsWorksheet.addRow([
+        'Transaction ID', 'Invoice ID', 'Payment Date', 'Amount',
+        'Payment Method', 'Reference', 'Review Flags',
+      ]).font = { bold: true };
+      authoritativeLedger.transactions.forEach((transaction) => {
+        const row = transactionsWorksheet.addRow([
+          transaction.id,
+          transaction.invoice_id || '',
+          dateOnly(transaction.payment_date || transaction.transaction_date),
+          Number(transaction.amount) || 0,
+          spreadsheetText(transaction.payment_method),
+          spreadsheetText(transaction.reference_number),
+          spreadsheetText((transaction.review_flags || []).join(', ')),
+        ]);
+        row.getCell(4).numFmt = 'R #,##0.00';
+      });
+      transactionsWorksheet.columns = [
+        { width: 16 }, { width: 12 }, { width: 16 }, { width: 14 },
+        { width: 20 }, { width: 24 }, { width: 32 },
+      ];
       
       // Set column widths — narrowed to fit on one A4 landscape page
       worksheet.columns = [
@@ -1210,8 +1309,9 @@ router.get('/search-students', [
     }
     
     const result = await db.query(`
-      SELECT u.id, u.first_name, u.last_name, u.student_number
+      SELECT u.id, u.first_name, u.last_name, u.student_number, g.name AS grade
       FROM users u
+      LEFT JOIN grades g ON g.id = u.grade_id
       WHERE u.role = 'student' 
         AND (
           u.student_number ILIKE $1 
@@ -1230,7 +1330,8 @@ router.get('/search-students', [
         studentNumber: s.student_number,
         firstName: s.first_name,
         lastName: s.last_name,
-        fullName: `${s.first_name} ${s.last_name}`
+         fullName: `${s.first_name} ${s.last_name}`,
+         grade: s.grade,
       }))
     });
     
@@ -2049,3 +2150,4 @@ router.post('/allocate-unmatched', [
 });
 
 module.exports = router;
+module.exports.normalizeManualPaymentMethod = normalizeManualPaymentMethod;

@@ -1,0 +1,813 @@
+Harmony Finance — Final Pre-Rollout Stabilization Phase
+
+We have completed an end-to-end QA audit of the Harmony Learning Institute Parent/Admin finance system.
+
+The synthetic R0.01 QA payment has now been reversed and cleaned up.
+
+This phase must address the confirmed audit findings before Parent finance is considered rollout-ready.
+
+Do not deploy automatically.
+Do not run migrations automatically.
+Do not silently rewrite historical finance records.
+Do not fabricate historical service charges from current enrollment flags.
+Do not change real learner balances unless required by an explicitly audited correction workflow.
+
+The authoritative finance ledger remains the source of truth.
+
+1. Create one canonical payable-obligations service
+
+Parent Submit Proof, Admin allocation adjustment and approval currently do not always derive payable obligations in the same way.
+
+Create one shared backend service/function responsible for:
+
+getPayableObligations(studentId)
+
+or equivalent.
+
+This service must power:
+
+Parent payment choices
+Admin allocation targets
+Server-side approval validation
+
+The same obligation must have the same identity everywhere.
+
+Each returned obligation should include enough authoritative identity such as:
+
+obligation type
+category
+invoice_id
+invoice_line_item_id where applicable
+one_off_fee_id where applicable
+assignment_id where applicable
+billing period
+description
+due date
+gross amount
+discount
+net due
+amount allocated
+amount outstanding
+legacy/reconciliation state
+
+Do not let three separate frontend/backend paths independently decide what is payable.
+
+2. Restore legitimate historical Tuition obligations
+
+QA confirmed that the learner has genuine recurring outstanding balances but Parent Submit Proof shows no recurring options.
+
+Historical invoices may predate invoice_line_items.
+
+Support old invoice-level Tuition obligations only when persisted historical evidence safely identifies the invoice as Tuition/school fees.
+
+Do not require a modern line item for these legitimate legacy Tuition invoices.
+
+Preserve:
+
+oldest unpaid Tuition first
+
+behaviour.
+
+Example outstanding recurring balances from the QA fixture:
+
+April       R950
+July        R200
+August    R2,350
+September R2,350
+
+These should be accounted for by the payable-obligation layer without changing their historical amounts.
+
+If an old invoice cannot safely be identified as Tuition, mark it:
+
+Requires reconciliation
+
+rather than guessing.
+
+3. Do not infer Boarding / Transport / Aftercare debt from flags
+
+Enrollment flags describe what the learner is enrolled in.
+
+They are not proof of an existing charge.
+
+Therefore:
+
+Boarding checked
+
+does not automatically mean:
+
+Boarding R1,600 outstanding
+
+Current and future recurring billing must create persisted authoritative service charge lines.
+
+Parent and Admin may only allocate to services backed by a real charge.
+
+Preserve the existing Reconcile Charge feature for legitimate missing charges confirmed by Admin.
+
+4. Fix outstanding one-off fee visibility
+
+QA confirmed that an R1,200 outstanding one-off invoice existed while it was absent from Parent payable choices.
+
+Do not hide an outstanding ledger obligation solely because the original one-off fee definition later becomes inactive/archived.
+
+Existing debt remains an obligation even if the template/definition is no longer active.
+
+Parent behaviour:
+
+UNPAID
+→ visible and payable
+
+PARTIALLY_PAID
+→ visible with remaining balance
+
+PENDING_REVIEW
+→ visible as pending, not selectable again
+
+PAID
+→ hidden from "Optional Fees to Include"
+
+REQUIRES_RECONCILIATION
+→ visible with a clear non-payable explanation where appropriate
+
+Paid one-off fees must remain in:
+
+payment history
+audit history
+one-off reconciliation
+receipt history
+5. Separate recurring school account from one-off charges
+
+The Admin learner finance history currently mixes one-off invoices into the monthly school-fee table.
+
+This produces multiple September rows such as:
+
+September Tuition
+September Fun Day
+September Test One-Off
+
+That is confusing.
+
+Refactor history/report presentation into:
+
+Monthly School Account
+
+Include:
+
+Tuition
+Boarding
+Transport
+Aftercare
+Other recurring services
+Approved discounts
+Net due
+Paid
+Outstanding
+Status
+One-Off / Additional Charges
+
+Include:
+
+Fee name
+Due date
+Amount due
+Paid
+Outstanding
+Status
+
+One payment may still cover recurring + one-off obligations together.
+
+Reporting separation must NOT force separate payments.
+
+6. Fix Admin Excel export structure
+
+The learner finance export should follow the same separation.
+
+Recommended workbook structure:
+
+Sheet 1 — Monthly School Account
+Sheet 2 — One-Off Fees
+Sheet 3 — Payment Transactions / Audit
+
+Monthly School Account columns should include:
+
+Year
+Month
+Tuition
+Boarding
+Transport
+Aftercare
+Other recurring services
+Gross due
+Discount
+Net due
+Paid
+Outstanding
+Credit
+Status
+
+One-Off sheet:
+
+Fee
+Description
+Due date
+Amount
+Paid
+Outstanding
+Status
+
+Do not present one-off fees as ordinary monthly Tuition rows.
+
+7. Fix CSV export filtering
+
+QA reproduced that CSV export can ignore:
+
+selected learner
+year when month = All Months
+
+Fix this.
+
+The exported rows must match exactly what the Admin filtered view represents.
+
+Create one validated filter parser shared by:
+
+invoice list
+summary
+CSV export
+XLSX export where applicable
+
+Support independently:
+
+learner only
+year only
+month only
+learner + year
+learner + month
+learner + year + month
+
+Never silently export other learners when Admin filtered to one learner.
+
+This is both a financial accuracy and privacy requirement.
+
+8. Export from authoritative ledger, not stale invoice columns
+
+QA reproduced that CSV can export stored stale balance/status fields.
+
+Export:
+
+due
+paid
+outstanding
+credit
+status
+
+from the same authoritative ledger projection used by Admin history.
+
+Do not maintain a second balance formula for exports.
+
+9. Neutralize formula-like CSV text
+
+User-controlled string fields such as:
+
+references
+learner names
+descriptions
+notes
+
+must be spreadsheet-safe.
+
+Protect text beginning with formula prefixes such as:
+
+=
++
+-
+@
+
+without changing legitimate numeric amount fields.
+
+Add regression fixtures.
+
+10. Fix discount stacking
+
+QA reproduced a case where:
+
+Gross charges = R200
+Generated discount lines = R250
+
+The later net-due clamp hides the incorrect breakdown.
+
+Fix calculateApprovedDiscounts() or equivalent.
+
+Every discount must be capped by BOTH:
+
+remaining invoice-level discount capacity
+
+and:
+
+remaining target service capacity
+
+Enforce:
+
+total discounts <= gross charges
+
+and:
+
+discounts for service X <= charge for service X
+
+Preserve deliberate discount ordering semantics.
+
+Add tests for:
+
+staff
+sibling
+custom
+fixed
+percentage
+scoped
+general
+overlapping assignments
+rounding
+
+Do not make legacy staff/sibling flags create discounts.
+
+Only explicit approved assignments affect invoices.
+
+11. Status must use net due
+
+All:
+
+Paid
+Partial
+Unpaid
+Overdue
+
+states must compare allocated payments against:
+
+gross charges
+- approved discounts
+= net due
+
+not gross tuition.
+
+Parent, Admin and exports must agree.
+
+12. Add correct due-date statuses
+
+QA found future invoices displayed as:
+
+Missed Payment
+
+even though the due date had not yet passed.
+
+Introduce explicit states such as:
+
+Paid
+Partial
+Due / Unpaid
+Overdue / Missed
+
+Use a clear school timezone/as-of date.
+
+A September invoice due on September 23 must NOT be called missed on September 15.
+
+13. Expose unallocated credit properly
+
+Admin currently shows a large:
+
+Credit / Overpaid
+
+figure while Parent sees only outstanding debt.
+
+Keep the two concepts separate:
+
+Invoice debt
+Unallocated funds
+
+Parent should not be shown a misleading:
+
+You owe R7,050
+
+with no indication that substantial unapplied funds exist.
+
+Add a clear Parent state such as:
+
+Outstanding invoices: R...
+Unallocated payments awaiting reconciliation: R...
+
+Do NOT automatically offset/refund historical credit.
+
+Admin must reconcile it deliberately.
+
+14. Strong warning before approving large unallocated credit
+
+If Admin is approving:
+
+Payment: R4,250
+Allocated: R300
+Unallocated: R3,950
+
+require explicit confirmation.
+
+Example:
+
+R3,950 of this payment is not allocated to an invoice.
+
+Approving will record it as unallocated credit.
+
+Require a reason where the remainder is non-trivial.
+
+Never make accidental credit creation look identical to fully reconciled approval.
+
+15. Fix stale allocation readiness
+
+A pending proof must not appear ready if any target is:
+
+unavailable
+settled
+missing
+malformed
+over-allocated
+
+Calculate and show:
+
+Valid allocations
+Invalid/unavailable allocations
+Unallocated amount
+
+Disable Approve until:
+
+every allocation is valid
+
+and any intentional unallocated amount has been explicitly acknowledged.
+
+16. Allow Admin to create the first allocation
+
+QA found that if Parent submits a proof with zero selected obligations, Admin receives no allocation editor because the UI is rendered only when:
+
+allocationDraft.length > 0
+
+Fix this.
+
+Pending payment modal must always show:
+
+Proposed Allocation
+
+even if initially empty.
+
+Admin should be able to:
+
++ Add obligation
+
+select a valid payable target
+enter amount
+provide reason if required
+save
+
+Also clearly show the current default automatic allocation destination before approval.
+
+Do not silently auto-allocate an untargeted payment without preview.
+
+17. Improve allocation option labels
+
+Do not display vague options like:
+
+September 2026 — R1,200
+September 2026 — R2,350
+
+Use:
+
+Tuition — September 2026 — R2,350 outstanding
+Fun Day — 23 Sep 2026 — R1,200 outstanding
+Transport — September 2026 — R650 outstanding
+
+Include invoice/fee identity behind the scenes.
+
+18. Fix audit-log structured rendering
+
+Audit currently renders some allocation before/after objects as:
+
+[object Object]
+
+Add structured expandable rendering.
+
+Show:
+
+target
+category
+amount
+invoice
+previous allocation
+new allocation
+actor
+timestamp
+reason
+
+Audit must be understandable without database access.
+
+19. Fix payment method/channel labels
+
+Proof payments must not be labelled:
+
+Bank Import
+
+simply because they are not manual entries.
+
+Use explicit mapping for:
+
+Parent Proof
+Manual Payment
+Bank Import
+Bank Transfer / EFT
+Cash
+Card
+Other
+
+Preserve:
+
+payment channel
+
+separately from:
+
+underlying payment method
+20. Correction screen must preserve original provenance
+
+QA found that opening a proof payment correction can default the payment method to:
+
+Manual entry
+
+even though the original was an EFT Parent proof.
+
+Fix this.
+
+Editing:
+
+date
+reference
+amount
+allocation
+
+must NOT silently change payment provenance.
+
+Preserve the original channel unless Admin deliberately changes an allowed method with an audited reason.
+
+21. Fix date-only rendering
+
+Identical invoice dates currently display one day apart in different views.
+
+Treat:
+
+DATE
+
+columns as calendar dates, not UTC timestamps.
+
+Do not pass date-only values through timezone conversion that changes the calendar day.
+
+Standardize:
+
+Parent
+Admin
+allocation dropdown
+history
+CSV
+XLSX
+
+Timestamp fields should still use proper timezone-aware formatting.
+
+22. Fix dashboard metric scope
+
+Current Admin cards can mix:
+
+school-wide student count
+
+with:
+
+filtered invoice counts
+
+clearly label and scope metrics.
+
+When one learner is filtered, do not make:
+
+Total Students 315
+Paid 6
+Unpaid 3
+
+look like the same population.
+
+For learner-level filtering, prefer:
+
+Paid invoices
+Partial invoices
+Unpaid invoices
+Outstanding total
+23. Fix Service Pricing guidance
+
+Current Admin copy incorrectly implies that service prices themselves are what Parents see/pay immediately.
+
+Update guidance.
+
+Pricing should be described as:
+
+configuration used when generating future billable service charges
+
+Existing invoice obligations remain authoritative.
+
+Editing Service Pricing does not retroactively modify historical debt.
+
+24. Fix loading/error/empty state confusion
+
+Parent/Admin fetch failures must not become:
+
+No payments
+No submissions
+
+distinguish:
+
+Loading
+Empty
+Session expired
+Forbidden
+Server error
+
+Provide Retry where appropriate.
+
+Do not make authentication or API failures look like successful empty finance data.
+
+25. Parent authentication redirect
+
+Parent 401/session expiry must return to:
+
+/parent/login
+
+not the shared Student/Staff login.
+
+Use role-aware handling in the common API interceptor.
+
+26. Standardize snapshot contract
+
+getStudentLedger() and invoice breakdown APIs must return a consistent:
+
+snapshot_available
+
+or equivalent.
+
+If validated persisted lines exist:
+
+snapshot_available = true
+
+Genuinely old invoices with no line snapshot:
+
+snapshot_available = false
+
+Parent/Admin should not show “snapshot unavailable” when line details actually exist.
+
+27. Standardize included-service property
+
+The ledger exposes:
+
+included
+
+while some renderers check:
+
+is_included
+
+standardize this contract.
+
+Bundled/included service lines should display consistently in Parent and Admin views.
+
+28. Fix grade and month-count export metadata
+
+Preserve learner grade in export lookup.
+
+If the learner is Grade 2, do not show:
+
+Grade N/A
+
+Also:
+
+totalMonths
+
+should mean distinct year-month combinations.
+
+One-off invoices in the same month must not inflate month count.
+
+If the metric is actually invoice count, rename it.
+
+29. Parent proof form deselection
+
+When the final selected obligation is deselected:
+
+do not retain the previous derived amount.
+
+Either:
+
+Amount = 0
+
+or switch deliberately to:
+
+Unallocated payment mode
+
+with clear explanation.
+
+Never silently submit the former total.
+
+30. Receipt modal accessibility
+
+Keep working PDF/JPG/PNG/WebP preview.
+
+Add:
+
+Escape closes modal
+focus trap
+focus restoration
+accessible dialog label
+keyboard-operable controls
+wrapping long filenames
+no horizontal overflow on mobile
+31. Tests
+
+Expand tests to include:
+
+Payable obligations
+modern Tuition line
+legacy Tuition invoice
+Boarding flag without charge
+Transport flag without charge
+valid recurring service line
+active one-off
+inactive definition + outstanding one-off invoice
+pending one-off
+partial one-off
+paid one-off hidden from payable screen
+Discounts
+scoped + general stacking
+gross-cap enforcement
+service-cap enforcement
+staff
+sibling
+custom
+percentage
+fixed
+Exports
+learner-only filter
+year-only filter
+month-only filter
+combined filters
+ledger parity
+one-off separation
+formula-safe text
+Allocation
+zero initial proposal
+add first Admin allocation
+stale target
+unavailable target
+intentional unallocated credit
+oldest unpaid
+mixed recurring + one-off
+UI
+future invoice not labelled missed
+payment channel labels
+dates consistent
+snapshot availability
+included service rendering
+Parent session expiry
+API error vs empty state
+receipt modal keyboard flow
+32. Historical data safety
+
+Do not use this repair phase to automatically:
+
+apply R32,150 credit
+refund it
+backfill historical Boarding
+recalculate old discounts
+rewrite old invoices
+change learner enrollment
+
+Any historical reconciliation must be a separate, explicit, audited Admin decision.
+
+Final report
+
+Return:
+
+Root cause and fix for missing recurring payable options
+Root cause and fix for hidden outstanding one-off fees
+Canonical payable-obligation architecture
+Legacy Tuition compatibility
+Recurring vs one-off history separation
+Excel/CSV changes
+Export filtering fixes
+Discount-cap fix
+Status/due-date fix
+Credit/unallocated presentation
+Allocation-readiness changes
+Empty Admin allocation editor
+Audit-log improvements
+Payment provenance fix
+Date handling fix
+Parent authentication/error-state changes
+Files changed
+Whether migration is required
+Tests added
+Test results
+Exact production verification checklist
+
+Do not deploy automatically.
+Do not run migrations automatically.

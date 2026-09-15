@@ -9,7 +9,7 @@
  * Admin/Parent discrepancy.
  */
 const db = require('../config/database');
-const { appendPeriodFilters } = require('../utils/invoiceQuery');
+const { appendPeriodFilters, parseInvoiceFilterQuery } = require('../utils/invoiceQuery');
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const nonNegative = (value) => Math.max(0, money(value));
@@ -303,19 +303,37 @@ function configuredBillableLines(student, prices) {
 function calculateApprovedDiscounts(assignments, chargeLines) {
   const discounts = [];
   const discountedByService = new Map();
-  const chargeGross = money(chargeLines.reduce((sum, line) => sum + line.amount, 0));
+  const billableCharges = (Array.isArray(chargeLines) ? chargeLines : [])
+    .filter((line) => !line.is_included && Number(line.amount) > 0);
+  const chargeGross = money(billableCharges.reduce((sum, line) => sum + line.amount, 0));
   let discountedTotal = 0;
-  for (const assignment of assignments) {
+  const seenAssignmentIds = new Set();
+  const approvedAssignments = (Array.isArray(assignments) ? assignments : [])
+    // Assignment ids are the identity of an approved discount.  A repeated
+    // row can otherwise create a second discount line during retries or joins.
+    // Rows without an id are not persisted approved assignments and are
+    // deliberately ignored rather than treating a legacy flag as approval.
+    .filter((assignment) => {
+      if (!assignment || assignment.id == null) return false;
+      const id = String(assignment.id);
+      if (seenAssignmentIds.has(id)) return false;
+      seenAssignmentIds.add(id);
+      return true;
+    });
+  for (const assignment of approvedAssignments) {
     const targets = assignment.applicable_service_key
-      ? chargeLines.filter((line) => line.service_key === assignment.applicable_service_key)
-      : chargeLines;
+      ? billableCharges.filter((line) => line.service_key === assignment.applicable_service_key)
+      : billableCharges;
     const targetGross = money(targets.reduce((sum, line) => sum + line.amount, 0));
-    const targetDiscounted = money(targets.reduce((sum, line) =>
-      sum + (discountedByService.get(line.service_key) || 0), 0));
+    const targetServices = new Set(targets.map((line) => line.service_key));
+    const targetDiscounted = money([...targetServices].reduce((sum, serviceKey) =>
+      sum + (discountedByService.get(serviceKey) || 0), 0));
     const remainingInvoice = money(chargeGross - discountedTotal);
     const remainingTarget = money(targetGross - targetDiscounted);
-    const available = assignment.applicable_service_key
-      ? remainingTarget : remainingInvoice;
+    // Both caps apply to every assignment.  Scoped discounts used to skip the
+    // invoice cap, while general discounts could leave a service overdrawn
+    // after their proportional distribution.
+    const available = Math.min(remainingInvoice, remainingTarget);
     if (available <= 0) continue;
     const requested = assignment.calculation_method === 'percentage'
       // Each assignment is calculated against its target gross amount; the
@@ -350,17 +368,42 @@ function calculateApprovedDiscounts(assignments, chargeLines) {
         money((discountedByService.get(assignment.applicable_service_key) || 0) + amount),
       );
     } else if (targetGross > 0) {
-      // A non-scoped discount consumes the remaining invoice gross. Track its
-      // proportional service allocation so later scoped assignments cannot
-      // discount a service below zero.
+      // Track a general discount against service capacity. Start with the
+      // historical proportional split, cap each service, then redistribute
+      // any overflow in deterministic charge-line order. This preserves the
+      // existing ordering semantics while guaranteeing service-level caps.
+      const targetByService = new Map();
+      targets.forEach((line) => {
+        targetByService.set(line.service_key, money(
+          (targetByService.get(line.service_key) || 0) + line.amount,
+        ));
+      });
+      const serviceOrder = [...targetByService.keys()];
+      const allocations = new Map();
       let allocated = 0;
-      targets.forEach((line, index) => {
-        const share = index === targets.length - 1
+      serviceOrder.forEach((serviceKey, index) => {
+        const gross = targetByService.get(serviceKey) || 0;
+        const rawShare = index === serviceOrder.length - 1
           ? money(amount - allocated)
-          : money(amount * line.amount / targetGross);
+          : money(amount * gross / targetGross);
+        const capacity = money(gross - (discountedByService.get(serviceKey) || 0));
+        const share = Math.min(capacity, Math.max(0, rawShare));
+        allocations.set(serviceKey, share);
         allocated = money(allocated + share);
-        discountedByService.set(line.service_key, money(
-          (discountedByService.get(line.service_key) || 0) + share,
+      });
+      let remainder = money(amount - allocated);
+      for (const serviceKey of serviceOrder) {
+        if (remainder <= 0) break;
+        const gross = targetByService.get(serviceKey) || 0;
+        const capacity = money(gross - (discountedByService.get(serviceKey) || 0) -
+          (allocations.get(serviceKey) || 0));
+        const extra = Math.min(capacity, remainder);
+        allocations.set(serviceKey, money((allocations.get(serviceKey) || 0) + extra));
+        remainder = money(remainder - extra);
+      }
+      allocations.forEach((share, serviceKey) => {
+        discountedByService.set(serviceKey, money(
+          (discountedByService.get(serviceKey) || 0) + share,
         ));
       });
     }
@@ -540,6 +583,9 @@ async function getStudentLedger(studentId, executor = db) {
         .map((id) => Number(id)))],
       category_balances: legacyCategoryReview ? [] : categoryBalances,
       category_allocation_review_required: legacyCategoryReview,
+      // This is derived from normalized rows loaded from the persisted
+      // invoice-line snapshot, never from current pricing or enrollment.
+      snapshot_available: lines.length > 0,
        // Enrollment information is not historical billing evidence. Billed
        // and bundled truth comes only from this invoice's immutable lines.
        service_components: charge.components.map(({ key, label, description, enrolled }) => ({
@@ -589,6 +635,7 @@ async function getStudentLedger(studentId, executor = db) {
  * credits have one interpretation for every consumer.
  */
 async function getFinanceSummary(filters = {}, executor = db) {
+  filters = parseInvoiceFilterQuery(filters);
   const params = [];
   const clauses = [];
   if (filters.status) {

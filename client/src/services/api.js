@@ -39,8 +39,18 @@ api.interceptors.response.use(
   (error) => {
     console.error('API Error:', error.response?.data || error.message);
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
+      const inParentFlow = window.location.pathname.startsWith('/parent') ||
+        Boolean(localStorage.getItem('parentToken') || sessionStorage.getItem('parentToken'));
+      if (inParentFlow) {
+        ['parentToken', 'parentUser', 'parentChildren', 'parentChild'].forEach((key) => {
+          localStorage.removeItem(key);
+          sessionStorage.removeItem(key);
+        });
+        if (window.location.pathname !== '/parent/login') window.location.href = '/parent/login';
+      } else {
+        localStorage.removeItem('token');
+        if (window.location.pathname !== '/login') window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }

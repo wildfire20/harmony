@@ -19,6 +19,24 @@ const formatRand = (amount) => Number(amount || 0).toLocaleString('en-ZA', {
   maximumFractionDigits: 2
 });
 
+const formatDateOnly = (value) => {
+  const raw = String(value || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return '—';
+  const [year, month, day] = raw.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString('en-ZA');
+};
+
+const paymentMethodLabel = (method) => ({
+  proof_of_payment: 'Parent Proof',
+  manual_entry: 'Manual Payment',
+  bank_import: 'Bank Import',
+  bank_transfer: 'Bank Transfer / EFT',
+  eft: 'Bank Transfer / EFT',
+  cash: 'Cash',
+  card: 'Card',
+  other: 'Other',
+}[method] || 'Other');
+
 const ManualPayments = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeSearch, setActiveSearch] = useState('');
@@ -434,7 +452,7 @@ const ManualPayments = () => {
                 {editingPayment && (
                   <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-md px-3 py-2">
                     Editing payment — you can change the amount, date, month, year, or reference.
-                    {editingPayment.payment_method === 'bank_transfer' && ' (Originally a bank import)'}
+                    {' Original channel: '}{paymentMethodLabel(editingPayment.payment_method)}. It is preserved unless you deliberately change it with the audited correction reason below.
                   </div>
                 )}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -459,7 +477,7 @@ const ManualPayments = () => {
                          <option value="">Select an outstanding invoice</option>
                          {invoices.map(invoice => (
                            <option key={invoice.id} value={invoice.id}>
-                             {invoice.reference_number || `Invoice #${invoice.id}`} — {new Date(invoice.due_date).toLocaleDateString()} — R {Number(invoice.outstanding_balance).toFixed(2)} outstanding
+                              {invoice.reference_number || `Invoice #${invoice.id}`} — {formatDateOnly(invoice.due_date)} — R {Number(invoice.outstanding_balance).toFixed(2)} outstanding
                            </option>
                          ))}
                        </select>
@@ -503,6 +521,8 @@ const ManualPayments = () => {
                        onChange={e => setPaymentData({ ...paymentData, payment_method: e.target.value })}
                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500" required>
                        <option value="manual_entry">Manual entry</option>
+                        <option value="proof_of_payment">Parent proof</option>
+                        <option value="bank_import">Bank import</option>
                        <option value="cash">Cash</option>
                        <option value="bank_transfer">Bank transfer</option>
                        <option value="card">Card</option>
@@ -577,7 +597,7 @@ const ManualPayments = () => {
                     {payments.map((payment) => (
                       <tr key={payment.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-sm text-gray-900">
-                          {new Date(payment.payment_date).toLocaleDateString()}
+                          {formatDateOnly(payment.payment_date)}
                         </td>
                         <td className="px-4 py-3 text-sm font-medium text-green-600">
                           R {parseFloat(payment.amount).toFixed(2)}
@@ -603,7 +623,7 @@ const ManualPayments = () => {
                               ? 'bg-yellow-100 text-yellow-800' 
                               : 'bg-blue-100 text-blue-800'
                           }`}>
-                            {payment.payment_method === 'manual_entry' ? 'Manual' : 'Bank Import'}
+                            {paymentMethodLabel(payment.payment_method)}
                           </span>
                         </td>
                          <td className="px-4 py-3 text-sm">

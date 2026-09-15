@@ -44,13 +44,23 @@ function DetailsBadge({ details }) {
   if (!details || typeof details !== 'object') return null;
   const items = Object.entries(details).filter(([k]) => !['error'].includes(k));
   if (!items.length) return null;
+  const simple = items.filter(([, value]) => value == null || ['string', 'number', 'boolean'].includes(typeof value));
+  const structured = items.filter(([, value]) => value != null && typeof value === 'object');
   return (
-    <div className="mt-1 flex flex-wrap gap-1">
-      {items.slice(0, 4).map(([k, v]) => (
-        <span key={k} className="inline-flex items-center gap-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded">
-          <span className="text-gray-400">{k.replace(/_/g, ' ')}:</span>
-          <span className="font-medium">{String(v).substring(0, 40)}</span>
-        </span>
+    <div className="mt-1 space-y-1">
+      <div className="flex flex-wrap gap-1">
+        {simple.map(([k, v]) => (
+          <span key={k} className="inline-flex items-center gap-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded">
+            <span className="text-gray-400">{k.replace(/_/g, ' ')}:</span>
+            <span className="font-medium break-all">{String(v ?? '—')}</span>
+          </span>
+        ))}
+      </div>
+      {structured.map(([key, value]) => (
+        <details key={key} className="rounded bg-gray-50 px-2 py-1 text-xs text-gray-600">
+          <summary className="cursor-pointer font-semibold capitalize">{key.replace(/_/g, ' ')}</summary>
+          <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words font-sans">{JSON.stringify(value, null, 2)}</pre>
+        </details>
       ))}
     </div>
   );

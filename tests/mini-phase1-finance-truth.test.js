@@ -77,6 +77,7 @@ test('ledger keeps top-level services enrollment-only and reports bundle truth o
   };
   const ledger = await getStudentLedger(8, executor);
   assert.equal(ledger.service_components.find((line) => line.key === 'tuition').billing_state, undefined);
+  assert.equal(ledger.invoices[0].snapshot_available, true);
   assert.equal(ledger.invoices[0].line_items.find((line) => line.service_key === 'tuition').included, true);
   assert.equal(ledger.invoices[0].line_items.find((line) => line.service_key === 'aftercare').included, true);
   assert.equal(ledger.invoices[0].line_items.find((line) => line.service_key === 'transport').included, false);
@@ -98,6 +99,41 @@ test('fixed, percentage and service-scoped assignments are cumulative and capped
     ['Custom approved discount', 50],
   ]);
   assert.ok(discounts.reduce((sum, line) => sum + line.amount, 0) <= 150);
+});
+
+test('discount caps apply to invoice and service capacity with stable assignment identity', () => {
+  const charges = [
+    { line_type: 'charge', service_key: 'tuition', amount: 100 },
+    { line_type: 'charge', service_key: 'transport', amount: 100 },
+  ];
+  const discounts = calculateApprovedDiscounts([
+    { id: 11, discount_type: 'staff', calculation_method: 'fixed', amount: 100,
+      applicable_service_key: 'tuition', reason: 'staff' },
+    { id: 12, discount_type: 'custom', calculation_method: 'fixed', amount: 100,
+      reason: 'general' },
+    // The duplicate row is ignored, and transport has no capacity left.
+    { id: 12, discount_type: 'custom', calculation_method: 'fixed', amount: 100,
+      reason: 'duplicate' },
+    { id: 13, discount_type: 'sibling', calculation_method: 'fixed', amount: 100,
+      applicable_service_key: 'transport', reason: 'sibling' },
+  ], charges);
+  assert.deepEqual(discounts.map((line) => [line.discount_assignment_id, line.amount]), [
+    [11, 100], [12, 100],
+  ]);
+  assert.equal(discounts.reduce((sum, line) => sum + line.amount, 0), 200);
+  assert.ok(discounts.every((line) => line.amount >= 0));
+});
+
+test('percentage discount rounding never creates a fractional-cent over-cap', () => {
+  const discounts = calculateApprovedDiscounts([{
+    id: 21, discount_type: 'custom', calculation_method: 'percentage',
+    percentage: 50, reason: 'rounding',
+  }], [
+    { line_type: 'charge', service_key: 'tuition', amount: 0.01 },
+    { line_type: 'charge', service_key: 'transport', amount: 0.01 },
+  ]);
+  assert.equal(discounts[0].amount, 0.01);
+  assert.ok(discounts.reduce((sum, line) => sum + line.amount, 0) <= 0.02);
 });
 
 test('legacy boolean discount flags remain informational and do not alter charges', () => {
@@ -320,4 +356,7 @@ test('history, export, Parent and Admin remain ledger-aligned and preserve year-
   assert.ok(packageJson.scripts['audit:mini-phase1-finance']);
   assert.deepEqual(parseInvoiceListQuery({ year: '2026' }).month, undefined);
   assert.match(dashboard, /Finance data is unavailable/);
+  assert.match(dashboard, /line\.included \?\? line\.is_included/);
+  assert.match(dashboard, /timeZone: 'UTC'/);
+  assert.doesNotMatch(dashboard, /new Date\(invoice\.due_date\)\.toLocaleDateString/);
 });

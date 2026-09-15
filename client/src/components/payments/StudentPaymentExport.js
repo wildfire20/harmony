@@ -115,9 +115,13 @@ const StudentPaymentExport = () => {
       case 'Overpaid':
         return 'bg-green-100 text-green-800';
       case 'Missed Payment':
+      case 'Overdue / Missed':
         return 'bg-red-100 text-red-800';
       case 'Partial Payment':
+      case 'Partial':
         return 'bg-orange-100 text-orange-800';
+      case 'Due / Unpaid':
+        return 'bg-yellow-100 text-yellow-800';
       default:
         return 'bg-gray-100 text-gray-600';
     }
@@ -129,8 +133,10 @@ const StudentPaymentExport = () => {
       case 'Overpaid':
         return <CheckCircle className="w-4 h-4 text-green-600" />;
       case 'Missed Payment':
+      case 'Overdue / Missed':
         return <XCircle className="w-4 h-4 text-red-600" />;
       case 'Partial Payment':
+      case 'Partial':
         return <AlertCircle className="w-4 h-4 text-orange-600" />;
       default:
         return null;

@@ -233,10 +233,10 @@ export default function ServicePricingAdmin() {
       <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
         <p className="text-amber-800 text-sm font-semibold mb-1">How these prices are used</p>
         <ul className="text-amber-700 text-xs space-y-1 list-disc list-inside">
-          <li>Prices are shown to parents when they open the "Submit Proof of Payment" screen</li>
-          <li>Parents only see fees for services their child is enrolled in (based on their service flags)</li>
-          <li>Tuition is shown to all parents</li>
-          <li>Changing a price here takes effect immediately for all parents</li>
+          <li>Prices are configuration used when generating future billable invoice charges.</li>
+          <li>Parent payment choices come from persisted outstanding invoice obligations, not enrollment flags or this screen.</li>
+          <li>Editing a price does not change existing invoices or historical debt.</li>
+          <li>Enrollment determines which configured services may be included the next time monthly invoices are generated.</li>
         </ul>
       </div>
     </div>

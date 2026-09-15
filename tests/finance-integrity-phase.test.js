@@ -290,9 +290,10 @@ test('saved proposal validation rejects proof over-allocation and duplicate targ
 test('Parent payable services cannot be overwritten by enrollment flags or Service Pricing', () => {
   const parent = source('client/src/components/parent/ParentPaymentProof.js');
   assert.doesNotMatch(parent, /authFetch\('\/api\/service-prices'\)/);
+  assert.doesNotMatch(parent, /authFetch\('\/api\/invoices'\)/);
   assert.doesNotMatch(parent, /is_boarder|uses_transport|uses_aftercare/);
-  assert.match(parent, /setPayableServices\(\[\.\.\.byService\.values\(\)\]\)/);
-  assert.match(parent, /invoice_line_item_id: line\.id/);
+  assert.match(parent, /parentApi\('\/payable-obligations'\)/);
+  assert.match(parent, /d\?\.obligations/);
   assert.match(parent, /invoice_line_item_id: service\.invoice_line_item_id/);
 });
 

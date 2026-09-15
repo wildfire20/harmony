@@ -55,6 +55,16 @@ export const useParentAuth = () => {
 };
 
 // ─── API helper (auto-injects auth + child_id) ────────────────────────────────
+const redirectParentToLogin = () => {
+  const destination = getSafeParentDestination(`${window.location.pathname}${window.location.search}`);
+  sessionStorage.clear();
+  window.location.href = parentLoginPath(destination);
+  const sessionError = new Error('Parent session expired');
+  sessionError.status = 401;
+  sessionError.code = 'SESSION_EXPIRED';
+  return sessionError;
+};
+
 export const parentApi = async (path, opts = {}) => {
   const { skipChildId, ...requestOptions } = opts;
   const storage = sessionStorage;
@@ -71,16 +81,16 @@ export const parentApi = async (path, opts = {}) => {
   let res = await request(token);
   if (res.status === 401) {
     try { res = await request(await refreshParentAccess()); }
-    catch (_) {
-      const destination = getSafeParentDestination(`${window.location.pathname}${window.location.search}`);
-      sessionStorage.clear();
-      window.location.href = parentLoginPath(destination);
-      return null;
-    }
+    catch (_) { throw redirectParentToLogin(); }
+  }
+  if (res.status === 401) {
+    throw redirectParentToLogin();
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Request failed');
+    const requestError = new Error(err.message || 'Request failed');
+    requestError.status = res.status;
+    throw requestError;
   }
   return res.json();
 };

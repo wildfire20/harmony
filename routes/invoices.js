@@ -14,7 +14,9 @@ const {
   buildInvoiceSnapshotLines,
   invoiceStatusExpression, loadInvoiceLineItems, buildInvoiceBreakdown, invoiceStatus,
 } = require('../services/financeLedger');
-const { parseInvoiceListQuery, appendPeriodFilters } = require('../utils/invoiceQuery');
+const {
+  parseInvoiceFilterQuery, parseInvoiceListQuery, appendPeriodFilters,
+} = require('../utils/invoiceQuery');
 
 const router = express.Router();
 const RECONCILABLE_SERVICES = new Map([
@@ -30,6 +32,27 @@ const positiveInteger = (value) => {
   const parsed = Number(raw);
   return Number.isSafeInteger(parsed) ? parsed : null;
 };
+
+function dateOnly(value) {
+  if (value == null || value === '') return '';
+  const raw = String(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+}
+
+function csvText(value) {
+  let text = String(value == null ? '' : value);
+  // A leading apostrophe makes formula-like user input text in spreadsheet
+  // applications. Amount columns intentionally do not use this helper.
+  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
+}
+
+function csvNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? String(Math.round(number * 100) / 100) : '0';
+}
 
 // Configure multer for CSV uploads
 const upload = multer({
@@ -1493,77 +1516,81 @@ router.get('/export/csv', [
   authorize('admin', 'super_admin')
 ], async (req, res) => {
   try {
-    const { status, month, year } = req.query;
+    let filters;
+    try {
+      filters = parseInvoiceFilterQuery(req.query);
+    } catch (error) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    const { status, month, year, studentNumber } = filters;
+    const clauses = [];
+    const queryParams = [];
+    if (status) {
+      queryParams.push(status);
+      clauses.push(`${invoiceStatusExpression('i')} = $${queryParams.length}`);
+    }
+    appendPeriodFilters(clauses, queryParams, 'i.due_date', { month, year });
+    if (studentNumber) {
+      queryParams.push(`%${studentNumber}%`);
+      clauses.push(`i.student_number ILIKE $${queryParams.length}`);
+    }
 
-    let query = `
+    const query = `
       SELECT 
-        i.reference_number, u.first_name, u.last_name, i.student_number,
-        i.amount_due, i.amount_paid, i.outstanding_balance, i.overpaid_amount,
-        i.due_date, i.status, i.created_at, i.updated_at,
+        i.id, i.reference_number, u.first_name, u.last_name, i.student_number,
+        i.description, i.amount_due, i.amount_paid, i.due_date, i.status,
+        i.created_at, i.updated_at,
         g.name as grade_name, c.name as class_name
       FROM invoices i
       LEFT JOIN users u ON i.student_id = u.id
       LEFT JOIN grades g ON u.grade_id = g.id
       LEFT JOIN classes c ON u.class_id = c.id
-      WHERE 1=1
+      WHERE ${clauses.length ? clauses.join(' AND ') : 'TRUE'}
+      ORDER BY i.due_date DESC, i.id DESC
     `;
 
-    const queryParams = [];
-    let paramCount = 0;
-
-    if (status) {
-      paramCount++;
-      query += ` AND i.status = $${paramCount}`;
-      queryParams.push(status);
-    }
-
-    if (month && year) {
-      paramCount++;
-      query += ` AND EXTRACT(MONTH FROM i.due_date) = $${paramCount}`;
-      queryParams.push(parseInt(month));
-      
-      paramCount++;
-      query += ` AND EXTRACT(YEAR FROM i.due_date) = $${paramCount}`;
-      queryParams.push(parseInt(year));
-    }
-
-    query += ` ORDER BY i.due_date DESC`;
-
     const result = await db.query(query, queryParams);
+    const invoiceIds = result.rows.map((row) => Number(row.id));
+    const lineData = await loadInvoiceLineItems(db, invoiceIds);
+    const linesByInvoice = new Map();
+    lineData.rows.forEach((line) => {
+      const id = Number(line.invoice_id);
+      if (!linesByInvoice.has(id)) linesByInvoice.set(id, []);
+      linesByInvoice.get(id).push(line);
+    });
+    const projectedRows = result.rows.map((row) => buildInvoiceBreakdown(
+      row,
+      linesByInvoice.get(Number(row.id)) || [],
+    ));
 
     // Generate CSV content
     const csvHeaders = [
       'Reference Number', 'Student Number', 'First Name', 'Last Name',
-      'Grade', 'Class', 'Amount Due', 'Amount Paid', 'Outstanding Balance',
+      'Grade', 'Class', 'Description', 'Amount Due', 'Amount Paid', 'Outstanding Balance',
       'Overpaid Amount', 'Due Date', 'Status', 'Created', 'Updated'
     ];
 
     let csvContent = csvHeaders.join(',') + '\n';
 
-    result.rows.forEach(row => {
+    projectedRows.forEach(row => {
+      const statusValue = invoiceStatus(row.amount_due, row.amount_paid, row.status);
       const csvRow = [
-        row.reference_number || '',
-        row.student_number || '',  // This comes from the invoice table
-        row.first_name || '',
-        row.last_name || '',
-        row.grade_name || '',
-        row.class_name || '',
-        row.amount_due || 0,
-        row.amount_paid || 0,
-        row.outstanding_balance || 0,
-        row.overpaid_amount || 0,
-        row.due_date?.toISOString().split('T')[0] || '',
-        row.status || '',
-        row.created_at?.toISOString().split('T')[0] || '',
-        row.updated_at?.toISOString().split('T')[0] || ''
-      ].map(field => {
-        // Handle special characters and quotes in CSV
-        const stringField = String(field);
-        if (stringField.includes('"') || stringField.includes(',') || stringField.includes('\n')) {
-          return `"${stringField.replace(/"/g, '""')}"`;
-        }
-        return `"${stringField}"`;
-      }).join(',');
+        csvText(row.reference_number),
+        csvText(row.student_number),
+        csvText(row.first_name),
+        csvText(row.last_name),
+        csvText(row.grade_name),
+        csvText(row.class_name),
+        csvText(row.description),
+        csvNumber(row.net_due),
+        csvNumber(row.allocated_effective_payments),
+        csvNumber(row.outstanding_balance),
+        csvNumber(row.credit),
+        csvText(dateOnly(row.due_date)),
+        csvText(statusValue),
+        csvText(dateOnly(row.created_at)),
+        csvText(dateOnly(row.updated_at)),
+      ].join(',');
       
       csvContent += csvRow + '\n';
     });

@@ -3,7 +3,8 @@ import {
   Upload, CheckCircle, Clock, XCircle, AlertCircle,
   ChevronLeft, Receipt, CreditCard, Banknote, Smartphone, Building2, Check
 } from 'lucide-react';
-import { parentApi } from './ParentPortal';
+import { parentApi, refreshParentAccess } from './ParentPortal';
+import { getSafeParentDestination, parentLoginPath } from './parentNavigation';
 
 const METHODS = [
   { value: 'eft', label: 'EFT / Bank Transfer', icon: Building2 },
@@ -19,12 +20,36 @@ const STATUS_STYLE = {
 };
 
 const R = (n) => `R ${Number(n || 0).toFixed(2)}`;
-const fmt = (d) => d ? new Date(d).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+const isDateOnly = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+const calendarDate = (value) => {
+  if (!value) return null;
+  if (isDateOnly(value)) {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+const fmt = (value) => {
+  const date = calendarDate(value);
+  if (!date) return '—';
+  return date.toLocaleDateString('en-ZA', isDateOnly(value)
+    ? { day: 'numeric', month: 'short', year: 'numeric' }
+    : { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+const requestMessage = (label, error) => {
+  if (error?.status === 401) return `${label} could not be loaded because your parent session has expired. Please sign in again.`;
+  if (error?.status === 403) return `${label} could not be loaded because this parent account is not permitted to view it.`;
+  if (error?.status >= 500) return `${label} is temporarily unavailable. Please try again.`;
+  return error?.message || `Could not load ${label.toLowerCase()}. Please try again.`;
+};
+const canRetry = (error) => !error?.status || error.status >= 500;
 
 export default function ParentPaymentProof({ child, embedded = false }) {
   const [view, setView] = useState('list'); // 'list' | 'form'
   const [submissions, setSubmissions] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [submissionStatus, setSubmissionStatus] = useState('loading');
+  const [submissionError, setSubmissionError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -40,14 +65,22 @@ export default function ParentPaymentProof({ child, embedded = false }) {
   const applicableServices = payableServices;
   const [selectedServices, setSelectedServices] = useState([]);
   const [banking, setBanking] = useState(null);
+  const [payableStatus, setPayableStatus] = useState('loading');
+  const [payableError, setPayableError] = useState(null);
+  const [bankingStatus, setBankingStatus] = useState('loading');
+  const [bankingError, setBankingError] = useState(null);
 
   const fileRef = useRef();
   const submissionKeyRef = useRef(null);
+  const receiptDialogRef = useRef(null);
+  const receiptCloseRef = useRef(null);
+  const receiptTriggerRef = useRef(null);
   const [receiptModal, setReceiptModal] = useState(null);
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [receiptPreviewFailed, setReceiptPreviewFailed] = useState(false);
 
   const viewReceipt = async (id, fileName) => {
+    receiptTriggerRef.current = document.activeElement;
     setReceiptLoading(id);
     try {
       const token = sessionStorage.getItem('parentToken');
@@ -76,68 +109,152 @@ export default function ParentPaymentProof({ child, embedded = false }) {
   const closeReceiptModal = () => {
     setReceiptModal(null);
     setReceiptPreviewFailed(false);
+    requestAnimationFrame(() => receiptTriggerRef.current?.focus?.());
+  };
+
+  const handleReceiptDialogKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeReceiptModal();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const controls = receiptDialogRef.current?.querySelectorAll(
+      'button:not([disabled]), a[href], iframe, [tabindex]:not([tabindex="-1"])',
+    );
+    if (!controls?.length) return;
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   };
 
   useEffect(() => {
     const url = receiptModal?.url;
+    if (url) requestAnimationFrame(() => receiptCloseRef.current?.focus());
     return () => {
       if (url) URL.revokeObjectURL(url);
     };
   }, [receiptModal?.url]);
 
-  const authFetch = (url) => {
-    const token = sessionStorage.getItem('parentToken');
-    return fetch(url, { credentials: 'include', headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
+  const authFetch = async (url) => {
+    let token = sessionStorage.getItem('parentToken');
+    let response = await fetch(url, {
+      credentials: 'include',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.status === 401) {
+      try {
+        token = await refreshParentAccess();
+        response = await fetch(url, {
+          credentials: 'include',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch (_) {
+        const destination = getSafeParentDestination(`${window.location.pathname}${window.location.search}`);
+        const sessionError = new Error('Parent session expired');
+        sessionError.status = 401;
+        sessionError.code = 'SESSION_EXPIRED';
+        window.location.href = parentLoginPath(destination);
+        throw sessionError;
+      }
+    }
+    if (response.status === 401) {
+      const destination = getSafeParentDestination(`${window.location.pathname}${window.location.search}`);
+      const sessionError = new Error('Parent session expired');
+      sessionError.status = 401;
+      sessionError.code = 'SESSION_EXPIRED';
+      window.location.href = parentLoginPath(destination);
+      throw sessionError;
+    }
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const requestError = new Error(data.message || 'Request failed');
+      requestError.status = response.status;
+      throw requestError;
+    }
+    return data;
   };
 
-  const loadSubmissions = () => {
-    setLoading(true);
-    setError(null);
+  const loadSubmissions = async () => {
+    setSubmissionStatus('loading');
+    setSubmissionError(null);
     const suffix = child?.id ? `?child_id=${child.id}` : '';
-    authFetch(`/api/payment-proofs/my${suffix}`)
-      .then(d => setSubmissions(d.submissions || []))
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
+    try {
+      const data = await authFetch(`/api/payment-proofs/my${suffix}`);
+      if (!Array.isArray(data.submissions)) {
+        throw new Error('The submissions response was invalid');
+      }
+      setSubmissions(data.submissions);
+      setSubmissionStatus('ready');
+    } catch (requestError) {
+      setSubmissions([]);
+      setSubmissionError(requestError);
+      setSubmissionStatus('error');
+    }
+  };
+
+  const loadPayables = async () => {
+    setPayableStatus('loading');
+    setPayableError(null);
+    setPayableServices([]);
+    setOneOffFees([]);
+    try {
+      const d = await parentApi('/payable-obligations');
+      if (!Array.isArray(d?.obligations)) throw new Error('The payable obligations response was invalid');
+      const obligations = d.obligations;
+      setPayableServices(obligations.filter((item) => item.obligation_type === 'recurring' || item.category !== 'one_off'));
+      setOneOffFees(obligations
+        .filter((item) => item.category === 'one_off')
+        .map((item) => ({
+          ...item,
+          id: item.one_off_fee_id || item.fee_id || item.obligation_id,
+          name: item.label,
+          remaining_amount: item.amount_outstanding,
+          ledger_invoice_id: item.invoice_id,
+          invoice_line_item_id: item.invoice_line_item_id,
+          assignment_id: item.assignment_id,
+          is_payable: item.is_payable,
+          payment_status: item.status,
+        })));
+      setPayableStatus('ready');
+    } catch (requestError) {
+      setPayableServices([]);
+      setOneOffFees([]);
+      setPayableError(requestError);
+      setPayableStatus('error');
+    }
+  };
+
+  const loadBanking = async () => {
+    setBankingStatus('loading');
+    setBankingError(null);
+    setBanking(null);
+    try {
+      const data = await parentApi('/banking-details');
+      if (!data || typeof data !== 'object' || !Object.prototype.hasOwnProperty.call(data, 'banking')) {
+        throw new Error('The banking details response was invalid');
+      }
+      setBanking(data.banking && typeof data.banking === 'object' ? data.banking : {});
+      setBankingStatus('ready');
+    } catch (requestError) {
+      setBankingError(requestError);
+      setBankingStatus('error');
+    }
   };
 
   useEffect(() => {
     loadSubmissions();
-    const suffix = child?.id ? `?child_id=${child.id}` : '';
-    authFetch(`/api/student-fees/for-child${suffix}`)
-      .then(d => setOneOffFees(d.fees || []))
-      .catch(() => {});
-    setPayableServices([]);
-    // Payable services come only from open, persisted invoice lines.
-    // Enrollment flags and current Service Pricing are not billing evidence.
-    parentApi('/invoices')
-      .then((d) => {
-        const byService = new Map();
-        (d.invoices || []).forEach((invoice) => {
-          if (Number(invoice.outstanding_balance || 0) <= 0) return;
-          (invoice.line_items || []).forEach((line) => {
-            if (line.line_type !== 'charge' || line.included || Number(line.amount || 0) <= 0 || !line.service_key) return;
-            if (line.metadata?.category === 'one_off' || line.metadata?.fee_id != null) return;
-            const balance = (invoice.category_balances || [])
-              .find((item) => item.category === line.service_key);
-            if (!balance || Number(balance.amount || 0) <= 0) return;
-            const current = byService.get(line.service_key);
-            if (!current || new Date(invoice.due_date) < new Date(current.due_date)) {
-              byService.set(line.service_key, {
-                service_key: line.service_key,
-                label: line.label,
-                description: line.description,
-                amount: Number(balance.amount),
-                invoice_id: invoice.id,
-                invoice_line_item_id: line.id,
-                due_date: invoice.due_date,
-              });
-            }
-          });
-        });
-        setPayableServices([...byService.values()]);
-      })
-      .catch(() => setPayableServices([]));
-    parentApi('/banking-details').then(d => setBanking(d.banking)).catch(() => {});
+    // All payment choices come from the canonical persisted-obligation
+    // projection. The old fee and invoice endpoints each had subtly different
+    // filtering rules (notably for archived one-offs and legacy Tuition).
+    loadPayables();
+    loadBanking();
   }, [child?.id]);
 
   // Recalculate total from both selected services and one-off fees
@@ -145,14 +262,14 @@ export default function ParentPaymentProof({ child, embedded = false }) {
     const serviceTotal = services.reduce((s, p) => s + parseFloat(p.amount), 0);
     const feeTotal = fees.reduce((s, f) => s + parseFloat(f.remaining_amount ?? f.amount), 0);
     const total = serviceTotal + feeTotal;
-    if (total > 0) setAmount(total.toFixed(2));
+    setAmount(total > 0 ? total.toFixed(2) : '');
   };
 
   const toggleService = (price) => {
     setSelectedServices(prev => {
-      const exists = prev.find(p => p.service_key === price.service_key);
+      const exists = prev.find(p => p.obligation_id === price.obligation_id);
       const updated = exists
-        ? prev.filter(p => p.service_key !== price.service_key)
+        ? prev.filter(p => p.obligation_id !== price.obligation_id)
         : [...prev, price];
       recalcTotal(updated, selectedFees);
       return updated;
@@ -161,8 +278,8 @@ export default function ParentPaymentProof({ child, embedded = false }) {
 
   const toggleFee = (fee) => {
     setSelectedFees(prev => {
-      const exists = prev.find(f => f.id === fee.id);
-      const updated = exists ? prev.filter(f => f.id !== fee.id) : [...prev, fee];
+      const exists = prev.find(f => f.obligation_id === fee.obligation_id);
+      const updated = exists ? prev.filter(f => f.obligation_id !== fee.obligation_id) : [...prev, fee];
       recalcTotal(selectedServices, updated);
       return updated;
     });
@@ -188,19 +305,23 @@ export default function ParentPaymentProof({ child, embedded = false }) {
       fd.append('notes', notes);
       fd.append('obligations', JSON.stringify([
         ...selectedServices.map((service) => ({
+          obligation_id: service.obligation_id,
           invoice_id: service.invoice_id,
           invoice_line_item_id: service.invoice_line_item_id,
           service_key: service.service_key,
           category: service.service_key,
-          amount: Number(service.amount),
+          amount: Number(service.amount_outstanding ?? service.amount),
+          legacy_invoice_level: service.obligation_type === 'legacy_invoice',
         })),
         ...selectedFees.map((fee) => ({
+          obligation_id: fee.obligation_id,
           fee_id: fee.id,
           assignment_id: fee.assignment_id,
           invoice_id: fee.ledger_invoice_id,
           invoice_line_item_id: fee.invoice_line_item_id,
           category: 'one_off',
-          amount: Number(fee.remaining_amount ?? fee.amount),
+          amount: Number(fee.amount_outstanding ?? fee.remaining_amount ?? fee.amount),
+          legacy_invoice_level: fee.obligation_type === 'legacy_invoice',
         })),
       ]));
       if (child?.id) fd.append('child_id', child.id);
@@ -294,6 +415,27 @@ export default function ParentPaymentProof({ child, embedded = false }) {
       {/* ── Submit Form ── */}
       {view === 'form' && (
         <form onSubmit={handleSubmit} className="space-y-4">
+          {payableStatus === 'loading' && (
+            <div className="rounded-xl border border-gray-100 bg-white p-3 text-sm text-gray-500">
+              Loading payable obligations…
+            </div>
+          )}
+          {payableStatus === 'error' && (
+            <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span className="flex-1">{requestMessage('Payable obligations', payableError)}</span>
+              {canRetry(payableError) && (
+                <button type="button" onClick={loadPayables} className="shrink-0 font-semibold underline">
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+          {payableStatus === 'ready' && payableServices.length === 0 && oneOffFees.length === 0 && (
+            <div className="rounded-xl border border-gray-100 bg-white p-3 text-sm text-gray-500">
+              There are no payable obligations currently available for this child. You may still enter the amount paid below.
+            </div>
+          )}
           {/* Payment Method */}
           <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
             <p className="text-sm font-semibold text-gray-700">Payment Method</p>
@@ -328,21 +470,33 @@ export default function ParentPaymentProof({ child, embedded = false }) {
               </div>
               <div className="space-y-2">
                 {applicableServices.map(price => {
-                  const checked = selectedServices.some(s => s.service_key === price.service_key);
+                  const checked = selectedServices.some(s => s.obligation_id === price.obligation_id);
                   return (
-                    <label key={price.service_key} className={`parent-fee-choice ${checked ? 'is-selected' : ''}`}>
+                    <label key={price.obligation_id} className={`parent-fee-choice ${checked ? 'is-selected' : ''}`}>
                       <input
                         type="checkbox"
                         checked={checked}
+                         disabled={!price.is_payable}
                         onChange={() => toggleService(price)}
                         className="parent-fee-choice-input"
                       />
                       <span className="parent-fee-choice-box" aria-hidden="true">{checked && <Check />}</span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-700">{price.label}</p>
+                        <p className="text-sm font-medium text-gray-700">
+                          {price.label} {price.billing_period_label ? `— ${price.billing_period_label}` : ''}
+                        </p>
                         {price.description && <p className="text-xs text-gray-400">{price.description}</p>}
+                        {!price.is_payable && (
+                          <p className="text-xs text-amber-700">
+                            {price.status === 'PENDING_REVIEW'
+                              ? 'Pending admin review'
+                              : 'Requires reconciliation before payment'}
+                          </p>
+                        )}
                       </div>
-                       <span className="text-sm font-bold text-[#176b73] shrink-0">{R(price.amount)}<span className="text-gray-400 font-normal text-xs">/mo</span></span>
+                        <span className="text-sm font-bold text-[#176b73] shrink-0">
+                          {R(price.amount_outstanding ?? price.amount)}<span className="text-gray-400 font-normal text-xs"> outstanding</span>
+                        </span>
                     </label>
                   );
                 })}
@@ -362,25 +516,26 @@ export default function ParentPaymentProof({ child, embedded = false }) {
               <p className="text-xs text-gray-400">Check any fees you are paying with this payment</p>
               <div className="space-y-2">
                 {oneOffFees.map(fee => (
-                  <label key={fee.id} className={`parent-fee-choice ${selectedFees.some(f => f.id === fee.id) ? 'is-selected' : ''} ${!fee.is_payable ? 'opacity-70' : ''}`}>
+                  <label key={fee.obligation_id} className={`parent-fee-choice ${selectedFees.some(f => f.obligation_id === fee.obligation_id) ? 'is-selected' : ''} ${!fee.is_payable ? 'opacity-70' : ''}`}>
                     <input
                       type="checkbox"
-                      checked={selectedFees.some(f => f.id === fee.id)}
+                      checked={selectedFees.some(f => f.obligation_id === fee.obligation_id)}
                       onChange={() => toggleFee(fee)}
                       disabled={!fee.is_payable}
                        className="parent-fee-choice-input"
                     />
-                    <span className="parent-fee-choice-box" aria-hidden="true">{selectedFees.some(f => f.id === fee.id) && <Check />}</span>
+                      <span className="parent-fee-choice-box" aria-hidden="true">{selectedFees.some(f => f.obligation_id === fee.obligation_id) && <Check />}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-700">{fee.name}</p>
+                        {fee.due_date_label && <p className="text-xs text-gray-400">{fee.due_date_label}</p>}
                       {fee.description && <p className="parent-fee-choice-description text-xs text-gray-500">{fee.description}</p>}
                     </div>
                       <span className="text-right text-sm font-semibold text-[#176b73] shrink-0">
-                        {R(fee.remaining_amount ?? fee.amount)}
-                        {fee.payment_status && fee.payment_status !== 'UNPAID' && (
+                         {R(fee.amount_outstanding ?? fee.remaining_amount ?? fee.amount)}
+                         {fee.payment_status && fee.payment_status !== 'UNPAID' && (
                           <span className="block text-[10px] text-gray-500">
-                            {fee.payment_status === 'UNTRACKED'
-                              ? 'Requires Admin reconciliation'
+                             {fee.payment_status === 'REQUIRES_RECONCILIATION'
+                               ? 'Requires Admin reconciliation'
                               : fee.payment_status.replaceAll('_', ' ')}
                           </span>
                         )}
@@ -463,11 +618,25 @@ export default function ParentPaymentProof({ child, embedded = false }) {
           {/* Banking Details reminder */}
            <div className="bg-[#f6f8f6] border border-[#dce6ea] rounded-2xl p-4">
              <p className="text-[#19324a] font-semibold text-sm mb-2">Banking Details</p>
-             <div className="space-y-0.5 text-xs text-[#617487]">
-               <p><span className="font-medium">Bank:</span> {banking?.bank || 'Loading…'}</p>
-               <p><span className="font-medium">Account:</span> {banking?.accountNumber || 'Loading…'} &bull; Branch: {banking?.branchCode || 'Loading…'}</p>
-               <p className="mt-1 text-[#176b73] font-semibold">Reference: {child?.student_number || 'your child\'s student number'}</p>
-            </div>
+              {bankingStatus === 'loading' ? (
+                <p className="text-xs text-[#617487]">Loading banking details…</p>
+              ) : bankingStatus === 'error' ? (
+                <div className="flex items-start gap-2 text-xs text-red-700">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span className="flex-1">{requestMessage('Banking details', bankingError)}</span>
+                  {canRetry(bankingError) && (
+                    <button type="button" onClick={loadBanking} className="font-semibold underline shrink-0">
+                      Retry
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-0.5 text-xs text-[#617487]">
+                  <p><span className="font-medium">Bank:</span> {banking?.bank || 'Not provided'}</p>
+                  <p><span className="font-medium">Account:</span> {banking?.accountNumber || 'Not provided'} &bull; Branch: {banking?.branchCode || 'Not provided'}</p>
+                  <p className="mt-1 text-[#176b73] font-semibold">Reference: {child?.student_number || 'your child\'s student number'}</p>
+                </div>
+              )}
           </div>
 
           <button
@@ -483,9 +652,19 @@ export default function ParentPaymentProof({ child, embedded = false }) {
       {/* ── Submission History ── */}
       {view === 'list' && (
         <>
-          {loading ? (
+          {submissionStatus === 'loading' ? (
             <div className="flex justify-center py-10">
                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#2c7475]" />
+            </div>
+          ) : submissionStatus === 'error' ? (
+            <div className="bg-red-50 rounded-2xl border border-red-200 p-8 text-center">
+              <AlertCircle className="h-10 w-10 text-red-300 mx-auto mb-3" />
+              <p className="text-red-700 text-sm">{requestMessage('Payment submissions', submissionError)}</p>
+              {canRetry(submissionError) && (
+                <button type="button" onClick={loadSubmissions} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-red-700 px-3 py-2 text-sm font-semibold text-white">
+                  Retry
+                </button>
+              )}
             </div>
           ) : submissions.length === 0 ? (
             <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center">
@@ -540,10 +719,18 @@ export default function ParentPaymentProof({ child, embedded = false }) {
       {/* Receipt Viewer Modal */}
       {receiptModal && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={closeReceiptModal}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div
+            ref={receiptDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="parent-receipt-dialog-title"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden"
+            onKeyDown={handleReceiptDialogKeyDown}
+            onClick={e => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-              <p className="text-sm font-semibold text-gray-700 truncate">{receiptModal.fileName}</p>
-              <button onClick={closeReceiptModal} className="text-gray-400 hover:text-gray-700 text-2xl leading-none ml-3">&times;</button>
+              <p id="parent-receipt-dialog-title" className="min-w-0 break-all text-sm font-semibold text-gray-700">{receiptModal.fileName}</p>
+              <button ref={receiptCloseRef} type="button" aria-label="Close receipt preview" onClick={closeReceiptModal} className="text-gray-400 hover:text-gray-700 text-2xl leading-none ml-3">&times;</button>
             </div>
             <div className="flex-1 overflow-auto flex-col flex items-center justify-center bg-gray-50 p-2 min-h-[280px]">
               {receiptModal.mime === 'application/pdf' && !receiptPreviewFailed ? (

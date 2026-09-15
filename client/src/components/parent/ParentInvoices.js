@@ -17,7 +17,7 @@ const ParentInvoices = ({ child }) => {
   const [tab, setTab] = useState('invoices');
   const [invoices, setInvoices] = useState([]);
   const [serviceComponents, setServiceComponents] = useState([]);
-  const [totals, setTotals] = useState({ totalDue: 0, totalPaid: 0, outstanding: 0 });
+  const [totals, setTotals] = useState({ totalDue: 0, totalPaid: 0, outstanding: 0, credit: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [banking, setBanking] = useState(null);
@@ -77,7 +77,7 @@ const ParentInvoices = ({ child }) => {
       {tab === 'invoices' && (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
              <div className="bg-[#19324a] rounded-2xl p-4 text-white text-center">
                <p className="text-[#c9dddf] text-xs font-medium">Total Billed</p>
               <p className="text-lg font-bold mt-0.5">{R(totals.totalDue)}</p>
@@ -87,10 +87,19 @@ const ParentInvoices = ({ child }) => {
               <p className="text-lg font-bold mt-0.5">{R(totals.totalPaid)}</p>
             </div>
             <div className={`${totals.outstanding > 0 ? 'bg-red-500' : 'bg-gray-400'} rounded-2xl p-4 text-white text-center`}>
-              <p className="text-white/80 text-xs font-medium">Outstanding</p>
+              <p className="text-white/80 text-xs font-medium">Outstanding invoices</p>
               <p className="text-lg font-bold mt-0.5">{R(totals.outstanding)}</p>
             </div>
+            <div className={`${Number(totals.credit || totals.unallocated || 0) > 0 ? 'bg-amber-500' : 'bg-gray-400'} rounded-2xl p-4 text-white text-center`}>
+              <p className="text-white/80 text-xs font-medium">Unallocated payments</p>
+              <p className="text-lg font-bold mt-0.5">{R(totals.credit || totals.unallocated || 0)}</p>
+            </div>
           </div>
+          {Number(totals.credit || totals.unallocated || 0) > 0 && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-4 text-sm">
+              These funds are recorded but have not yet been applied to an invoice. Outstanding invoices and unallocated payments are shown separately until Admin completes reconciliation.
+            </div>
+          )}
 
           {/* Enrolled services */}
           {serviceComponents.length > 0 && (
@@ -138,9 +147,12 @@ const ParentInvoices = ({ child }) => {
           </div>
 
           {error && (
-            <div className="flex items-center gap-3 bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm">
+            <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm">
+              <span className="flex items-center gap-3">
               <AlertCircle className="h-4 w-4 shrink-0" />
               {error}
+              </span>
+              <button type="button" onClick={() => window.location.reload()} className="font-semibold underline">Retry</button>
             </div>
           )}
 
@@ -148,7 +160,7 @@ const ParentInvoices = ({ child }) => {
             <div className="flex justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#2c7475]" />
             </div>
-          ) : invoices.length === 0 ? (
+          ) : error ? null : invoices.length === 0 ? (
             <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center">
               <CreditCard className="h-10 w-10 text-gray-200 mx-auto mb-2" />
               <p className="text-gray-400 text-sm">No invoices on record</p>
@@ -164,7 +176,7 @@ const ParentInvoices = ({ child }) => {
               <div className="divide-y divide-gray-50">
                 {invoices.map((inv) => {
                   const cfg = STATUS_CONFIG[inv.status] || STATUS_CONFIG.Unpaid;
-                  const dueDate = inv.due_date ? new Date(inv.due_date) : null;
+                  const dueDate = inv.due_date ? new Date(`${String(inv.due_date).slice(0, 10)}T00:00:00`) : null;
                   return (
                     <React.Fragment key={inv.id}>
                     <div className="grid grid-cols-4 items-center px-4 py-3">
@@ -199,11 +211,11 @@ const ParentInvoices = ({ child }) => {
                       </div>
                     </div>
                     <div className="px-4 pb-3 text-xs text-gray-500">
-                      {inv.snapshot_available && inv.line_items?.length > 0 ? (
+                      {(inv.snapshot_available ?? (inv.line_items?.length > 0)) && inv.line_items?.length > 0 ? (
                         <div className="flex flex-wrap gap-x-4 gap-y-1">
                           {inv.line_items.map((line) => (
                             <span key={line.id || `${inv.id}-${line.label}`} className={line.line_type === 'discount' ? 'text-emerald-700' : ''}>
-                              {line.is_included ? 'Included · ' : ''}{line.label}: {line.line_type === 'discount' ? '-' : ''}{R(line.amount)}
+                              {(line.included ?? line.is_included) ? 'Included · ' : ''}{line.label}: {line.line_type === 'discount' ? '-' : ''}{R(line.amount)}
                             </span>
                           ))}
                         </div>
