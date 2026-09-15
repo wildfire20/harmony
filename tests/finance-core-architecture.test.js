@@ -137,6 +137,8 @@ test('finance-core audit contract is read-only', () => {
     'utf8',
   );
   assert.match(source, /BEGIN READ ONLY/);
+  assert.match(source, /finance_audit_optional_/);
+  assert.match(source, /ROLLBACK TO SAVEPOINT/);
   assert.match(source, /ROLLBACK/);
   assert.match(source, /header_vs_ledger/);
   assert.match(source, /uncategorized_allocations/);
@@ -168,11 +170,14 @@ test('finance-core preflight and deployment order are explicit and read-only', (
   const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   const order = fs.readFileSync(path.join(__dirname, '..', 'FINANCE_CORE_DEPLOYMENT_ORDER.md'), 'utf8');
   assert.match(preflight, /BEGIN READ ONLY/);
+  assert.match(preflight, /targetTables/);
+  assert.match(preflight, /hasCanonicalIdentityColumns/);
   assert.match(preflight, /canonicalMonthlyDuplicates/);
   assert.match(preflight, /overlapping_active_enrollment/);
   assert.doesNotMatch(preflight, /\b(INSERT|UPDATE|DELETE|ALTER|CREATE TABLE)\b/);
   assert.equal(packageJson.scripts['preflight:finance-core'], 'node scripts/preflight-finance-core.js');
-  assert.match(order, /audit.*preflight/i);
+  assert.match(order, /Production pre-migration preflight/i);
+  assert.match(order, /Missing Finance Core target tables and columns are\s+expected/i);
   assert.match(order, /backup\/checkpoint/i);
   assert.match(order, /operator-run migration/i);
   assert.match(order, /post-migration audit/i);

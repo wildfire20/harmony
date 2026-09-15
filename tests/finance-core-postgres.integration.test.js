@@ -24,6 +24,7 @@ const crypto = require('node:crypto');
 const express = require('express');
 const { Pool } = require('pg');
 const { runFinanceCoreAudit } = require('../scripts/audit-finance-core');
+const { runFinanceCorePreflight } = require('../scripts/preflight-finance-core');
 
 const databaseUrl = process.env.FINANCE_TEST_DATABASE_URL;
 
@@ -159,7 +160,7 @@ const seedPrices = `
     ('aftercare', 'Aftercare', 'Monthly aftercare', 550, 4, 'standalone', '[]');
 `;
 
-async function installFinanceDatabase(pool, schema) {
+async function installBaseFinanceDatabase(pool, schema) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -168,15 +169,23 @@ async function installFinanceDatabase(pool, schema) {
     await client.query(baseSchema);
     await client.query(seedPrices);
     await client.query('COMMIT');
-    const migration = fs.readFileSync(
-      path.join(__dirname, '..', 'migrations', 'finance_core_architecture.sql'), 'utf8',
-    );
-    await client.query(`SET search_path TO ${quoteIdentifier(schema)}`);
-    await client.query(migration);
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schema)} CASCADE`).catch(() => {});
     throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function applyFinanceCoreMigration(pool, schema) {
+  const migration = fs.readFileSync(
+    path.join(__dirname, '..', 'migrations', 'finance_core_architecture.sql'), 'utf8',
+  );
+  const client = await pool.connect();
+  try {
+    await client.query(`SET search_path TO ${quoteIdentifier(schema)}`);
+    await client.query(migration);
   } finally {
     client.release();
   }
@@ -210,8 +219,57 @@ async function runSuite() {
   const modulePaths = [];
   try {
     await pool.query('SELECT 1');
-    await installFinanceDatabase(pool, schema);
+    await installBaseFinanceDatabase(pool, schema);
     database = scopedDatabase(pool, schema);
+
+    const preMigrationClient = await database.pool.connect();
+    try {
+      await preMigrationClient.query('BEGIN READ ONLY');
+      const preMigration = await runFinanceCorePreflight(preMigrationClient);
+      assert.equal(preMigration.ok, true, JSON.stringify(preMigration.blockers));
+      assert.ok(preMigration.checks.targetTables.absent.includes('service_enrollments'));
+      assert.deepEqual(preMigration.checks.canonicalMonthlyDuplicates, []);
+      await preMigrationClient.query('SELECT 1 AS transaction_still_usable');
+      await preMigrationClient.query('ROLLBACK');
+    } finally {
+      preMigrationClient.release();
+    }
+
+    await database.query('CREATE TABLE invoices_canonical_monthly_identity_idx (id integer)');
+    const blockerClient = await database.pool.connect();
+    try {
+      await blockerClient.query('BEGIN READ ONLY');
+      const blockedPreMigration = await runFinanceCorePreflight(blockerClient);
+      assert.equal(blockedPreMigration.ok, false);
+      assert.ok(blockedPreMigration.blockers.some(
+        (blocker) => blocker.code === 'conflicting_schema_object',
+      ));
+      await blockerClient.query('ROLLBACK');
+    } finally {
+      blockerClient.release();
+    }
+    await database.query('DROP TABLE invoices_canonical_monthly_identity_idx');
+
+    const strictAuditClient = await database.pool.connect();
+    try {
+      await strictAuditClient.query('BEGIN READ ONLY');
+      const preMigrationAudit = await runFinanceCoreAudit(strictAuditClient, {
+        currentPeriod: '2029-01',
+      });
+      assert.equal(preMigrationAudit.ok, false);
+      assert.ok(preMigrationAudit.findings.some(
+        (finding) => finding.code === 'missing_table',
+      ));
+      assert.ok(preMigrationAudit.findings.some(
+        (finding) => finding.section === 'schema_version' && finding.code === 'missing_schema',
+      ));
+      await strictAuditClient.query('SELECT 1 AS transaction_recovered_after_optional_error');
+      await strictAuditClient.query('ROLLBACK');
+    } finally {
+      strictAuditClient.release();
+    }
+
+    await applyFinanceCoreMigration(pool, schema);
 
     // Make every production service used by the mounted routes point at the
     // disposable schema.  This cache substitution is test-only and is undone
@@ -721,13 +779,23 @@ async function runSuite() {
     );
     assert.equal(concurrentRows.rows[0].count, 1);
 
-    const releaseAudit = await runFinanceCoreAudit(database, { currentPeriod: '2029-01' });
-    assert.equal(releaseAudit.readOnly, true);
-    assert.equal(
-      releaseAudit.findings.filter((finding) => finding.severity === 'error').length,
-      0,
-      JSON.stringify(releaseAudit.findings),
-    );
+    const postMigrationClient = await database.pool.connect();
+    try {
+      await postMigrationClient.query('BEGIN READ ONLY');
+      const releaseAudit = await runFinanceCoreAudit(postMigrationClient, { currentPeriod: '2029-01' });
+      assert.equal(releaseAudit.readOnly, true);
+      assert.equal(
+        releaseAudit.findings.filter((finding) => finding.severity === 'error').length,
+        0,
+        JSON.stringify(releaseAudit.findings),
+      );
+      const postMigrationPreflight = await runFinanceCorePreflight(postMigrationClient);
+      assert.equal(postMigrationPreflight.ok, true, JSON.stringify(postMigrationPreflight.blockers));
+      await postMigrationClient.query('SELECT 1 AS transaction_still_usable');
+      await postMigrationClient.query('ROLLBACK');
+    } finally {
+      postMigrationClient.release();
+    }
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
     // Dropping the schema is the release-gate cleanup assertion: no test data

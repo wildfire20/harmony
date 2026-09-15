@@ -19,9 +19,23 @@ const REQUIRED_BASE_TABLES = [
   'student_fee_assignments',
 ];
 
-const isMissingRelation = (error) => error && (
-  error.code === '42P01' || error.code === '42703'
-);
+const TARGET_TABLES = [
+  'service_enrollments',
+  'finance_schema_versions',
+  'payment_proof_allocation_proposals',
+  'payment_proof_allocations',
+];
+
+const TARGET_COLUMNS = [
+  ['invoices', 'billing_period'],
+  ['invoices', 'invoice_kind'],
+  ['invoices', 'finance_origin'],
+  ['service_enrollments', 'student_id'],
+  ['service_enrollments', 'service_key'],
+  ['service_enrollments', 'state'],
+  ['service_enrollments', 'effective_start'],
+  ['service_enrollments', 'effective_end'],
+];
 
 async function runFinanceCorePreflight(client) {
   const blockers = [];
@@ -33,9 +47,13 @@ async function runFinanceCorePreflight(client) {
     FROM information_schema.tables
     WHERE table_schema = current_schema()
       AND table_name = ANY($1::text[])
-  `, [REQUIRED_BASE_TABLES]);
+  `, [[...REQUIRED_BASE_TABLES, ...TARGET_TABLES]]);
   const present = new Set(tables.rows.map((row) => row.table_name));
   checks.baseTables = { schema, missing: REQUIRED_BASE_TABLES.filter((name) => !present.has(name)) };
+  checks.targetTables = {
+    present: TARGET_TABLES.filter((name) => present.has(name)),
+    absent: TARGET_TABLES.filter((name) => !present.has(name)),
+  };
   checks.baseTables.missing.forEach((table) => blockers.push({
     code: 'missing_base_table',
     table,
@@ -55,7 +73,15 @@ async function runFinanceCorePreflight(client) {
         ('invoices', 'amount_paid'),
         ('invoices', 'status'),
         ('invoice_line_items', 'invoice_id'),
-        ('payment_transactions', 'invoice_id')
+        ('payment_transactions', 'invoice_id'),
+        ('service_enrollments', 'student_id'),
+        ('service_enrollments', 'service_key'),
+        ('service_enrollments', 'state'),
+        ('service_enrollments', 'effective_start'),
+        ('service_enrollments', 'effective_end'),
+        ('invoices', 'billing_period'),
+        ('invoices', 'invoice_kind'),
+        ('invoices', 'finance_origin')
       )
   `);
   const columnSet = new Set(columns.rows.map((row) => `${row.table_name}.${row.column_name}`));
@@ -68,11 +94,27 @@ async function runFinanceCorePreflight(client) {
     column,
     message: `Required base column ${column} is missing`,
   }));
+  checks.targetColumns = {
+    present: TARGET_COLUMNS
+      .filter(([table, column]) => columnSet.has(`${table}.${column}`))
+      .map(([table, column]) => `${table}.${column}`),
+    absent: TARGET_COLUMNS
+      .filter(([table, column]) => !columnSet.has(`${table}.${column}`))
+      .map(([table, column]) => `${table}.${column}`),
+  };
+  if (checks.baseColumns.missing.length) {
+    return { ok: false, readOnly: true, schema, checks, blockers };
+  }
 
   // These are the rows that would make the migration's unique index fail.
   // Only explicit canonical rows are considered; unknown historical rows are
   // intentionally not assigned a period by this command.
-  const duplicateResult = await client.query(`
+  const hasCanonicalIdentityColumns = [
+    'invoices.billing_period',
+    'invoices.invoice_kind',
+    'invoices.finance_origin',
+  ].every((column) => columnSet.has(column));
+  const duplicateResult = hasCanonicalIdentityColumns ? await client.query(`
     SELECT student_id, billing_period, invoice_kind,
            COUNT(*)::integer AS row_count,
            ARRAY_AGG(id ORDER BY id) AS invoice_ids
@@ -83,10 +125,7 @@ async function runFinanceCorePreflight(client) {
     GROUP BY student_id, billing_period, invoice_kind
     HAVING COUNT(*) > 1
     ORDER BY student_id, billing_period
-  `).catch((error) => {
-    if (isMissingRelation(error)) return { rows: [] };
-    throw error;
-  });
+  `) : { rows: [] };
   checks.canonicalMonthlyDuplicates = duplicateResult.rows;
   duplicateResult.rows.forEach((row) => blockers.push({
     code: 'duplicate_canonical_monthly_invoice',
@@ -95,16 +134,13 @@ async function runFinanceCorePreflight(client) {
       + `period ${row.billing_period}; reconcile invoice IDs ${row.invoice_ids.join(', ')}`,
   }));
 
-  const invalidPeriods = await client.query(`
+  const invalidPeriods = columnSet.has('invoices.billing_period') ? await client.query(`
     SELECT id, billing_period
     FROM invoices
     WHERE billing_period IS NOT NULL
       AND billing_period <> date_trunc('month', billing_period)::date
     ORDER BY id
-  `).catch((error) => {
-    if (isMissingRelation(error)) return { rows: [] };
-    throw error;
-  });
+  `) : { rows: [] };
   checks.invalidBillingPeriods = invalidPeriods.rows;
   invalidPeriods.rows.forEach((row) => blockers.push({
     code: 'invalid_billing_period',
@@ -112,16 +148,13 @@ async function runFinanceCorePreflight(client) {
     message: `Invoice ${row.id} has a billing_period that is not the first day of its month`,
   }));
 
-  const invalidOrigins = await client.query(`
+  const invalidOrigins = columnSet.has('invoices.finance_origin') ? await client.query(`
     SELECT id, finance_origin
     FROM invoices
     WHERE finance_origin IS NOT NULL
       AND finance_origin NOT IN ('canonical', 'legacy', 'unknown')
     ORDER BY id
-  `).catch((error) => {
-    if (isMissingRelation(error)) return { rows: [] };
-    throw error;
-  });
+  `) : { rows: [] };
   checks.invalidFinanceOrigins = invalidOrigins.rows;
   invalidOrigins.rows.forEach((row) => blockers.push({
     code: 'invalid_finance_origin',
@@ -129,7 +162,14 @@ async function runFinanceCorePreflight(client) {
     message: `Invoice ${row.id} has unsupported finance_origin ${row.finance_origin}`,
   }));
 
-  const overlaps = await client.query(`
+  const hasEnrollmentSchema = present.has('service_enrollments') && [
+    'service_enrollments.student_id',
+    'service_enrollments.service_key',
+    'service_enrollments.state',
+    'service_enrollments.effective_start',
+    'service_enrollments.effective_end',
+  ].every((column) => columnSet.has(column));
+  const overlaps = hasEnrollmentSchema ? await client.query(`
     SELECT left_side.student_id, left_side.service_key,
            left_side.id AS first_id, right_side.id AS second_id
     FROM service_enrollments left_side
@@ -141,10 +181,7 @@ async function runFinanceCorePreflight(client) {
       AND left_side.effective_start <= COALESCE(right_side.effective_end, 'infinity'::date)
       AND right_side.effective_start <= COALESCE(left_side.effective_end, 'infinity'::date)
     ORDER BY left_side.student_id, left_side.service_key, left_side.id
-  `).catch((error) => {
-    if (isMissingRelation(error)) return { rows: [] };
-    throw error;
-  });
+  `) : { rows: [] };
   checks.enrollmentOverlaps = overlaps.rows;
   overlaps.rows.forEach((row) => blockers.push({
     code: 'overlapping_active_enrollment',

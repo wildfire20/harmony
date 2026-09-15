@@ -47,11 +47,19 @@ async function query(client, section, text, values = []) {
   }
 }
 
+let optionalSectionSequence = 0;
+
 async function optionalSection(client, findings, name, text, values = []) {
+  optionalSectionSequence += 1;
+  const savepoint = `finance_audit_optional_${optionalSectionSequence}`;
+  await client.query(`SAVEPOINT ${savepoint}`);
   try {
     const result = await client.query(text, values);
+    await client.query(`RELEASE SAVEPOINT ${savepoint}`);
     return result.rows;
   } catch (error) {
+    await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+    await client.query(`RELEASE SAVEPOINT ${savepoint}`);
     if (error.code === '42P01' || error.code === '42703') {
       findings.push({
         section: name,
