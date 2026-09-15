@@ -86,11 +86,13 @@ test('all payment channels are wired to the authoritative allocator', () => {
   const bank = source('routes/invoices.js');
   const enhanced = source('routes/enhanced-invoices.js');
   const proof = source('routes/paymentProofs.js');
+  const commands = source('services/financeCommandService.js');
 
-  assert.match(bank, /allocatePayment\(client/);
+  assert.match(bank, /financeCommands\.(recordPayment|importBankPayment)/);
   assert.match(enhanced, /paymentMethod: 'bank_transfer'/);
   assert.match(enhanced, /paymentMethod: 'manual_entry'/);
-  assert.match(proof, /allocatePayment\(executor/);
+  assert.match(proof, /financeCommands\.(approveProof|recordPayment|applyUnallocated)/);
+  assert.match(commands, /allocatePayment\(executor/);
   // No channel is allowed to maintain a second invoice allocation algorithm.
   const bankHandler = bank.split("router.post('/process-bank-statement'")[1]
     .split("// Get payment transactions")[0];
@@ -212,8 +214,8 @@ test('manual edit/delete routes reverse exact allocations instead of period-wide
   const source = fs.readFileSync(path.join(__dirname, '..', 'routes/enhanced-invoices.js'), 'utf8');
   const editDelete = source.split("router.put('/manual-payment/:paymentId'")[1]
     .split("router.post('/manual-payment/apply-arrears-first'")[0];
-  assert.match(editDelete, /reversePayment/);
-  assert.match(editDelete, /invoiceId: reversal\.effectiveInvoiceId/);
+  assert.match(editDelete, /financeCommands\.(correctPayment|reversePayment)/);
+  assert.match(editDelete, /sourceTransactionId|transactionId/);
   assert.match(editDelete, /WHERE id = \$1\s+FOR UPDATE/);
   assert.doesNotMatch(editDelete, /WHERE student_id = \\$2[\\s\\S]{0,400}EXTRACT\\(MONTH FROM due_date\\)/);
   assert.doesNotMatch(editDelete, /DELETE FROM payment_transactions/);

@@ -19,6 +19,21 @@ const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const nonNegative = (value) => Math.max(0, money(value));
 const INVOICE_STATUSES = ['Unpaid', 'Partial', 'Paid', 'Overpaid', 'Carried Forward'];
 
+function dateOnlyParts(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return {
+      year: value.getFullYear(),
+      month: value.getMonth() + 1,
+      day: value.getDate(),
+    };
+  }
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+}
+
 function invoiceStatus(amountDue, amountPaid, originalStatus) {
   if (originalStatus === 'Carried Forward') return originalStatus;
   const due = money(amountDue);
@@ -213,14 +228,29 @@ function invoiceCategoryBalances(rawLines = [], amountDue = 0, transactions = []
   return [...balances.entries()].map(([category, amount]) => ({ category, amount }));
 }
 
-function configuredComponents(student, prices) {
+function enrolledServiceKeys(student, enrollmentRows) {
+  if (!Array.isArray(enrollmentRows)) {
+    // This is intentionally the legacy display-only path.  New billing
+    // callers pass an enrollment array (including []) and therefore cannot
+    // accidentally derive a charge from a current Boolean flag.
+    return new Set([
+      'tuition',
+      ...(student.is_boarder ? ['boarding'] : []),
+      ...(student.uses_transport ? ['transport'] : []),
+      ...(student.uses_aftercare ? ['aftercare'] : []),
+    ]);
+  }
+  return new Set(enrollmentRows
+    .filter((row) => row && row.state === 'active')
+    .map((row) => String(row.service_key || '').toLowerCase())
+    .filter((key) => ['tuition', 'boarding', 'transport', 'aftercare'].includes(key)));
+}
+
+function configuredComponents(student, prices, enrollmentRows) {
   const byKey = new Map(prices.map((price) => [price.service_key, price]));
-  const enabled = [
-    ['tuition', true],
-    ['boarding', Boolean(student.is_boarder)],
-    ['transport', Boolean(student.uses_transport)],
-    ['aftercare', Boolean(student.uses_aftercare)],
-  ];
+  const enrolled = enrolledServiceKeys(student, enrollmentRows);
+  const enabled = ['tuition', 'boarding', 'transport', 'aftercare']
+    .map((key) => [key, enrolled.has(key)]);
   let subtotal = 0;
   const components = enabled
     .filter(([key, isEnabled]) => isEnabled && byKey.has(key))
@@ -259,13 +289,9 @@ function configuredComponents(student, prices) {
  * lines, preventing tuition/aftercare from being charged twice while leaving
  * standalone transport billable.
  */
-function configuredBillableLines(student, prices) {
-  const enabled = new Map([
-    ['tuition', true],
-    ['boarding', Boolean(student.is_boarder)],
-    ['transport', Boolean(student.uses_transport)],
-    ['aftercare', Boolean(student.uses_aftercare)],
-  ]);
+function configuredBillableLines(student, prices, enrollmentRows) {
+  const enabled = new Map([...enrolledServiceKeys(student, enrollmentRows)]
+    .map((key) => [key, true]));
   const includedByBundle = new Set();
   const lines = [];
   const eligiblePrices = prices.filter((price) =>
@@ -439,8 +465,8 @@ function calculateApprovedDiscounts(assignments, chargeLines) {
   return discounts;
 }
 
-function buildInvoiceSnapshotLines(student, prices, assignments = []) {
-  const charges = configuredBillableLines(student, prices);
+function buildInvoiceSnapshotLines(student, prices, assignments = [], enrollmentRows) {
+  const charges = configuredBillableLines(student, prices, enrollmentRows);
   return [...charges, ...calculateApprovedDiscounts(assignments, charges)];
 }
 
@@ -563,9 +589,9 @@ async function getStudentLedger(studentId, executor = db) {
     });
     const legacyMetadata = legacyLine?.metadata || {};
     const paymentReviewFlags = [];
-    const invoiceDate = row.due_date ? new Date(row.due_date) : null;
-    const invoiceMonth = invoiceDate && invoiceDate.getUTCMonth() + 1;
-    const invoiceYear = invoiceDate && invoiceDate.getUTCFullYear();
+    const invoiceDate = dateOnlyParts(row.due_date);
+    const invoiceMonth = invoiceDate?.month;
+    const invoiceYear = invoiceDate?.year;
     for (const transaction of paymentRowsByInvoice.get(row.id) || []) {
       if (transaction.month != null && transaction.year != null &&
           invoiceDate &&
@@ -749,7 +775,12 @@ async function getFinanceSummary(filters = {}, executor = db) {
 }
 
 /*
- * Allocate one payment atomically on a caller-owned transaction.  Every
+ * Internal ledger primitive. It must only be called by
+ * financeCommandService inside withTransaction(), which sets the transaction
+ * local harmony.finance_command=canonical marker enforced by the finance-core
+ * invoice projection guard. Routes must not call this function directly.
+ *
+ * Allocate one payment atomically on a caller-owned transaction. Every
  * channel (manual entry, bank import, and approved proof) can use this helper.
  * The excess is deliberately recorded as an invoice-less transaction rather
  * than inflating the last invoice; this keeps overpayment/unallocated credit
@@ -866,7 +897,7 @@ async function allocatePayment(executor, {
   let allocationLineRows = [];
   if (proposals) {
     const lineResult = await queryAt('load-invoice-lines', `
-      SELECT invoice_id, line_type, service_key, amount, is_included, metadata
+      SELECT id, invoice_id, line_type, service_key, amount, is_included, metadata
       FROM invoice_line_items
       WHERE invoice_id = ANY($1::integer[])
       ORDER BY invoice_id, id
@@ -991,8 +1022,8 @@ async function allocatePayment(executor, {
     `, [
       invoice.id, normalizedStudentId, student.student_number, ref, toApply.toFixed(2),
       date, description || null, paymentMethod, recordedBy || null,
-      transactionMonth || new Date(invoice.due_date).getUTCMonth() + 1,
-      transactionYear || new Date(invoice.due_date).getUTCFullYear(),
+      transactionMonth || dateOnlyParts(invoice.due_date)?.month,
+      transactionYear || dateOnlyParts(invoice.due_date)?.year,
       proposal?.category || null,
     ]) : await queryAt('insert-allocation-event', `
       INSERT INTO payment_transactions
@@ -1004,8 +1035,8 @@ async function allocatePayment(executor, {
     `, [
       invoice.id, normalizedStudentId, student.student_number, ref, toApply.toFixed(2),
       date, description || null, paymentMethod, recordedBy || null,
-      transactionMonth || new Date(invoice.due_date).getUTCMonth() + 1,
-      transactionYear || new Date(invoice.due_date).getUTCFullYear(),
+      transactionMonth || dateOnlyParts(invoice.due_date)?.month,
+      transactionYear || dateOnlyParts(invoice.due_date)?.year,
     ]);
     allocations.push({
       transactionId: tx.rows[0].id,
@@ -1037,6 +1068,9 @@ async function allocatePayment(executor, {
 }
 
 /*
+ * Internal ledger primitive; see allocatePayment above. It is reached only
+ * through financeCommandService's marked command transaction.
+ *
  * Reverse one immutable allocation without broad student/month/year updates.
  * The original event remains untouched; a negative compensating event is
  * recorded and the exact invoice balance is restored under a row lock.
@@ -1094,9 +1128,7 @@ async function reversePayment(executor, { transactionId, recordedBy, description
       // replacement carries the remaining balance, so undoing an old
       // allocation increases the successor's amount_due rather than trying
       // to make the historical invoice visible again.
-      const sourceYear = invoice.due_date
-        ? new Date(invoice.due_date).getUTCFullYear()
-        : payment.year;
+      const sourceYear = dateOnlyParts(invoice.due_date)?.year || payment.year;
       let successorResult;
       if (invoice.carried_forward_to_invoice_id != null) {
         successorResult = await executor.query(`

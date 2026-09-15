@@ -8,7 +8,6 @@ const { authenticate, authorize } = require('../middleware/auth');
 const s3Service = require('../services/s3Service');
 const { logAudit, getIp } = require('../utils/auditLogger');
 const {
-  allocatePayment,
   getStudentLedger,
   invoiceAllocationCategories,
   invoiceCategoryBalances,
@@ -22,9 +21,23 @@ const {
 const { resolveLegacyClassification } = require('../services/legacyClassification');
 const { detectType } = require('../services/admissionsDocumentService');
 const { notifyPayment } = require('../services/parentNotificationService');
+const financeCommands = require('../services/financeCommandService');
 
 const requireParent = [authenticate, authorize('parent')];
 const requireAdmin = [authenticate, authorize('admin', 'super_admin')];
+
+function dateOnly(value) {
+  if (value == null || value === '') return '';
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return '';
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  const raw = String(value);
+  return /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : '';
+}
 
 // ─── Multer setup (memory for S3 or durable database storage) ────────────────
 const storage = multer.memoryStorage();
@@ -437,7 +450,7 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
     if (availableAmount <= 0 || Number(line.amount_paid) >= Number(line.amount_due)) {
       const error = new Error(`selector ${index + 1} (${ledgerCategory}) is already fully paid`);
       error.status = 409;
-      error.safeMessage = `${categoryLabel}${line.due_date ? ` for ${String(line.due_date).slice(0, 10)}` : ''} is already fully paid. Remove or retarget this allocation before approving.`;
+      error.safeMessage = `${categoryLabel}${line.due_date ? ` for ${dateOnly(line.due_date)}` : ''} is already fully paid. Remove or retarget this allocation before approving.`;
       error.obligationIndex = index;
       error.obligationCategory = ledgerCategory;
       throw error;
@@ -471,41 +484,35 @@ const applyPaymentToInvoices = async (executor, studentId, amount, proofId, admi
       throw new Error('Stored payment obligation proposal is invalid');
     }
   }
-  // An explicitly empty proposal is an intentional unallocated payment. Do
-  // not pass [] to allocatePayment: that helper treats omitted proposals as
-  // oldest-unpaid automatic allocation and rejects an empty proposal.
   if (Array.isArray(selected) && selected.length === 0) {
-    const learner = await executor.query(
-      `SELECT student_number FROM users WHERE id=$1 AND role='student' FOR SHARE`,
-      [studentId],
-    );
-    if (!learner.rows.length) throw new Error('Student not found');
-    const date = new Date().toISOString().slice(0, 10);
-    const reference = `PROOF-${proofId}`;
-    const tx = await executor.query(`
-      INSERT INTO payment_transactions
-        (invoice_id, student_id, student_number, reference_number, reference,
-         amount, transaction_date, payment_date, description, payment_method,
-         recorded_by)
-      VALUES (NULL,$1,$2,$3,$3,$4,$5,$5,$6,'proof_of_payment',$7)
-      RETURNING id
-    `, [
-      studentId, learner.rows[0].student_number, reference, Number(amount).toFixed(2),
-      date, `Approved proof of payment (Ref #${proofId})`, adminId || null,
-    ]);
-    return [tx.rows[0].id];
+    const result = await financeCommands.applyUnallocated({
+      executor,
+      studentId,
+      amount,
+      paymentMethod: 'proof_of_payment',
+      reference: `PROOF-${proofId}`,
+      description: `Approved proof of payment (Ref #${proofId})`,
+      recordedBy: adminId,
+      actor: { id: adminId, role: 'admin' },
+      // This compatibility helper is retained for legacy unit callers; the
+      // approval command itself records the required atomic audit event.
+      skipAudit: true,
+    });
+    return (result.allocations || []).map((allocation) => allocation.transactionId);
   }
   const allocationProposals = await resolvePaymentProposals(executor, studentId, selected);
-  const result = await allocatePayment(executor, {
+  const result = await financeCommands.recordPayment({
+    executor,
     studentId,
     amount,
     paymentMethod: 'proof_of_payment',
     reference: `PROOF-${proofId}`,
     description: `Approved proof of payment (Ref #${proofId})`,
     recordedBy: adminId,
-    allocationProposals,
+    obligations: allocationProposals,
+    skipAudit: true,
   });
-  return result.allocations.map((allocation) => allocation.transactionId);
+  return (result.allocations || []).map((allocation) => allocation.transactionId);
 };
 
 const validateResolvedPlan = (resolved, paymentAmount) => {
@@ -653,19 +660,6 @@ router.post('/', requireParent, uploadReceipt, async (req, res) => {
       return res.status(400).json({ message: 'Invalid request key' });
     }
     client = await db.pool.connect();
-    let supportsSelectedObligations = true;
-    try {
-      await client.query('SELECT selected_obligations FROM pending_payments LIMIT 0');
-      await client.query('SELECT allocation_category FROM payment_transactions LIMIT 0');
-    } catch (schemaError) {
-      if (schemaError.code !== '42P01' && schemaError.code !== '42703') throw schemaError;
-      supportsSelectedObligations = false;
-      if (selectedObligations.length) {
-        return res.status(503).json({
-          message: 'Multi-obligation payment selection is unavailable until migrations/finance_multi_allocation.sql is applied',
-        });
-      }
-    }
     await client.query('BEGIN');
     // Reservation locks are required for every selected-obligation submission,
     // including requests carrying an idempotency key. They are deliberately
@@ -705,47 +699,30 @@ router.post('/', requireParent, uploadReceipt, async (req, res) => {
       storedObligations = normaliseStoredObligations(resolved);
     }
 
-    const result = supportsSelectedObligations
-      ? await client.query(`
-        INSERT INTO pending_payments
-          (parent_id, student_id, amount, payment_method, reference, notes,
-           receipt_file_name, receipt_file_path, receipt_s3_key, receipt_s3_url,
-           receipt_mime_type, receipt_data, selected_obligations)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
-        RETURNING *
-      `, [req.user.id, child.id, normalizedAmount.toFixed(2), normalizedMethod,
-          normalizedReference, normalizedNotes,
-          receiptFileName, receiptFilePath, receiptS3Key, receiptS3Url, receiptMime, receiptData,
-          JSON.stringify(storedObligations)])
-      : await client.query(`
-        INSERT INTO pending_payments
-          (parent_id, student_id, amount, payment_method, reference, notes,
-           receipt_file_name, receipt_file_path, receipt_s3_key, receipt_s3_url,
-           receipt_mime_type, receipt_data)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-        RETURNING *
-      `, [req.user.id, child.id, normalizedAmount.toFixed(2), normalizedMethod,
-          normalizedReference, normalizedNotes,
-          receiptFileName, receiptFilePath, receiptS3Key, receiptS3Url, receiptMime, receiptData]);
-
-    const submission = result.rows[0];
-    await logAudit({
+    const commandResult = await financeCommands.createPaymentProof({
       executor: client,
-      required: true,
-      userId: req.user.id,
-      userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-      userRole: req.user.role,
-      action: 'payment_proof_submit',
-      entityType: 'payment_proof',
-      entityId: submission.id,
-      details: {
-        idempotency_key: idempotencyKey || null,
-        student_id: child.id,
-        amount: submission.amount,
-        selected_obligations: storedObligations,
+      parentId: req.user.id,
+      learnerId: child.id,
+      amount: normalizedAmount,
+      paymentMethod: normalizedMethod,
+      reference: normalizedReference,
+      notes: normalizedNotes,
+      receiptFileName,
+      receiptFilePath,
+      receiptS3Key,
+      receiptS3Url,
+      receiptMime,
+      receiptData,
+      obligations: storedObligations,
+      idempotencyKey,
+      actor: {
+        id: req.user.id,
+        name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        role: req.user.role,
+        ipAddress: getIp(req),
       },
-      ipAddress: getIp(req),
     });
+    const submission = commandResult.submission;
     await client.query('COMMIT');
 
     res.status(201).json({
@@ -857,8 +834,52 @@ router.get('/', requireAdmin, async (req, res) => {
       ${where}
       ORDER BY pp.submitted_at DESC
     `, params);
+    let normalizedByProof = null;
+    const normalizedAuthoritativeIds = new Set();
+    try {
+      const normalized = await db.query(`
+        SELECT proof_id, invoice_id, invoice_line_item_id, fee_assignment_id,
+               category, proposed_amount, resolution_state
+        FROM payment_proof_allocation_proposals
+        WHERE proof_id = ANY($1::integer[])
+          AND resolution_state IN ('proposed','accepted')
+        ORDER BY id
+      `, [result.rows.map((submission) => Number(submission.id))]);
+      normalizedByProof = new Map();
+      normalized.rows.forEach((row) => {
+        if (!normalizedByProof.has(Number(row.proof_id))) normalizedByProof.set(Number(row.proof_id), []);
+        normalizedByProof.get(Number(row.proof_id)).push({
+          invoice_id: row.invoice_id,
+          invoice_line_item_id: row.invoice_line_item_id,
+          fee_assignment_id: row.fee_assignment_id,
+          category: row.category,
+          amount: Number(row.proposed_amount),
+        });
+      });
+      const markers = await db.query(`
+        SELECT entity_id, details
+        FROM audit_logs
+        WHERE entity_type='payment_proof'
+          AND action IN ('payment_proof_submit','payment_proof_retarget')
+          AND entity_id = ANY($1::integer[])
+        ORDER BY id
+      `, [result.rows.map((submission) => Number(submission.id))]);
+      markers.rows.forEach((row) => {
+        let details = row.details;
+        if (typeof details === 'string') {
+          try { details = JSON.parse(details); } catch (_) { details = null; }
+        }
+        if (details?.normalized_proposals_available === true) {
+          normalizedAuthoritativeIds.add(Number(row.entity_id));
+        }
+      });
+    } catch (error) {
+      if (error.code !== '42P01' && error.code !== '42703') throw error;
+    }
     const submissions = result.rows.map((submission) => {
-      let selected = submission.selected_obligations;
+      let selected = normalizedByProof && normalizedAuthoritativeIds.has(Number(submission.id))
+        ? (normalizedByProof.get(Number(submission.id)) || [])
+        : submission.selected_obligations;
       if (typeof selected === 'string') {
         try { selected = JSON.parse(selected); } catch (_) { selected = []; }
       }
@@ -1010,185 +1031,91 @@ router.get('/:id/allocation-options', requireAdmin, async (req, res) => {
 });
 
 router.put('/:id/allocations', requireAdmin, async (req, res) => {
-  let client;
   try {
     const reason = boundedText(req.body?.reason, 500, 'Adjustment reason');
     if (!reason) return res.status(400).json({ message: 'An allocation adjustment reason is required' });
     const obligations = parseSelectedObligations(req.body?.obligations);
     const unallocatedAcknowledged = req.body?.unallocated_acknowledged === true ||
       req.body?.unallocated_acknowledged === 'true';
-    client = await db.pool.connect();
-    await client.query('BEGIN');
-    const proof = (await client.query(
-      `SELECT * FROM pending_payments WHERE id=$1 FOR UPDATE`,
-      [req.params.id],
-    )).rows[0];
-    if (!proof) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ message: 'Submission not found' });
-    }
-    if (proof.status !== 'pending') {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ message: 'Only pending submissions can be adjusted' });
-    }
     if (!obligations.length) {
       if (!unallocatedAcknowledged) {
-        await client.query('ROLLBACK');
         return res.status(422).json({
           message: 'Confirm that the full payment will remain unallocated credit before saving an empty allocation.',
         });
       }
-      await client.query(
-        `UPDATE pending_payments SET selected_obligations='[]'::jsonb WHERE id=$1`,
-        [proof.id],
-      );
-      await logAudit({
-        executor: client, required: true,
-        userId: req.user.id,
-        userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-        userRole: req.user.role,
-        action: 'payment_allocation_adjust',
-        entityType: 'payment_proof',
-        entityId: proof.id,
-        details: {
-          reason,
-          previous: proof.selected_obligations || null,
-          proposed: [],
-          explicit_unallocated: true,
+      await financeCommands.retargetProof({
+        proofId: req.params.id,
+        obligations: [],
+        actor: {
+          id: req.user.id,
+          name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+          role: req.user.role,
+          ipAddress: getIp(req),
         },
-        ipAddress: getIp(req),
+        reason,
       });
-      await client.query('COMMIT');
       return res.json({ message: 'Payment will be recorded as unallocated credit', obligations: [] });
     }
-    await validateCanonicalSelections(client, proof.student_id, obligations, {
-      excludePaymentId: proof.id,
+    const result = await financeCommands.retargetProof({
+      proofId: req.params.id,
+      obligations,
+      actor: {
+        id: req.user.id,
+        name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        role: req.user.role,
+        ipAddress: getIp(req),
+      },
+      reason,
     });
-    const resolved = await resolvePaymentProposals(client, proof.student_id, obligations);
-    validateResolvedPlan(resolved, proof.amount);
-    const storedObligations = normaliseStoredObligations(resolved);
-    await client.query(
-      `UPDATE pending_payments SET selected_obligations=$1::jsonb WHERE id=$2`,
-      [JSON.stringify(storedObligations), proof.id],
-    );
-    await logAudit({
-      executor: client, required: true,
-      userId: req.user.id,
-      userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-      userRole: req.user.role,
-      action: 'payment_allocation_adjust',
-      entityType: 'payment_proof',
-      entityId: proof.id,
-      details: { reason, previous: proof.selected_obligations || [], proposed: storedObligations },
-      ipAddress: getIp(req),
-    });
-    await client.query('COMMIT');
-    res.json({ message: 'Proposed allocation updated', obligations: storedObligations });
+    res.json({ message: 'Proposed allocation updated', obligations: result.obligations });
   } catch (error) {
-    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Adjust proof allocation error:', error);
     res.status(error.status || 500).json({
       message: error.safeMessage || (error.status ? error.message : 'Could not adjust allocation'),
     });
-  } finally {
-    if (client) client.release();
   }
 });
 
 // ─── POST /api/payment-proofs/:id/approve  (admin approves) ──────────────────
 router.post('/:id/approve', requireAdmin, async (req, res) => {
-  let client;
   try {
-    client = await db.pool.connect();
-    await client.query('BEGIN');
-    const proof = (await client.query('SELECT * FROM pending_payments WHERE id=$1 FOR UPDATE', [req.params.id])).rows[0];
-    if (!proof) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ message: 'Submission not found' });
-    }
-    if (proof.status === 'approved') {
-      await client.query('COMMIT');
-      return res.json({ message: 'Payment proof was already approved', status: 'approved' });
-    }
-    if (proof.status !== 'pending') {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ message: `This submission is already ${proof.status}` });
-    }
-
     const admin_note = boundedText(req.body?.admin_note, 2000, 'Admin note');
-    try {
-      validateExplicitObligationAmounts(proof.selected_obligations);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      return res.status(error.status || 422).json({ message: error.safeMessage || error.message });
-    }
-    let disposition;
-    try {
-      disposition = approvalUnallocatedDisposition(
-        proof.selected_obligations, proof.amount, req.body || {},
-      );
-    } catch (error) {
-      await client.query('ROLLBACK');
-      return res.status(error.status || 422).json({ message: error.safeMessage || error.message });
-    }
-    const {
-      unallocatedAmount, acknowledged: unallocatedAcknowledged, reason: unallocatedReason,
-    } = disposition;
-    await validateCanonicalSelections(client, proof.student_id, proof.selected_obligations || [], {
-      excludePaymentId: proof.id,
-    });
-    const txIds = await applyPaymentToInvoices(
-      client,
-      proof.student_id,
-      proof.amount,
-      proof.id,
-      req.user.id,
-      proof.selected_obligations,
-    );
-
-    await client.query(`
-      UPDATE pending_payments
-      SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, admin_note=$2
-      WHERE id=$3 AND status='pending'
-    `, [req.user.id, admin_note || null, proof.id]);
-
-    await logAudit({
-      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-      userRole: req.user.role, action: 'payment_proof_approve',
-      entityType: 'payment_proof', entityId: proof.id,
-      details: {
-        summary: `Approved payment proof of R${proof.amount}`,
-        amount: proof.amount,
-        student_id: proof.student_id,
-        admin_note: admin_note || null,
-        unallocated_amount: unallocatedAmount,
-        unallocated_acknowledged: unallocatedAcknowledged,
-        unallocated_reason: unallocatedReason || null,
+    const result = await financeCommands.approveProof({
+      proofId: req.params.id,
+      adminNote: admin_note,
+      unallocatedAcknowledged: req.body?.unallocated_acknowledged,
+      unallocatedReason: boundedText(req.body?.unallocated_reason, 500, 'Unallocated credit reason'),
+      actor: {
+        id: req.user.id,
+        name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        role: req.user.role,
+        ipAddress: getIp(req),
       },
-      ipAddress: getIp(req), executor: client, required: true
     });
-    await client.query('COMMIT');
-    res.json({ message: 'Payment approved and applied to student balance', status: 'approved', transaction_ids: txIds });
+    res.json({
+      message: result.idempotent
+        ? 'Payment proof was already approved'
+        : 'Payment approved and applied to student balance',
+      status: 'approved',
+      transaction_ids: result.transactionIds,
+    });
     setImmediate(async () => {
       await Promise.allSettled([
         notifyPayment({
           kind: 'approved',
-          paymentId: proof.id,
-          learnerId: proof.student_id,
-          amount: proof.amount,
+          paymentId: result.proof.id,
+          learnerId: result.proof.student_id,
+          amount: result.proof.amount,
         }),
         notifyPayment({
           kind: 'applied',
-          paymentId: proof.id,
-          learnerId: proof.student_id,
-          amount: proof.amount,
+          paymentId: result.proof.id,
+          learnerId: result.proof.student_id,
+          amount: result.proof.amount,
         }),
       ]);
     });
   } catch (err) {
-    if (client) {
-      try { await client.query('ROLLBACK'); } catch (rollbackError) { console.error('Approval rollback failed:', rollbackError.message); }
-    }
     console.error('Approve proof error:', {
       message: err.message,
       code: err.code,
@@ -1202,52 +1129,37 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
     });
     res.status(500).json({ message: 'Server error approving payment' });
   } finally {
-    if (client) client.release();
   }
 });
 
 // ─── POST /api/payment-proofs/:id/reject  (admin rejects) ────────────────────
 router.post('/:id/reject', requireAdmin, async (req, res) => {
-  let client;
   try {
-    client = await db.pool.connect();
-    await client.query('BEGIN');
-    const proof = (await client.query('SELECT * FROM pending_payments WHERE id=$1 FOR UPDATE', [req.params.id])).rows[0];
-    if (!proof) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ message: 'Submission not found' });
-    }
-    if (proof.status !== 'pending') {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ message: `This submission is already ${proof.status}` });
-    }
-
     const admin_note = boundedText(req.body?.admin_note, 2000, 'Admin note');
-    await client.query(`
-      UPDATE pending_payments
-      SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, admin_note=$2
-      WHERE id=$3 AND status='pending'
-    `, [req.user.id, admin_note || null, proof.id]);
-
-    await logAudit({
-      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-      userRole: req.user.role, action: 'payment_proof_reject',
-      entityType: 'payment_proof', entityId: proof.id,
-      details: { summary: `Rejected payment proof of R${proof.amount}`, amount: proof.amount, student_id: proof.student_id, reason: admin_note || null },
-      ipAddress: getIp(req), executor: client, required: true
+    const result = await financeCommands.rejectProof({
+      proofId: req.params.id,
+      adminNote: admin_note,
+      idempotencyKey: req.get('Idempotency-Key'),
+      actor: {
+        id: req.user.id,
+        name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        role: req.user.role,
+        ipAddress: getIp(req),
+      },
     });
-    await client.query('COMMIT');
-    res.json({ message: 'Submission rejected' });
-    setImmediate(() => notifyPayment({
-      kind: 'rejected',
-      paymentId: proof.id,
-      learnerId: proof.student_id,
-      reason: admin_note,
-    }).catch((error) => console.warn('Post-commit rejection notification failed:', error.message)));
+    const proof = result.proof || {};
+    res.json({ message: result.idempotent ? 'Submission was already rejected' : 'Submission rejected' });
+    if (!result.idempotent && proof.id) {
+      setImmediate(() => notifyPayment({
+        kind: 'rejected',
+        paymentId: proof.id,
+        learnerId: proof.student_id,
+        reason: admin_note,
+      }).catch((error) => console.warn('Post-commit rejection notification failed:', error.message)));
+    }
   } catch (err) {
-    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Reject proof error:', err);
-    res.status(500).json({ message: 'Server error rejecting payment' });
+    res.status(err.status || 500).json({ message: err.safeMessage || err.message || 'Server error rejecting payment' });
   } finally {
     if (client) client.release();
   }

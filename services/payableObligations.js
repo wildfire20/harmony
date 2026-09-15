@@ -2,8 +2,9 @@
  * Canonical payable-obligation read model.
  *
  * An obligation is a persisted invoice charge (or a safely identified legacy
- * invoice-level Tuition charge).  This module intentionally never consults
- * enrolment flags or current service pricing when deciding that money is due.
+ * invoice-level Tuition charge from an explicitly legacy/unknown invoice).
+ * This module intentionally never consults enrolment flags or current service
+ * pricing when deciding that money is due.
  * Parent payment choices, allocation targets and approval validation should all
  * use the identity returned here.
  */
@@ -16,6 +17,20 @@ const nonNegative = (value) => Math.max(0, money(value));
 const isMissingFinanceSchema = (error) => error && (
   error.code === '42P01' || error.code === '42703'
 );
+
+const legacyCompatibilityEnabled = (options = {}) =>
+  options.allowLegacyCompatibility !== false &&
+  options.allowLegacyPayables !== false &&
+  options.legacyCompatibility !== false &&
+  process.env.FINANCE_LEGACY_PAYABLES_ENABLED !== 'false';
+
+// Existing invoices with a NULL marker are intentionally treated as unknown
+// and retain the controlled compatibility path. Canonical generated invoices
+// are explicitly excluded; no date-based period guessing is authoritative.
+function isLegacyCompatibleInvoice(invoice, options = {}) {
+  const origin = String(invoice?.finance_origin || '').trim().toLowerCase();
+  return legacyCompatibilityEnabled(options) && origin !== 'canonical';
+}
 
 const legacyTuitionDescription = (value) =>
   /\b(?:tuition|school\s+fees?)\b/i.test(String(value || ''));
@@ -175,9 +190,11 @@ async function getPayableObligations(studentId, executor = db, options = {}) {
     executor = db;
   }
   const asOf = options.asOf || new Date();
+  const allowLegacyCompatibility = legacyCompatibilityEnabled(options);
   const invoiceResult = await executor.query(`
     SELECT i.id, i.student_id, i.amount_due, i.amount_paid, i.due_date,
-           i.status, i.description, i.reference_number
+           i.status, i.description, i.reference_number, i.billing_period,
+           i.invoice_kind, i.invoice_source, i.finance_origin
     FROM invoices i
     WHERE i.student_id = $1
     ORDER BY i.due_date ASC NULLS LAST, i.id ASC
@@ -214,7 +231,22 @@ async function getPayableObligations(studentId, executor = db, options = {}) {
     if (carryForwardSourceIds.has(invoiceId)) return;
     const amountDue = money(invoice.amount_due);
     const amountPaid = money(invoice.amount_paid);
-    const invoiceLines = resolveLegacyClassification(linesByInvoice.get(invoiceId) || []).lines;
+    const rawInvoiceLines = linesByInvoice.get(invoiceId) || [];
+    const hasLegacyClassification = rawInvoiceLines.some((line) => {
+      const metadata = line.metadata && typeof line.metadata === 'object'
+        ? line.metadata : {};
+      return metadata.source === 'legacy_invoice_reconciliation' ||
+        metadata.legacy_reconciliation === true ||
+        metadata.legacy_reconciliation === 'true';
+    });
+    const legacyCompatible = isLegacyCompatibleInvoice(invoice, options);
+    // Classification is controlled only for explicitly legacy/unknown
+    // invoices. Canonical invoices expose persisted lines without allowing a
+    // correction to become a new payable interpretation.
+    const invoiceLines = legacyCompatible
+      ? resolveLegacyClassification(rawInvoiceLines).lines
+      : rawInvoiceLines;
+    const currentCanonicalLegacy = hasLegacyClassification && !legacyCompatible;
     const charges = invoiceLines.filter((line) =>
       String(line.line_type || 'charge').toLowerCase() === 'charge' &&
       !Boolean(line.is_included) && money(line.amount) > 0);
@@ -227,18 +259,20 @@ async function getPayableObligations(studentId, executor = db, options = {}) {
       const outstanding = nonNegative(amountDue - amountPaid);
       if (outstanding <= 0) {
         obligations.push(makeObligation({
-          invoice, category: 'tuition', invoiceLineItemId: null,
+          invoice, category: legacyCompatible ? 'tuition' : 'unclassified', invoiceLineItemId: null,
           gross: amountDue, discount: 0, allocated: amountPaid,
-          outstanding: 0, reconciliationRequired: false, line: null,
+          outstanding: 0, reconciliationRequired: !legacyCompatible, line: null,
           pendingRows, asOf,
         }));
         return;
       }
-      const safeTuition = legacyTuitionDescription(invoice.description);
+      const safeTuition = allowLegacyCompatibility && legacyCompatible &&
+        legacyTuitionDescription(invoice.description);
+      const unresolvedCategory = legacyCompatible ? 'tuition' : 'unclassified';
       obligations.push(makeObligation({
-        invoice, category: 'tuition', invoiceLineItemId: null,
+        invoice, category: unresolvedCategory, invoiceLineItemId: null,
         gross: amountDue, discount: 0, allocated: amountPaid,
-        outstanding, reconciliationRequired: !safeTuition,
+        outstanding, reconciliationRequired: !safeTuition || !legacyCompatible,
         line: safeTuition ? {
           label: 'Legacy Tuition',
           description: invoice.description || 'Legacy school fees',
@@ -289,7 +323,8 @@ async function getPayableObligations(studentId, executor = db, options = {}) {
       const allocated = hasMultipleCategories
         ? (hasCategorisedPayments ? categoryPayments : 0)
         : amountPaid;
-      const reconciliationRequired = hasMultipleCategories && amountPaid > 0 && !hasCategorisedPayments;
+      const reconciliationRequired = currentCanonicalLegacy ||
+        (hasMultipleCategories && amountPaid > 0 && !hasCategorisedPayments);
       const outstanding = nonNegative(net - allocated);
       const primaryLine = rows[0];
       const lineGross = money(rows.reduce((sum, row) => sum + money(row.amount), 0));
@@ -360,8 +395,8 @@ function makeObligation({
     one_off_fee_id: oneOffFeeId,
     fee_id: oneOffFeeId,
     assignment_id: assignmentId,
-    billing_period: billingPeriod(invoice.due_date),
-    billing_period_label: billingPeriodLabel(invoice.due_date),
+     billing_period: billingPeriod(invoice.billing_period || invoice.due_date),
+     billing_period_label: billingPeriodLabel(invoice.billing_period || invoice.due_date),
     description: line?.description || invoice.description || null,
     label,
     due_date: dateOnly(invoice.due_date),
@@ -403,4 +438,6 @@ module.exports = {
   loadPending,
   legacyTuitionDescription,
   pendingMatches,
+  legacyCompatibilityEnabled,
+  isLegacyCompatibleInvoice,
 };

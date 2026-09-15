@@ -25,20 +25,74 @@ const normalizeManualPaymentMethod = (value) => {
   return 'other';
 };
 const { logAudit, getIp } = require('../utils/auditLogger');
-const { allocatePayment, getStudentLedger, reversePayment } = require('../services/financeLedger');
+const { getStudentLedger } = require('../services/financeLedger');
+const financeCommands = require('../services/financeCommandService');
 const { getPayableObligations } = require('../services/payableObligations');
 
 function dateOnly(value) {
   if (value == null || value === '') return '';
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return '';
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
   const raw = String(value);
   if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+  return '';
 }
 
 function spreadsheetText(value) {
   const text = String(value == null ? '' : value);
   return /^[=+\-@]/.test(text) ? `'${text}` : text;
+}
+
+const EXPORT_SERVICE_LABELS = {
+  tuition: 'Tuition',
+  boarding: 'Boarding',
+  transport: 'Transport',
+  aftercare: 'Aftercare',
+  one_off: 'One-off fee',
+  one_off_fee: 'One-off fee',
+  other: 'Other',
+};
+
+// Text columns in the workbook must never expose an internal numeric value.
+// Numeric IDs remain numeric in their dedicated ID columns, but a number in a
+// label, service key, status, reference, or review flag is a stale
+// shared-string/index value rather than human-readable finance data.
+function exportText(value, fallback = '') {
+  if (value == null || typeof value === 'number' || typeof value === 'boolean') return fallback;
+  if (typeof value === 'object') {
+    return exportText(value.label ?? value.name ?? value.type ?? value.code, fallback);
+  }
+  const text = String(value).trim();
+  return /^\d+$/.test(text) ? fallback : text;
+}
+
+function exportServiceLabel(value) {
+  const key = exportText(value);
+  return EXPORT_SERVICE_LABELS[key] || key.replace(/_/g, ' ');
+}
+
+function exportReviewFlags(flags) {
+  const values = (Array.isArray(flags) ? flags : [flags])
+    .map((flag) => exportText(flag))
+    .filter(Boolean);
+  return values.join(', ');
+}
+
+function exportServiceCharges(charges) {
+  if (!charges || typeof charges !== 'object') return '';
+  return Object.entries(charges)
+    .map(([key, value]) => {
+      const label = exportServiceLabel(key);
+      const amount = Number(value);
+      return label && Number.isFinite(amount) ? `${label}: R${amount.toFixed(2)}` : '';
+    })
+    .filter(Boolean)
+    .join('; ');
 }
 
 function paymentStatusForInvoice(invoice, asOf = new Date()) {
@@ -50,6 +104,24 @@ function paymentStatusForInvoice(invoice, asOf = new Date()) {
   const dueDate = dateOnly(invoice.due_date);
   const today = dateOnly(asOf);
   return dueDate && dueDate < today ? 'Overdue / Missed' : 'Due / Unpaid';
+}
+
+function paymentStatusForObligation(obligation, invoice) {
+  if (!obligation) return paymentStatusForInvoice(invoice);
+  switch (obligation.status) {
+    case 'PAID':
+      return 'Paid';
+    case 'PARTIALLY_PAID':
+      return 'Partial';
+    case 'PENDING_REVIEW':
+      return 'Pending Review';
+    case 'REQUIRES_RECONCILIATION':
+      return 'Review';
+    case 'UNPAID':
+      return obligation.due_status === 'OVERDUE' ? 'Overdue / Missed' : 'Due / Unpaid';
+    default:
+      return paymentStatusForInvoice(invoice);
+  }
 }
 
 // Configure multer for CSV and PDF uploads
@@ -665,7 +737,8 @@ async function processTransactions(transactions, userId) {
       const studentFirstName = matchedInvoice.first_name || 'Unknown';
       const studentLastName  = matchedInvoice.last_name  || 'Student';
 
-      const allocationResult = await allocatePayment(client, {
+      const allocationResult = await financeCommands.recordPayment({
+        executor: client,
         studentId,
         amount: transaction.amount,
         paymentDate: transaction.date,
@@ -673,6 +746,16 @@ async function processTransactions(transactions, userId) {
         reference: transaction.reference,
         description: transaction.description,
         recordedBy: userId,
+        // The import matcher identified this exact invoice.  Do not silently
+        // re-run arrears-first allocation against another invoice.
+        matchedInvoiceId: matchedInvoice.id,
+        idempotencyKey: `bank:${transaction.reference}:${transaction.amount}:${transaction.date}`,
+        actor: {
+          id: userId,
+          name: 'Bank import',
+          role: 'admin',
+        },
+        action: 'bank_import_payment',
       });
       const allocations = allocationResult.allocations.map((allocation) => ({
         transactionId: allocation.transactionId,
@@ -826,10 +909,8 @@ router.get('/student-payment-history/:studentNumber', [
       if (!inv.counted_in_totals && !inv.carry_forward_history &&
           inv.status !== 'Carried Forward') return;
       if (!inv.due_date) return;
-      const date = new Date(inv.due_date);
-      const year = date.getUTCFullYear();
-      const monthIndex = date.getUTCMonth();
-      const monthNum = monthIndex + 1;
+      const [year, monthNum] = dateOnly(inv.due_date).split('-').map(Number);
+      const monthIndex = monthNum - 1;
       const paymentStatus = paymentStatusForInvoice(inv);
       const oneOffLines = inv.one_off_charge_lines || [];
       const recurringLines = inv.service_charge_lines || [];
@@ -839,19 +920,23 @@ router.get('/student-payment-history/:studentNumber', [
         const payable = payableObligations.find((obligation) =>
           Number(obligation.invoice_id) === Number(inv.id) &&
           Number(obligation.invoice_line_item_id) === Number(line.id));
-        const oneOffStatus = payable?.status === 'PENDING_REVIEW'
-          ? 'Pending Review'
-          : paymentStatus;
+        const oneOffStatus = paymentStatusForObligation(payable, inv);
+        const oneOffAmountPaid = payable?.amount_allocated != null
+          ? Number(payable.amount_allocated) || 0
+          : (oneOffLines.length === 1 && !recurringLines.length
+            ? inv.allocated_effective_payments : 0);
+        const oneOffOutstanding = payable?.amount_outstanding != null
+          ? Number(payable.amount_outstanding) || 0
+          : (oneOffLines.length === 1 && !recurringLines.length
+            ? inv.outstanding_balance : Number(line.amount) || 0);
         oneOffHistory.push({
           invoiceId: inv.id,
           fee: line.label || line.description || 'One-off fee',
           description: line.description || '',
           dueDate: dateOnly(inv.due_date),
           amount: Number(line.amount) || 0,
-          amountPaid: oneOffLines.length === 1 && !recurringLines.length
-            ? inv.allocated_effective_payments : 0,
-          outstanding: oneOffLines.length === 1 && !recurringLines.length
-            ? inv.outstanding_balance : Number(line.amount) || 0,
+          amountPaid: oneOffAmountPaid,
+          outstanding: oneOffOutstanding,
           status: oneOffStatus,
           reference: inv.reference_number || '-',
         });
@@ -1111,16 +1196,16 @@ router.get('/student-payment-history/:studentNumber', [
         row.values = [
           month.year,
            month.month,
-           spreadsheetText(Object.entries(month.serviceCharges || {}).map(([key, value]) => `${key}: R${Number(value).toFixed(2)}`).join('; ') || 'Legacy snapshot unavailable'),
+           spreadsheetText(exportServiceCharges(month.serviceCharges) || 'Legacy snapshot unavailable'),
            month.grossCharges,
            -(month.discountLines || []).reduce((sum, line) => sum + Number(line.amount || 0), 0),
            month.amountDue,
            month.amountPaid,
            month.outstanding,
            month.credit,
-           month.paymentStatus,
-           spreadsheetText((month.reviewFlags || []).map((flag) => flag.type).join(', ') || 'No review flags'),
-            spreadsheetText(month.reference)
+           exportText(month.paymentStatus),
+           spreadsheetText(exportReviewFlags(month.reviewFlags) || 'No review flags'),
+            spreadsheetText(exportText(month.reference))
         ];
         
         // Format currency columns
@@ -1164,15 +1249,15 @@ router.get('/student-payment-history/:studentNumber', [
       ]).font = { bold: true };
       oneOffHistory.forEach((fee) => {
         const row = oneOffWorksheet.addRow([
-          spreadsheetText(fee.fee),
-          spreadsheetText(fee.description),
+          spreadsheetText(exportText(fee.fee, 'One-off fee')),
+          spreadsheetText(exportText(fee.description)),
           fee.invoiceId,
           fee.dueDate,
           fee.amount,
           fee.amountPaid,
           fee.outstanding,
-          spreadsheetText(fee.status),
-          spreadsheetText(fee.reference),
+          spreadsheetText(exportText(fee.status)),
+          spreadsheetText(exportText(fee.reference)),
         ]);
         [5, 6, 7].forEach((column) => { row.getCell(column).numFmt = 'R #,##0.00'; });
       });
@@ -1192,9 +1277,9 @@ router.get('/student-payment-history/:studentNumber', [
           transaction.invoice_id || '',
           dateOnly(transaction.payment_date || transaction.transaction_date),
           Number(transaction.amount) || 0,
-          spreadsheetText(transaction.payment_method),
-          spreadsheetText(transaction.reference_number),
-          spreadsheetText((transaction.review_flags || []).join(', ')),
+          spreadsheetText(exportText(transaction.payment_method)),
+          spreadsheetText(exportText(transaction.reference_number)),
+          spreadsheetText(exportReviewFlags(transaction.review_flags)),
         ]);
         row.getCell(4).numFmt = 'R #,##0.00';
       });
@@ -1257,25 +1342,29 @@ router.get('/student-payment-history/:studentNumber', [
         const lines = invoice.line_items || [];
         const base = {
           invoiceId: invoice.id,
-          dueDate: invoice.due_date ? new Date(invoice.due_date).toISOString().slice(0, 10) : '',
+          dueDate: dateOnly(invoice.due_date),
           gross: invoice.gross_charges,
           discountTotal: invoice.discount_total,
           netDue: invoice.net_due,
           paid: invoice.allocated_effective_payments,
           outstanding: invoice.outstanding_balance,
           credit: invoice.credit,
-          status: invoice.status,
-          review: (invoice.payment_review_flags || []).map((flag) => flag.type).join(', '),
+          status: exportText(invoice.status),
+          review: exportReviewFlags(invoice.payment_review_flags),
           snapshot: lines.length ? 'Persisted snapshot' : 'Snapshot unavailable (legacy invoice)',
         };
         if (!lines.length) {
-          breakdownSheet.addRow({ ...base, lineType: 'unavailable', label: 'Detailed snapshot unavailable' });
+          breakdownSheet.addRow({
+            ...base,
+            lineType: 'unavailable',
+            label: 'Detailed snapshot unavailable',
+          });
         } else {
           lines.forEach((line) => breakdownSheet.addRow({
             ...base,
-            lineType: line.line_type,
-            serviceKey: line.service_key || '',
-            label: line.label,
+            lineType: exportText(line.line_type),
+            serviceKey: exportServiceLabel(line.service_key),
+            label: exportText(line.label || line.description),
             included: line.included ? 'Yes' : 'No',
             lineAmount: line.line_type === 'discount' ? -line.amount : line.amount,
           }));
@@ -1409,7 +1498,8 @@ router.post('/manual-payment', [
     let paymentResult;
     try {
       await client.query('BEGIN');
-      allocation = await allocatePayment(client, {
+      allocation = await financeCommands.recordPayment({
+        executor: client,
         studentId: student_id,
         amount,
         paymentDate: payment_date,
@@ -1420,41 +1510,25 @@ router.post('/manual-payment', [
         invoiceId: invoice_id == null ? null : Number(invoice_id),
         transactionMonth: month || null,
         transactionYear: year || null,
+        idempotencyKey: `manual:${refValue}:${student_id}:${amount}:${payment_date}`,
+        actor: {
+          id: req.user.id,
+          name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+          role: req.user.role,
+        },
+        action: 'manual_payment_add',
       });
       if (invoice_id != null && !allocation.allocations.some((item) => item.invoiceId === Number(invoice_id))) {
         const error = new Error('Selected invoice is not an outstanding invoice for this learner');
         error.status = 409;
         throw error;
       }
-      const firstPaymentId = allocation.allocations[0]?.transactionId;
+      const firstPaymentId = allocation.transactionIds?.[0] ||
+        allocation.allocations?.[0]?.transactionId;
       paymentResult = await client.query(
         'SELECT * FROM payment_transactions WHERE id = $1',
         [firstPaymentId],
       );
-      await logAudit({
-        userId: req.user.id,
-        userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-        userRole: req.user.role,
-        action: 'manual_payment_add',
-        entityType: 'payment',
-        entityId: paymentResult.rows[0]?.id || null,
-        details: {
-          summary: `R${amount} recorded for ${student.first_name} ${student.last_name} (${student.student_number})`,
-          student: `${student.first_name} ${student.last_name}`,
-          student_number: student.student_number,
-          student_id,
-          amount,
-          month: paymentMonth,
-          year: paymentYear,
-          reference: refValue,
-          invoice_id: invoice_id == null ? null : Number(invoice_id),
-          allocation_transaction_ids: allocation.allocations.map((item) => item.transactionId),
-          invoice_updated: allocation.allocations.some((item) => item.invoiceId != null),
-        },
-        ipAddress: getIp(req),
-        executor: client,
-        required: true,
-      });
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -1462,7 +1536,8 @@ router.post('/manual-payment', [
     } finally {
       client.release();
     }
-    const invoiceUpdated = allocation.allocations.some((item) => item.invoiceId != null);
+    const allocationRows = allocation.allocations || [];
+    const invoiceUpdated = allocationRows.some((item) => item.invoiceId != null);
 
     console.log(`✅ Manual payment recorded: R${amount} for ${student.first_name} ${student.last_name} (${student.student_number})`);
 
@@ -1477,7 +1552,7 @@ router.post('/manual-payment', [
       success: true,
       message: `Payment of R${amount} recorded for ${student.first_name} ${student.last_name}`,
       payment: paymentResult.rows[0],
-      allocations: allocation.allocations,
+      allocations: allocationRows,
       invoiceUpdated,
       student: {
         id: student.id,
@@ -1614,11 +1689,25 @@ router.put('/manual-payment/:paymentId', [
       const newYear = year ? parseInt(year, 10) : (original.year || (newDate ? new Date(newDate).getUTCFullYear() : null));
 
       correctionStage = 'reverse_original_allocation';
-      const reversal = await reversePayment(client, {
+      const correction = await financeCommands.correctPayment({
+        executor: client,
         transactionId: paymentId,
+        amount: newAmount,
+        paymentDate: newDate,
+        paymentMethod: normalizeManualPaymentMethod(payment_method || original.payment_method),
+        reference: reference || original.reference || original.reference_number,
+        description: `Correction replacement for payment ${paymentId}: ${description || original.description || reason}`,
         recordedBy: req.user.id,
-        description: `Correction reversal for payment ${paymentId}: ${reason}`,
+        transactionMonth: newMonth,
+        transactionYear: newYear,
+        actor: {
+          id: req.user.id,
+          name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+          role: req.user.role,
+        },
+        idempotencyKey: `correction:${paymentId}:${newAmount}:${newDate}:${reference || ''}`,
       });
+      const reversal = correction.reversal;
       if (reversal.alreadyReversed) {
         const error = new Error('Payment was already reversed and cannot be edited');
         error.status = 409;
@@ -1626,23 +1715,7 @@ router.put('/manual-payment/:paymentId', [
       }
       reversalId = reversal.reversalId;
       correctionStage = 'allocate_replacement_payment';
-      const allocation = await allocatePayment(client, {
-        studentId: original.student_id,
-        amount: newAmount,
-        paymentDate: newDate,
-        paymentMethod: normalizeManualPaymentMethod(payment_method || original.payment_method),
-        reference: reference || original.reference || original.reference_number,
-        description: `Correction replacement for payment ${paymentId}: ${description || original.description || reason}`,
-        recordedBy: req.user.id,
-        // Preserve the original allocation identity. A month/year edit must
-        // never touch every invoice for that student and period.
-        // Carry-forward reversals can target the active arrears successor,
-        // not the historical source invoice. Never blindly reuse the source
-        // transaction's invoice_id after reversePayment has resolved it.
-        invoiceId: reversal.effectiveInvoiceId == null ? 0 : reversal.effectiveInvoiceId,
-        transactionMonth: newMonth,
-        transactionYear: newYear,
-      });
+      const allocation = correction.allocation;
       replacement = allocation.allocations[0] || null;
       replacementTransactionIds = allocation.allocations.map((item) => item.transactionId);
       if (replacement?.transactionId) {
@@ -1653,35 +1726,6 @@ router.put('/manual-payment/:paymentId', [
         );
         replacementPayment = replacementResult.rows[0] || null;
       }
-      correctionStage = 'write_audit_event';
-      await logAudit({
-        userId: req.user.id,
-        userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-        userRole: req.user.role,
-        action: 'manual_payment_edit',
-        entityType: 'payment',
-        entityId: parseInt(paymentId),
-        details: {
-          summary: `Payment #${paymentId} corrected by reversal and replacement`,
-          student_id: original.student_id,
-          invoice_id: reversal.effectiveInvoiceId,
-          original_transaction_id: Number(paymentId),
-          reversal_transaction_id: reversalId,
-          replacement_transaction_ids: replacementTransactionIds,
-          old_amount: oldAmount,
-          new_amount: newAmount,
-          old_date: original.payment_date || original.transaction_date,
-          new_date: newDate,
-          old_reference: original.reference || original.reference_number,
-          new_reference: reference || original.reference || original.reference_number,
-          previous_method: original.payment_method,
-          new_method: normalizeManualPaymentMethod(payment_method || original.payment_method),
-          reason,
-        },
-        ipAddress: getIp(req),
-        executor: client,
-        required: true,
-      });
       correctionStage = 'commit_transaction';
       await client.query('COMMIT');
     } catch (error) {
@@ -1758,10 +1802,16 @@ router.delete('/manual-payment/:paymentId', [
         return res.status(404).json({ success: false, message: 'Payment not found' });
       }
       payment = paymentResult.rows[0];
-      const reversal = await reversePayment(client, {
+      const reversal = await financeCommands.reversePayment({
+        executor: client,
         transactionId: paymentId,
         recordedBy: req.user.id,
         description: `Admin reversal of payment ${paymentId}: ${reason}`,
+        actor: {
+          id: req.user.id,
+          name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+          role: req.user.role,
+        },
       });
       if (reversal.alreadyReversed) {
         const error = new Error('Payment was already reversed');
@@ -1769,29 +1819,6 @@ router.delete('/manual-payment/:paymentId', [
         throw error;
       }
       reversalId = reversal.reversalId;
-      await logAudit({
-        userId: req.user.id,
-        userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-        userRole: req.user.role,
-        action: 'manual_payment_reverse',
-        entityType: 'payment',
-        entityId: parseInt(paymentId),
-        details: {
-          summary: `Payment #${paymentId} reversed (R${payment.amount})`,
-          student_id: payment.student_id,
-          invoice_id: payment.invoice_id,
-          original_transaction_id: Number(paymentId),
-          reversal_transaction_id: reversalId,
-          amount: payment.amount,
-          month: payment.month,
-          year: payment.year,
-          method: payment.payment_method,
-          reason,
-        },
-        ipAddress: getIp(req),
-        executor: client,
-        required: true,
-      });
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -1877,55 +1904,40 @@ router.post('/manual-payment/:paymentId/apply', [
         throw error;
       }
 
-      const reversal = await reversePayment(client, {
+      const creditResult = await financeCommands.applyCredit({
+        executor: client,
+        sourceTransactionId: paymentId,
+        amount: Number(original.amount),
+        studentId: original.student_id,
+        paymentDate: original.payment_date || original.transaction_date,
+        paymentMethod: original.payment_method || 'manual_entry',
+        reference: original.reference || original.reference_number,
+        description: `Reallocated from payment ${paymentId}: ${original.description || reason}`,
         transactionId: paymentId,
         recordedBy: req.user.id,
-        description: `Reallocation reversal for payment ${paymentId}: ${reason}`,
+        obligations: [{
+          invoice_id: invoiceId,
+          amount: Number(original.amount),
+        }],
+        actor: {
+          id: req.user.id,
+          name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+          role: req.user.role,
+        },
       });
+      const reversal = creditResult.reversal;
       if (reversal.alreadyReversed) {
         const error = new Error('Payment was already reversed');
         error.status = 409;
         throw error;
       }
       reversalId = reversal.reversalId;
-      const allocation = await allocatePayment(client, {
-        studentId: original.student_id,
-        amount: Number(original.amount),
-        paymentDate: original.payment_date || original.transaction_date,
-        paymentMethod: original.payment_method || 'manual_entry',
-        reference: original.reference || original.reference_number,
-        description: `Reallocated from payment ${paymentId}: ${original.description || reason}`,
-        recordedBy: req.user.id,
-        invoiceId,
-        transactionMonth: original.month,
-        transactionYear: original.year,
-      });
+      const allocation = creditResult.allocation;
       replacement = allocation.allocations[0] || null;
       replacementTransactionIds = allocation.allocations.map((item) => item.transactionId);
       if (!replacement || replacement.invoiceId !== invoiceId) {
         throw new Error('Payment could not be applied to the selected invoice');
       }
-      await logAudit({
-        userId: req.user.id,
-        userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-        userRole: req.user.role,
-        action: 'manual_payment_reallocated',
-        entityType: 'payment',
-        entityId: paymentId,
-        details: {
-          summary: `Unallocated payment #${paymentId} applied to invoice #${invoiceId}`,
-          student_id: original.student_id,
-          invoice_id: invoiceId,
-          original_transaction_id: paymentId,
-          reversal_transaction_id: reversalId,
-          replacement_transaction_ids: replacementTransactionIds,
-          amount: Number(original.amount),
-          reason,
-        },
-        ipAddress: getIp(req),
-        executor: client,
-        required: true,
-      });
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -1991,7 +2003,8 @@ router.post('/manual-payment/apply-arrears-first', [
     try {
       await client.query('BEGIN');
 
-      const allocationResult = await allocatePayment(client, {
+      const allocationResult = await financeCommands.recordPayment({
+        executor: client,
         studentId: student_id,
         amount,
         paymentDate: payment_date,
@@ -1999,6 +2012,13 @@ router.post('/manual-payment/apply-arrears-first', [
         reference: refValue,
         description: description || 'Manual payment',
         recordedBy: req.user.id,
+        idempotencyKey: `manual-arrears-first:${refValue}:${student_id}:${amount}:${payment_date}`,
+        actor: {
+          id: req.user.id,
+          name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+          role: req.user.role,
+        },
+        action: 'manual_payment_arrears',
       });
       allocations = allocationResult.allocations.map((allocation) => ({
         transactionId: allocation.transactionId,
@@ -2030,19 +2050,6 @@ router.post('/manual-payment/apply-arrears-first', [
       ? `R${parseFloat(amount).toFixed(2)} applied: R${arrearsAllocations.reduce((s,a)=>s+a.appliedAmount,0).toFixed(2)} to previous-year arrears${currentAllocations.length ? `, R${currentAllocations.reduce((s,a)=>s+a.appliedAmount,0).toFixed(2)} to current year` : ''}`
       : `R${parseFloat(amount).toFixed(2)} applied across ${currentAllocations.length} invoice(s)`;
 
-    await logAudit({
-      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-      userRole: req.user.role, action: 'manual_payment_arrears',
-      entityType: 'payment', entityId: null,
-      details: {
-        summary: summaryMsg, student: `${student.first_name} ${student.last_name}`,
-        student_number: student.student_number, amount: parseFloat(amount),
-        invoices_updated: allocations.filter((allocation) => allocation.invoiceId != null).length,
-        arrears_invoices: arrearsAllocations.length,
-        current_invoices: currentAllocations.length
-      },
-      ipAddress: getIp(req)
-    });
     await Promise.allSettled(allocations
       .filter((allocation) => allocation.transactionId != null)
       .map((allocation) => notifyPayment({
@@ -2113,13 +2120,21 @@ router.post('/allocate-unmatched', [
     let allocation;
     try {
       await client.query('BEGIN');
-      allocation = await allocatePayment(client, {
+      allocation = await financeCommands.recordPayment({
+        executor: client,
         studentId: student_id,
         amount,
         paymentDate: date || new Date().toISOString().split('T')[0],
         paymentMethod: 'bank_statement',
         description: description || 'Allocated from unmatched bank statement payment',
         recordedBy: adminId,
+        idempotencyKey: `unmatched:${student_id}:${amount}:${date || ''}:${description || ''}`,
+        actor: {
+          id: adminId,
+          name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+          role: req.user.role,
+        },
+        action: 'unmatched_payment_allocated',
       });
       await client.query('COMMIT');
     } catch (error) {
@@ -2134,21 +2149,6 @@ router.post('/allocate-unmatched', [
     }));
 
     console.log(`✅ Unmatched payment allocated: R${amount} → ${student.first_name} ${student.last_name}`);
-    await logAudit({
-      userId: adminId,
-      userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-      userRole: req.user.role,
-      action: 'unmatched_payment_allocated',
-      entityType: 'payment',
-      entityId: txIds[0]?.id || null,
-      details: {
-        student_id: student.id,
-        student_number: student.student_number,
-        amount: parseFloat(amount),
-        allocations: txIds,
-      },
-      ipAddress: getIp(req),
-    });
     await Promise.allSettled(txIds.map((transaction) => notifyPayment({
       kind: 'applied',
       paymentId: transaction.id,

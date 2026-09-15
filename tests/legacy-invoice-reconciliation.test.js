@@ -501,10 +501,11 @@ test('pending duplicate validation is controlled and rejection/approval states r
   assert.equal(approved[0].status, 'PAID');
   assert.equal(approved[0].visible, false);
 
-  assert.match(routeSource, /acquireCanonicalObligationLocks\(client, child\.id, selectedObligations\)/);
-  assert.match(routeSource, /validateCanonicalSelections\(client, child\.id, selectedObligations\)/);
-  assert.ok(routeSource.indexOf('acquireCanonicalObligationLocks(client, child.id, selectedObligations)') <
-    routeSource.indexOf('INSERT INTO pending_payments'));
+  const commandSource = fs.readFileSync('services/financeCommandService.js', 'utf8');
+  assert.match(routeSource, /financeCommands\.createPaymentProof/);
+  assert.match(commandSource, /acquireInvoiceObligationLocks\(executor, descriptorsFor\(studentId, lockObligations\)\)/);
+  assert.ok(commandSource.indexOf('acquireInvoiceObligationLocks(executor, descriptorsFor(studentId, lockObligations))') <
+    commandSource.indexOf('INSERT INTO pending_payments'));
   assert.match(payableSource, /WHERE student_id = \$1 AND status = 'pending'/);
 });
 
