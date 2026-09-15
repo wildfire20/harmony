@@ -8,6 +8,7 @@
  * use the identity returned here.
  */
 const db = require('../config/database');
+const { getCarryForwardSourceIds } = require('./carryForwardLineage');
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const nonNegative = (value) => Math.max(0, money(value));
@@ -176,6 +177,7 @@ async function getPayableObligations(studentId, executor = db, options = {}) {
   if (!invoiceResult.rows.length) return [];
 
   const invoiceIds = invoiceResult.rows.map((row) => Number(row.id));
+  const carryForwardSourceIds = await getCarryForwardSourceIds(executor, invoiceResult.rows);
   const [lineResult, transactions, pendingRows] = await Promise.all([
     loadLines(executor, invoiceIds),
     loadTransactions(executor, studentId),
@@ -197,6 +199,10 @@ async function getPayableObligations(studentId, executor = db, options = {}) {
 
   invoiceResult.rows.forEach((invoice) => {
     const invoiceId = Number(invoice.id);
+    // Carried-forward sources are historical evidence only. Never rebuild
+    // them as a fresh payable obligation, even if a legacy anomaly leaves
+    // their status or lineage column inconsistent.
+    if (carryForwardSourceIds.has(invoiceId)) return;
     const amountDue = money(invoice.amount_due);
     const amountPaid = money(invoice.amount_paid);
     const invoiceLines = linesByInvoice.get(invoiceId) || [];
@@ -308,6 +314,8 @@ function makeObligation({
   outstanding, reconciliationRequired, line, pendingRows, asOf,
 }) {
   const metadata = line?.metadata && typeof line.metadata === 'object' ? line.metadata : {};
+  const isLegacyReconciled = metadata.source === 'legacy_invoice_reconciliation' ||
+    metadata.legacy_reconciliation === true || metadata.legacy_reconciliation === 'true';
   const oneOffFeeId = metadata.fee_id == null ? null : Number(metadata.fee_id);
   const assignmentId = metadata.assignment_id == null ? null : Number(metadata.assignment_id);
   const identity = `invoice:${Number(invoice.id)}:${invoiceLineItemId == null
@@ -355,6 +363,15 @@ function makeObligation({
     reconciliation_reason: reconciliationRequired
       ? 'This invoice has persisted charges but historical payment allocation is not identified by service.'
       : null,
+    legacy_reconciliation: isLegacyReconciled ? {
+      state: 'RECONCILED',
+      source: metadata.source || 'legacy_invoice_reconciliation',
+      category: metadata.category || category,
+      actor_id: metadata.actor_id == null ? null : Number(metadata.actor_id),
+      actor_name: metadata.actor_name || null,
+      classified_at: metadata.classified_at || null,
+      reason: metadata.reason || null,
+    } : null,
     due_status: dueState(outstanding, invoice.due_date, asOf),
     visible: state !== 'PAID',
     selectable,

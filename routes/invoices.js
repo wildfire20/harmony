@@ -17,6 +17,9 @@ const {
 const {
   parseInvoiceFilterQuery, parseInvoiceListQuery, appendPeriodFilters,
 } = require('../utils/invoiceQuery');
+const { acquireInvoiceObligationLocks } = require('../services/invoiceObligationLocks');
+const { getPayableObligations } = require('../services/payableObligations');
+const { getCarryForwardSourceIds } = require('../services/carryForwardLineage');
 
 const router = express.Router();
 const RECONCILABLE_SERVICES = new Map([
@@ -25,6 +28,11 @@ const RECONCILABLE_SERVICES = new Map([
   ['transport', 'Transport'],
   ['aftercare', 'Aftercare'],
 ]);
+const LEGACY_CLASSIFICATION_SERVICES = new Map([
+  ...RECONCILABLE_SERVICES,
+  ['other_recurring', 'Other recurring'],
+]);
+const LEGACY_CLASSIFICATION_SOURCE = 'legacy_invoice_reconciliation';
 
 const positiveInteger = (value) => {
   const raw = String(value == null ? '' : value);
@@ -437,6 +445,318 @@ router.post('/reconcile-missing-charge', [
   });
 });
 
+// Classify an existing, line-less historical invoice.  This is deliberately
+// separate from reconcile-missing-charge: it never creates an invoice and the
+// line amount is copied from the authoritative invoice header.
+router.post('/:id/classify-legacy', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+], async (req, res) => {
+  const invoiceId = positiveInteger(req.params.id);
+  const category = String(req.body?.category || req.body?.service_key || '').trim().toLowerCase();
+  const reason = String(req.body?.reason || '').trim();
+  if (!invoiceId || !LEGACY_CLASSIFICATION_SERVICES.has(category) ||
+      reason.length < 10 || reason.length > 500) {
+    return res.status(422).json({
+      success: false,
+      message: 'A valid invoice, recurring category, and a meaningful reason of 10–500 characters are required.',
+    });
+  }
+
+  const client = await db.pool.connect();
+  let classified;
+  try {
+    await client.query('BEGIN');
+    // Acquire the shared advisory key before the invoice row lock. Parent
+    // proof submission follows this same order, preventing a
+    // classification-vs-proof deadlock under concurrency.
+    await acquireInvoiceObligationLocks(client, [{
+      invoiceId,
+      category,
+    }]);
+    const invoiceResult = await client.query(`
+      SELECT i.id, i.student_id, i.student_number, i.amount_due, i.amount_paid,
+             i.outstanding_balance, i.overpaid_amount, i.due_date,
+             i.reference_number, i.description, i.status
+      FROM invoices i
+      WHERE i.id = $1::integer
+      FOR UPDATE
+    `, [invoiceId]);
+    const invoice = invoiceResult.rows[0];
+    if (!invoice) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+
+    const carryForwardSourceIds = await getCarryForwardSourceIds(client, [invoice]);
+    if (carryForwardSourceIds.has(invoiceId)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'Carried-forward source invoices and invoices with an active successor cannot be classified.',
+      });
+    }
+
+    const amountDue = Number(invoice.amount_due);
+    const amountPaid = Number(invoice.amount_paid);
+    const outstanding = Math.max(amountDue - amountPaid, 0);
+    if (!Number.isFinite(amountDue) || amountDue <= 0 || outstanding <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'Only invoices with a positive outstanding balance can be classified.',
+      });
+    }
+
+    const pendingResult = await client.query(`
+      SELECT id, selected_obligations
+      FROM pending_payments
+      WHERE student_id = $1::integer AND status = 'pending'
+    `, [invoice.student_id]);
+    const pendingReferencesInvoice = pendingResult.rows.some((pending) => {
+      let selected = pending.selected_obligations;
+      if (typeof selected === 'string') {
+        try { selected = JSON.parse(selected); } catch (_) { selected = []; }
+      }
+      selected = Array.isArray(selected) ? selected : [];
+      return selected.some((item) => {
+        const obligationId = String(item?.obligation_id || '');
+        return Number(item?.invoice_id) === invoiceId ||
+          obligationId === `invoice:${invoiceId}:legacy` ||
+          obligationId.startsWith(`invoice:${invoiceId}:line:`);
+      });
+    });
+    if (pendingReferencesInvoice) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'This invoice has an active pending payment proof and cannot be classified until it is reviewed.',
+      });
+    }
+
+    // Locking the invoice serializes this check with another classifier.  Any
+    // line is existing immutable invoice evidence (including discounts and
+    // included/adjustment rows) and must not be relabelled or supplemented by
+    // this legacy-only action.
+    const linesResult = await client.query(`
+      SELECT id, line_type, service_key, metadata
+      FROM invoice_line_items
+      WHERE invoice_id = $1::integer
+      ORDER BY id
+    `, [invoiceId]);
+    const alreadyClassified = linesResult.rows.some((line) => {
+      const metadata = line.metadata && typeof line.metadata === 'object' ? line.metadata : {};
+      return metadata.source === LEGACY_CLASSIFICATION_SOURCE ||
+        metadata.legacy_reconciliation === true ||
+        metadata.legacy_reconciliation === 'true';
+    });
+    if (alreadyClassified || linesResult.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'This invoice already has an immutable charge snapshot or classification.',
+      });
+    }
+
+    // Preserve a separate allocation snapshot as evidence.  The invoice
+    // amount_paid remains authoritative; this total is never used to rewrite
+    // the invoice or allocations.
+    const allocationResult = await client.query(`
+      SELECT pt.id, pt.amount,
+             to_jsonb(pt)->>'allocation_category' AS allocation_category,
+             pt.reverses_transaction_id,
+             (reversal.id IS NOT NULL) AS is_reversed
+      FROM payment_transactions pt
+      LEFT JOIN payment_transactions reversal
+        ON reversal.reverses_transaction_id = pt.id
+      WHERE pt.invoice_id = $1::integer
+        AND pt.reverses_transaction_id IS NULL
+        AND reversal.id IS NULL
+      ORDER BY pt.id
+    `, [invoiceId]);
+    const allocations = allocationResult.rows || [];
+    const allocationCategories = [...new Set(
+      allocations.map((row) => row.allocation_category).filter(Boolean),
+    )];
+    if (allocationCategories.length > 1 || (
+      allocationCategories.length === 1 && allocationCategories[0] !== category
+    )) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'This invoice has conflicting payment allocation categories and requires explicit reconciliation.',
+      });
+    }
+    const allocation = {
+      allocation_total: allocations.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+      allocation_count: allocations.length,
+    };
+    const headerSnapshot = {
+      id: Number(invoice.id),
+      student_id: Number(invoice.student_id),
+      amount_due: String(invoice.amount_due),
+      amount_paid: String(invoice.amount_paid),
+      outstanding_balance: String(invoice.outstanding_balance ?? outstanding),
+      overpaid_amount: String(invoice.overpaid_amount ?? Math.max(amountPaid - amountDue, 0)),
+      due_date: invoice.due_date == null ? null : String(invoice.due_date).slice(0, 10),
+      reference_number: invoice.reference_number || null,
+      status: invoice.status || null,
+    };
+    const classifiedAt = new Date().toISOString();
+    const metadata = {
+      source: LEGACY_CLASSIFICATION_SOURCE,
+      legacy_reconciliation: true,
+      category,
+      service_key: category,
+      reason,
+      actor_id: Number(req.user.id),
+      actor_name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim() || null,
+      classified_at: classifiedAt,
+      previous_classification: null,
+      immutable_header_snapshot: headerSnapshot,
+      allocation_snapshot: {
+        invoice_amount_paid: String(invoice.amount_paid),
+        allocation_total: String(allocation.allocation_total),
+        allocation_count: Number(allocation.allocation_count || 0),
+      },
+      payable_outstanding_before: outstanding,
+    };
+    const lineResult = await client.query(`
+      INSERT INTO invoice_line_items
+        (invoice_id, line_type, service_key, label, description,
+         quantity, unit_amount, amount, is_included, metadata)
+      VALUES ($1::integer, 'charge', $2, $3, $4,
+              1, $5::numeric, $5::numeric, false, $6::jsonb)
+      RETURNING id, invoice_id, line_type, service_key, label, description,
+                amount, metadata
+    `, [
+      invoiceId,
+      category,
+      LEGACY_CLASSIFICATION_SERVICES.get(category),
+      invoice.description || `Legacy ${LEGACY_CLASSIFICATION_SERVICES.get(category)} invoice`,
+      invoice.amount_due,
+      JSON.stringify(metadata),
+    ]);
+
+    // Validate through both canonical finance read models, not only arithmetic
+    // based on the header. Any drift means the transaction must be rolled back.
+    const payableAfter = await getPayableObligations(invoice.student_id, client);
+    const payableMatch = payableAfter.find((obligation) =>
+      Number(obligation.invoice_id) === invoiceId && obligation.category === category);
+    const ledgerAfter = await getStudentLedger(invoice.student_id, client);
+    const ledgerMatch = ledgerAfter?.invoices?.find((item) => Number(item.id) === invoiceId);
+    if (!payableMatch || !payableMatch.is_payable ||
+        Number(payableMatch.net_due) !== amountDue ||
+        Number(payableMatch.amount_outstanding) !== outstanding ||
+        payableMatch.reconciliation_state ||
+        !ledgerMatch ||
+        ledgerMatch.legacy_reconciliation?.state !== 'RECONCILED' ||
+        ledgerMatch.legacy_reconciliation?.category !== category ||
+        Number(ledgerMatch.net_due) !== amountDue ||
+        Number(ledgerMatch.outstanding_balance) !== outstanding) {
+      throw Object.assign(new Error('Canonical payable read models did not preserve the legacy invoice obligation'), {
+        status: 409,
+      });
+    }
+
+    const afterInvoiceResult = await client.query(`
+      SELECT id, student_id, amount_due, amount_paid, outstanding_balance,
+             overpaid_amount, due_date, reference_number, status
+      FROM invoices
+      WHERE id = $1::integer
+    `, [invoiceId]);
+    const after = afterInvoiceResult.rows[0];
+    const same = after && headerSnapshot.id === Number(after.id) &&
+      headerSnapshot.student_id === Number(after.student_id) &&
+      headerSnapshot.amount_due === String(after.amount_due) &&
+      headerSnapshot.amount_paid === String(after.amount_paid) &&
+      headerSnapshot.outstanding_balance === String(after.outstanding_balance) &&
+      headerSnapshot.overpaid_amount === String(after.overpaid_amount) &&
+      headerSnapshot.due_date === (after.due_date == null ? null : String(after.due_date).slice(0, 10)) &&
+      headerSnapshot.reference_number === (after.reference_number || null) &&
+      headerSnapshot.status === (after.status || null);
+    const afterAllocationResult = await client.query(`
+      SELECT pt.id, pt.amount,
+             to_jsonb(pt)->>'allocation_category' AS allocation_category,
+             pt.reverses_transaction_id,
+             (reversal.id IS NOT NULL) AS is_reversed
+      FROM payment_transactions pt
+      LEFT JOIN payment_transactions reversal
+        ON reversal.reverses_transaction_id = pt.id
+      WHERE pt.invoice_id = $1::integer
+        AND pt.reverses_transaction_id IS NULL
+        AND reversal.id IS NULL
+      ORDER BY pt.id
+    `, [invoiceId]);
+    const afterAllocationRows = afterAllocationResult.rows || [];
+    const afterAllocation = {
+      allocation_total: afterAllocationRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+      allocation_count: afterAllocationRows.length,
+    };
+    if (!same ||
+        Number(lineResult.rows[0]?.amount) !== amountDue ||
+        Math.max(Number(after.amount_due) - Number(after.amount_paid), 0) !== outstanding ||
+        String(allocation.allocation_total) !== String(afterAllocation.allocation_total) ||
+        Number(allocation.allocation_count || 0) !== Number(afterAllocation.allocation_count || 0)) {
+      throw Object.assign(new Error('Invoice financial fields changed during legacy classification'), {
+        status: 409,
+      });
+    }
+
+    await logAudit({
+      executor: client,
+      required: true,
+      userId: req.user.id,
+      userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      userRole: req.user.role,
+      action: 'LEGACY_INVOICE_CLASSIFIED',
+      entityType: 'invoice',
+      entityId: invoiceId,
+      details: {
+        invoice_id: invoiceId,
+        student_id: Number(invoice.student_id),
+        previous_classification: null,
+        new_classification: category,
+        actor: { id: Number(req.user.id), name: metadata.actor_name, role: req.user.role },
+        reason,
+        classified_at: classifiedAt,
+      },
+      ipAddress: getIp(req),
+    });
+    await client.query('COMMIT');
+    classified = {
+      invoice: after,
+      line: lineResult.rows[0],
+      metadata: { ...metadata, payable_outstanding_after: outstanding },
+      financial_invariants: {
+        invoice_id: invoiceId,
+        authoritative_amount_due: amountDue,
+        authoritative_outstanding_before: outstanding,
+        payable_net_due_after: amountDue,
+        payable_outstanding_after: outstanding,
+        unchanged: true,
+      },
+    };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error.status === 409 || error.code === '23505') {
+      return res.status(409).json({
+        success: false,
+        message: error.safeMessage || error.message || 'Invoice was classified concurrently; refresh and try again.',
+      });
+    }
+    console.error('Legacy invoice classification error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to classify legacy invoice' });
+  } finally {
+    client.release();
+  }
+  return res.status(200).json({
+    success: true,
+    message: `Existing invoice classified as ${LEGACY_CLASSIFICATION_SERVICES.get(category)}`,
+    ...classified,
+  });
+});
+
 // Manual arrears entry: admin creates an arrears invoice for a specific student
 router.post('/manual-arrears', [
   authenticate,
@@ -802,6 +1122,7 @@ router.get('/', [
     }));
     const invoiceIds = result.rows.map((invoice) => invoice.id);
     const lineData = await loadInvoiceLineItems(db, invoiceIds);
+    const carryForwardSourceIds = await getCarryForwardSourceIds(db, result.rows);
     const linesByInvoice = new Map();
     lineData.rows.forEach((line) => {
       const key = Number(line.invoice_id);
@@ -838,8 +1159,41 @@ router.get('/', [
       });
     });
     result.rows = result.rows.map((invoice) => ({
-      ...buildInvoiceBreakdown(invoice, linesByInvoice.get(Number(invoice.id)) || [],
-        flagsByInvoice.get(Number(invoice.id)) || []),
+      ...(() => {
+        const lineItems = linesByInvoice.get(Number(invoice.id)) || [];
+        const classifiedLine = lineItems.find((line) => {
+          const metadata = line.metadata && typeof line.metadata === 'object' ? line.metadata : {};
+          return metadata.source === LEGACY_CLASSIFICATION_SOURCE ||
+            metadata.legacy_reconciliation === true ||
+            metadata.legacy_reconciliation === 'true';
+        });
+        const metadata = classifiedLine?.metadata || {};
+        const carryForwardHistory = carryForwardSourceIds.has(Number(invoice.id)) ||
+          invoice.status === 'Carried Forward';
+        return {
+          ...buildInvoiceBreakdown(invoice, lineItems, flagsByInvoice.get(Number(invoice.id)) || []),
+          legacy_reconciliation: !carryForwardHistory && classifiedLine ? {
+            state: 'RECONCILED',
+            category: metadata.category || classifiedLine.service_key,
+            service_key: metadata.service_key || classifiedLine.service_key,
+            actor_id: metadata.actor_id == null ? null : Number(metadata.actor_id),
+            actor_name: metadata.actor_name || null,
+            classified_at: metadata.classified_at || null,
+            reason: metadata.reason || null,
+            previous_classification: metadata.previous_classification ?? null,
+          } : null,
+          reconciliation_state: carryForwardHistory ? null : (
+            classifiedLine ? 'RECONCILED' : (
+              !lineData.available ||
+              lineItems.some((line) => String(line.line_type || '').toLowerCase() === 'charge') ||
+              Number(invoice.amount_due || 0) <= Number(invoice.amount_paid || 0)
+                ? null
+                : 'REQUIRES_RECONCILIATION'
+            )
+          ),
+          carry_forward_history: carryForwardHistory,
+        };
+      })(),
       snapshot_available: lineData.available && (linesByInvoice.get(Number(invoice.id)) || []).length > 0,
       snapshot_unavailable_reason: lineData.available
         ? ((linesByInvoice.get(Number(invoice.id)) || []).length ? null : 'No persisted invoice line-item snapshot')

@@ -87,6 +87,12 @@ const PaymentDashboard = () => {
   const [editArrearsAmount, setEditArrearsAmount] = useState('');
   const [editArrearsDescription, setEditArrearsDescription] = useState('');
   const [editArrearsSaving, setEditArrearsSaving] = useState(false);
+  // Existing legacy invoices are classified in-place. This is intentionally
+  // separate from the Missing Charge workflow, which creates a new invoice.
+  const [legacyInvoice, setLegacyInvoice] = useState(null);
+  const [legacyCategory, setLegacyCategory] = useState('tuition');
+  const [legacyReason, setLegacyReason] = useState('');
+  const [legacySaving, setLegacySaving] = useState(false);
 
   // Check if user is admin
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
@@ -309,6 +315,37 @@ const PaymentDashboard = () => {
       toast.error(err.message || 'Failed to update arrears invoice');
     } finally {
       setEditArrearsSaving(false);
+    }
+  };
+
+  const openLegacyClassification = (invoice) => {
+    setLegacyInvoice(invoice);
+    setLegacyCategory('tuition');
+    setLegacyReason('');
+  };
+
+  const handleClassifyLegacy = async (event) => {
+    event.preventDefault();
+    if (!legacyInvoice || legacyReason.trim().length < 10) {
+      toast.error('Enter a meaningful reason of at least 10 characters.');
+      return;
+    }
+    setLegacySaving(true);
+    try {
+      const response = await fetch(`/api/invoices/${legacyInvoice.id}/classify-legacy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: legacyCategory, reason: legacyReason.trim() }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Could not classify legacy invoice');
+      toast.success(data.message || 'Legacy invoice classified');
+      setLegacyInvoice(null);
+      fetchInvoices();
+    } catch (error) {
+      toast.error(error.message || 'Could not classify legacy invoice');
+    } finally {
+      setLegacySaving(false);
     }
   };
 
@@ -839,6 +876,12 @@ const PaymentDashboard = () => {
                       </tr>
                     ) : invoices.map((invoice) => {
                       const isArrearsInvoice = (invoice.description || '').toLowerCase().includes('arrears');
+                      const isCarriedForwardHistory = invoice.carry_forward_history ||
+                        invoice.status === 'Carried Forward';
+                      const requiresLegacyReconciliation = !isCarriedForwardHistory &&
+                        invoice.reconciliation_state === 'REQUIRES_RECONCILIATION' &&
+                        Number(invoice.outstanding_balance || 0) > 0;
+                      const legacyReconciliation = invoice.legacy_reconciliation;
                       return (
                         <React.Fragment key={invoice.id}>
                         <tr className="hover:bg-gray-50">
@@ -890,6 +933,22 @@ const PaymentDashboard = () => {
                                 <Pencil className="h-3 w-3" /> Edit
                               </button>
                             )}
+                            {requiresLegacyReconciliation && (
+                              <button
+                                onClick={() => openLegacyClassification(invoice)}
+                                className="flex items-center gap-1 text-xs px-2 py-1 mt-1 bg-amber-50 text-amber-700 border border-amber-300 rounded hover:bg-amber-100"
+                              >
+                                Reconcile Existing Invoice
+                              </button>
+                            )}
+                            {legacyReconciliation?.state === 'RECONCILED' && (
+                              <div className="text-xs text-emerald-700 font-medium">
+                                Reconciled as {String(legacyReconciliation.category || '').replaceAll('_', ' ')}
+                              </div>
+                            )}
+                            {isCarriedForwardHistory && (
+                              <div className="text-xs text-slate-600 font-medium">Carried forward history · classification unavailable</div>
+                            )}
                           </td>
                         </tr>
                         <tr className="bg-gray-50">
@@ -912,6 +971,20 @@ const PaymentDashboard = () => {
                               <span className="ml-4 text-amber-700">
                                 Review: {(invoice.payment_review_flags || []).map((flag) => flag.type).join(', ')}
                               </span>
+                            )}
+                            {requiresLegacyReconciliation && (
+                              <span className="ml-4 text-amber-700 font-medium">Requires reconciliation</span>
+                            )}
+                            {legacyReconciliation?.state === 'RECONCILED' && (
+                              <span className="ml-4 text-emerald-700">
+                                Reconciled as {String(legacyReconciliation.category || '').replaceAll('_', ' ')}
+                                {legacyReconciliation.actor_name ? ` by ${legacyReconciliation.actor_name}` : ''}
+                                {legacyReconciliation.classified_at ? ` on ${new Date(legacyReconciliation.classified_at).toLocaleString()}` : ''}
+                                {legacyReconciliation.reason ? ` — ${legacyReconciliation.reason}` : ''}
+                              </span>
+                            )}
+                            {isCarriedForwardHistory && (
+                              <span className="ml-4 text-slate-600 font-medium">Carried forward history; not payable here</span>
                             )}
                           </td>
                         </tr>
@@ -955,6 +1028,63 @@ const PaymentDashboard = () => {
           )}
         </div>
       </div>
+
+      {/* Classify an existing legacy invoice without creating a replacement. */}
+      {legacyInvoice && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <form onSubmit={handleClassifyLegacy} className="bg-white rounded-lg p-6 w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-medium text-gray-900">Reconcile Existing Invoice</h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  {legacyInvoice.first_name} {legacyInvoice.last_name} · {formatCurrency(legacyInvoice.amount_due)} due ·
+                  {' '}{formatCurrency(legacyInvoice.amount_paid)} paid · {formatCurrency(legacyInvoice.outstanding_balance)} outstanding
+                </p>
+              </div>
+              <button type="button" onClick={() => setLegacyInvoice(null)} className="text-gray-400 hover:text-gray-600">×</button>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              This attaches provenance to invoice #{legacyInvoice.id} and preserves its amount, payment history, and allocations.
+              It does not create a new invoice.
+            </p>
+            <label className="block text-sm font-medium text-gray-700 mb-3">
+              Classification
+              <select
+                value={legacyCategory}
+                onChange={(event) => setLegacyCategory(event.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md"
+              >
+                <option value="tuition">Tuition</option>
+                <option value="boarding">Boarding</option>
+                <option value="transport">Transport</option>
+                <option value="aftercare">Aftercare</option>
+                <option value="other_recurring">Other recurring</option>
+              </select>
+            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-4">
+              Reconciliation reason
+              <textarea
+                value={legacyReason}
+                onChange={(event) => setLegacyReason(event.target.value)}
+                minLength={10}
+                maxLength={500}
+                rows={4}
+                required
+                placeholder="Explain how the existing invoice was confirmed (minimum 10 characters)."
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md"
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setLegacyInvoice(null)} className="px-4 py-2 border rounded-md text-gray-700">
+                Cancel
+              </button>
+              <button type="submit" disabled={legacySaving} className="px-4 py-2 rounded-md bg-amber-600 text-white disabled:opacity-50">
+                {legacySaving ? 'Saving…' : 'Classify existing invoice'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Generate Invoices Modal */}
       {showGenerateModal && (

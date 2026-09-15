@@ -1,0 +1,268 @@
+Harmony Finance Follow-Up — Existing Legacy Invoice Reconciliation
+
+The latest production verification has exposed the final recurring-payment blocker.
+
+Parent Submit Proof now correctly detects four historical recurring balances, but displays:
+
+Tuition — R200 outstanding
+Requires reconciliation before payment
+
+Tuition — R2,350 outstanding
+Requires reconciliation before payment
+
+Tuition — R950 outstanding
+Requires reconciliation before payment
+
+Tuition — R2,350 outstanding
+Requires reconciliation before payment
+
+These correspond to existing historical invoice balances.
+
+They are NOT new charges.
+
+DO NOT:
+
+create replacement invoices
+duplicate these balances
+use current service pricing to reconstruct them
+silently rewrite historical amounts
+deploy automatically
+run migrations automatically
+1. Add controlled reconciliation for EXISTING legacy invoices
+
+We currently have a Reconcile Charge feature intended for a genuinely missing charge.
+
+That is NOT appropriate here.
+
+These invoices already exist and already carry authoritative outstanding balances.
+
+Add a separate Admin action:
+
+Reconcile Existing Invoice
+
+or:
+
+Classify Legacy Invoice
+
+This action must attach classification/provenance to the existing invoice rather than creating another invoice.
+
+2. Required Admin workflow
+
+For each ambiguous historical invoice, Admin should see:
+
+Existing invoice
+Billing period
+Original amount due
+Amount paid
+Outstanding
+Existing description
+Current classification state
+
+Admin then chooses:
+
+Tuition
+Boarding
+Transport
+Aftercare
+Other recurring
+
+Require:
+
+reconciliation reason
+
+Example:
+
+Existing April 2026 school-fee invoice confirmed as Tuition.
+3. Reconciliation MUST NOT change financial totals
+
+Reconciliation must preserve:
+
+invoice.id
+amount_due
+amount_paid
+outstanding balance
+payment history
+existing allocations
+due date
+invoice reference
+
+It must NOT:
+
+create a new invoice
+increase amount due
+create a new payment
+modify historical allocations
+
+The purpose is only to give the existing obligation an authoritative category.
+
+4. Persist classification safely
+
+Inspect the current schema first.
+
+Prefer existing metadata / invoice classification fields if available.
+
+The reconciliation needs enough persisted evidence for:
+
+getPayableObligations(studentId)
+
+to safely recognize the existing invoice as Tuition/another recurring service.
+
+Do not rely on:
+
+current service pricing
+current enrollment flags
+frontend-only state
+
+If schema is genuinely insufficient, explain the smallest additive migration required, but DO NOT RUN IT.
+
+5. Parent behaviour after reconciliation
+
+Before:
+
+Tuition
+R950 outstanding
+Requires reconciliation before payment
+
+After Admin confirms it as Tuition:
+
+Tuition — April 2026
+R950 outstanding
+
+selectable normally.
+
+Likewise:
+
+Tuition — July 2026 — R200 outstanding
+Tuition — August 2026 — R2,350 outstanding
+Tuition — September 2026 — R2,350 outstanding
+
+Use the actual persisted dates/periods.
+
+Do not hardcode these months.
+
+6. Oldest-unpaid behaviour
+
+Once classified:
+
+Tuition payments should continue using:
+
+oldest unpaid Tuition first
+
+unless Parent/Admin explicitly targets a particular valid invoice.
+
+7. Admin visibility
+
+In:
+
+Admin → Invoices
+Admin → learner finance history
+
+visibly mark ambiguous legacy invoices:
+
+Requires reconciliation
+
+and provide the reconciliation action.
+
+After reconciliation show:
+
+Reconciled as Tuition
+
+with:
+
+Admin actor
+date/time
+reason
+8. Audit trail
+
+Add an immutable audit event:
+
+LEGACY_INVOICE_CLASSIFIED
+
+or equivalent.
+
+Include:
+
+invoice ID
+learner ID
+previous classification
+new classification
+actor
+reason
+timestamp
+
+No amount changes should occur.
+
+9. One-off pending-review behaviour
+
+Latest Parent screen also shows an R1,200 one-off fee with:
+
+PENDING REVIEW
+
+A fee in PENDING REVIEW must:
+
+remain visible so Parent understands it exists
+NOT be selectable again
+clearly say payment is awaiting school review
+
+Do not allow duplicate proof/payment submission against the same reserved obligation.
+
+Once its pending proof is:
+
+Approved
+→ show Paid / remove from payable options
+
+Rejected
+→ return remaining amount to payable state
+10. Improve recurring labels
+
+Do not show four identical rows named only:
+
+Tuition
+
+Include period:
+
+Tuition — April 2026
+Tuition — July 2026
+Tuition — August 2026
+Tuition — September 2026
+
+This is important when Parents pay arrears.
+
+11. Tests
+
+Add tests for:
+
+ambiguous legacy invoice → Requires reconciliation
+classification as Tuition
+no financial total changes
+no duplicate invoice
+audit entry created
+Parent becomes able to select reconciled obligation
+oldest unpaid ordering
+partial legacy balance
+existing allocations preserved
+invalid category rejected
+reason required
+Parent cannot perform reconciliation
+unrelated Admin permissions respected
+one-off PENDING REVIEW cannot be selected twice
+rejected one-off becomes payable again
+approved one-off disappears from payable choices
+Final report
+
+Return:
+
+Why these four existing invoices currently require reconciliation
+Existing schema available for classification
+Reconciliation design implemented
+Proof that no amounts/invoices were duplicated
+Parent payable behaviour after reconciliation
+One-off Pending Review behaviour
+Files changed
+Whether migration is required
+Tests added
+Test results
+Exact production steps for reconciling the existing Tuition invoices
+
+Do not deploy automatically.
+Do not run migrations automatically.

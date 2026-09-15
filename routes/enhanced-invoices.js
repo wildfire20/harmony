@@ -819,7 +819,8 @@ router.get('/student-payment-history/:studentNumber', [
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 
                     'July', 'August', 'September', 'October', 'November', 'December'];
     authoritativeLedger.invoices.forEach(inv => {
-      if (!inv.counted_in_totals) return;
+      if (!inv.counted_in_totals && !inv.carry_forward_history &&
+          inv.status !== 'Carried Forward') return;
       if (!inv.due_date) return;
       const date = new Date(inv.due_date);
       const year = date.getUTCFullYear();
@@ -864,6 +865,10 @@ router.get('/student-payment-history/:studentNumber', [
         allocatedPayments: inv.allocated_effective_payments,
         reviewFlags: inv.payment_review_flags,
         reviewRequired: inv.review_required,
+         reconciliationState: inv.reconciliation_state || null,
+         reconciliation: inv.legacy_reconciliation || null,
+         legacyReconciliation: inv.legacy_reconciliation || null,
+         carryForwardHistory: Boolean(inv.carry_forward_history || inv.status === 'Carried Forward'),
          status: paymentStatus,
          paymentStatus,
         reference: inv.reference_number || '-'

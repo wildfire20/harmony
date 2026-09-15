@@ -14,6 +14,11 @@ const {
   invoiceCategoryBalances,
 } = require('../services/financeLedger');
 const { getPayableObligations } = require('../services/payableObligations');
+const {
+  invoiceObligationLockKeys,
+  acquireInvoiceObligationLocks,
+  normaliseCategory,
+} = require('../services/invoiceObligationLocks');
 const { detectType } = require('../services/admissionsDocumentService');
 const { notifyPayment } = require('../services/parentNotificationService');
 
@@ -189,6 +194,25 @@ const optionalPositiveId = (value, label) => {
   }
   return parsed;
 };
+
+const canonicalObligationLockKeys = (studentId, obligations = []) => [...new Set(
+  obligations.flatMap((obligation) => invoiceObligationLockKeys({
+    invoiceId: obligation?.invoice_id,
+    studentId,
+    lineId: obligation?.invoice_line_item_id == null ? 'legacy' : obligation.invoice_line_item_id,
+    category: normaliseCategory(obligation?.category || obligation?.service_key),
+    feeId: obligation?.fee_id,
+  })),
+)].sort();
+
+const acquireCanonicalObligationLocks = (executor, studentId, obligations) =>
+  acquireInvoiceObligationLocks(executor, obligations.map((obligation) => ({
+    invoiceId: obligation?.invoice_id,
+    studentId,
+    lineId: obligation?.invoice_line_item_id == null ? 'legacy' : obligation.invoice_line_item_id,
+    category: normaliseCategory(obligation?.category || obligation?.service_key),
+    feeId: obligation?.fee_id,
+  })));
 
 const resolveChild = async (parentId, childId) => {
   const q = childId
@@ -631,6 +655,11 @@ router.post('/', requireParent, uploadReceipt, async (req, res) => {
       }
     }
     await client.query('BEGIN');
+    // Reservation locks are required for every selected-obligation submission,
+    // including requests carrying an idempotency key. They are deliberately
+    // acquired before any pending-payments read so the read and INSERT share
+    // one serialized critical section.
+    await acquireCanonicalObligationLocks(client, child.id, selectedObligations);
     if (idempotencyKey) {
       await client.query(
         `SELECT pg_advisory_xact_lock(hashtext('parent-payment-proof'), hashtext($1))`,
@@ -655,6 +684,10 @@ router.post('/', requireParent, uploadReceipt, async (req, res) => {
     }
     let storedObligations = [];
     if (selectedObligations.length) {
+      // Re-read the canonical payable model after the advisory locks. A
+      // competing committed pending proof is therefore observed before this
+      // transaction can INSERT its own reservation.
+      await validateCanonicalSelections(client, child.id, selectedObligations);
       const resolved = await resolvePaymentProposals(client, child.id, selectedObligations);
       validateResolvedPlan(resolved, normalizedAmount);
       storedObligations = normaliseStoredObligations(resolved);
@@ -1201,3 +1234,6 @@ module.exports.applyPaymentToInvoices = applyPaymentToInvoices;
 module.exports.approvalUnallocatedDisposition = approvalUnallocatedDisposition;
 module.exports.parseSelectedObligations = parseSelectedObligations;
 module.exports.validateExplicitObligationAmounts = validateExplicitObligationAmounts;
+module.exports.canonicalObligationLockKeys = canonicalObligationLockKeys;
+module.exports.acquireCanonicalObligationLocks = acquireCanonicalObligationLocks;
+module.exports.validateCanonicalSelections = validateCanonicalSelections;

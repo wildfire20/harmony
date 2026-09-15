@@ -12,6 +12,10 @@ const StudentPaymentExport = () => {
   const [loading, setLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [legacyTarget, setLegacyTarget] = useState(null);
+  const [legacyCategory, setLegacyCategory] = useState('tuition');
+  const [legacyReason, setLegacyReason] = useState('');
+  const [legacySaving, setLegacySaving] = useState(false);
 
   const handleSessionExpired = () => {
     toast.error('Your session has expired. Please log in again.');
@@ -107,6 +111,32 @@ const StudentPaymentExport = () => {
   const clearSelection = () => {
     setSelectedStudent(null);
     setPaymentHistory(null);
+    setLegacyTarget(null);
+  };
+
+  const submitLegacyClassification = async (event) => {
+    event.preventDefault();
+    if (!legacyTarget || legacyReason.trim().length < 10) {
+      toast.error('A meaningful reason of at least 10 characters is required.');
+      return;
+    }
+    setLegacySaving(true);
+    try {
+      const response = await fetch(`/api/invoices/${legacyTarget.invoiceId}/classify-legacy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: legacyCategory, reason: legacyReason.trim() }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Could not classify existing invoice');
+      toast.success(data.message || 'Existing invoice classified');
+      setLegacyTarget(null);
+      selectStudent(selectedStudent);
+    } catch (error) {
+      toast.error(error.message || 'Could not classify existing invoice');
+    } finally {
+      setLegacySaving(false);
+    }
   };
 
   const getStatusColor = (status) => {
@@ -275,7 +305,7 @@ const StudentPaymentExport = () => {
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Amount Paid</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Outstanding</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Credit</th>
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status</th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status / reconciliation</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
@@ -299,6 +329,32 @@ const StudentPaymentExport = () => {
                                 {month.paymentStatus}
                               </span>
                             </div>
+                            {month.reconciliationState === 'REQUIRES_RECONCILIATION' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setLegacyTarget(month);
+                                  setLegacyCategory('tuition');
+                                  setLegacyReason('');
+                                }}
+                                className="mt-2 text-xs px-2 py-1 rounded border border-amber-300 bg-amber-50 text-amber-700"
+                              >
+                                Classify existing invoice
+                              </button>
+                            )}
+                            {month.carryForwardHistory && (
+                              <div className="mt-2 text-xs text-slate-600 font-medium">
+                                Carried forward history · classification unavailable
+                              </div>
+                            )}
+                            {month.reconciliation?.state === 'RECONCILED' && (
+                              <div className="mt-2 text-xs text-emerald-700">
+                                Reconciled as {String(month.reconciliation.category || '').replaceAll('_', ' ')}
+                                {month.reconciliation.actor_name ? ` by ${month.reconciliation.actor_name}` : ''}
+                                {month.reconciliation.classified_at ? ` on ${new Date(month.reconciliation.classified_at).toLocaleString()}` : ''}
+                                {month.reconciliation.reason ? ` — ${month.reconciliation.reason}` : ''}
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -308,6 +364,45 @@ const StudentPaymentExport = () => {
               )}
             </div>
           ) : null}
+        </div>
+      )}
+      {legacyTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <form onSubmit={submitLegacyClassification} className="w-full max-w-lg mx-4 rounded-lg bg-white p-6 shadow-xl">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Classify Existing Invoice</h3>
+                <p className="mt-1 text-xs text-gray-500">
+                  Invoice #{legacyTarget.invoiceId} · {legacyTarget.month} {legacyTarget.year} · preserves the existing balance
+                </p>
+              </div>
+              <button type="button" onClick={() => setLegacyTarget(null)} className="text-gray-400">×</button>
+            </div>
+            <label className="mt-4 block text-sm font-medium text-gray-700">
+              Category
+              <select value={legacyCategory} onChange={(event) => setLegacyCategory(event.target.value)}
+                className="mt-1 w-full rounded border border-gray-300 p-2">
+                <option value="tuition">Tuition</option>
+                <option value="boarding">Boarding</option>
+                <option value="transport">Transport</option>
+                <option value="aftercare">Aftercare</option>
+                <option value="other_recurring">Other recurring</option>
+              </select>
+            </label>
+            <label className="mt-3 block text-sm font-medium text-gray-700">
+              Reason
+              <textarea required minLength={10} maxLength={500} rows={4} value={legacyReason}
+                onChange={(event) => setLegacyReason(event.target.value)}
+                className="mt-1 w-full rounded border border-gray-300 p-2"
+                placeholder="Explain how the existing invoice was confirmed." />
+            </label>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setLegacyTarget(null)} className="rounded border px-4 py-2 text-gray-700">Cancel</button>
+              <button type="submit" disabled={legacySaving} className="rounded bg-amber-600 px-4 py-2 text-white disabled:opacity-50">
+                {legacySaving ? 'Saving…' : 'Classify invoice'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

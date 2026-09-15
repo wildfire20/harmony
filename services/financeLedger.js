@@ -9,6 +9,7 @@
  * Admin/Parent discrepancy.
  */
 const db = require('../config/database');
+const { getCarryForwardSourceIds } = require('./carryForwardLineage');
 const { appendPeriodFilters, parseInvoiceFilterQuery } = require('../utils/invoiceQuery');
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
@@ -101,6 +102,13 @@ function buildInvoiceBreakdown(invoice, rawLines = [], reviewFlags = []) {
   const oneOffLines = charges.filter((line) => (
     line.metadata && (line.metadata.fee_id != null || line.metadata.category === 'one_off')
   ));
+  const legacyLine = charges.find((line) => {
+    const metadata = line.metadata || {};
+    return metadata.source === 'legacy_invoice_reconciliation' ||
+      metadata.legacy_reconciliation === true ||
+      metadata.legacy_reconciliation === 'true';
+  });
+  const legacyMetadata = legacyLine?.metadata || {};
   return {
     ...invoice,
     status: invoiceStatus(amountDue, amountPaid, invoice.status),
@@ -122,6 +130,16 @@ function buildInvoiceBreakdown(invoice, rawLines = [], reviewFlags = []) {
       .map((line) => line.metadata?.fee_id)
       .filter((id) => id != null)
       .map((id) => Number(id)))],
+    legacy_reconciliation: legacyLine ? {
+      state: 'RECONCILED',
+      category: legacyMetadata.category || legacyLine.service_key,
+      service_key: legacyMetadata.service_key || legacyLine.service_key,
+      actor_id: legacyMetadata.actor_id == null ? null : Number(legacyMetadata.actor_id),
+      actor_name: legacyMetadata.actor_name || null,
+      classified_at: legacyMetadata.classified_at || null,
+      reason: legacyMetadata.reason || null,
+      previous_classification: legacyMetadata.previous_classification ?? null,
+    } : null,
     snapshot_available: lines.length > 0,
     payment_review_flags: reviewFlags,
     review_required: reviewFlags.length > 0,
@@ -469,6 +487,7 @@ async function getStudentLedger(studentId, executor = db) {
   ]);
 
   const charge = configuredComponents(student, priceResult.rows);
+  const carryForwardSourceIds = await getCarryForwardSourceIds(executor, invoiceResult.rows);
   const transactions = transactionResult.rows.map((row) => ({
     ...row,
     amount: money(row.amount),
@@ -527,6 +546,13 @@ async function getStudentLedger(studentId, executor = db) {
     const oneOffChargeLines = charges.filter((line) => (
       line.metadata && (line.metadata.fee_id != null || line.metadata.category === 'one_off')
     ));
+    const legacyLine = charges.find((line) => {
+      const metadata = line.metadata || {};
+      return metadata.source === 'legacy_invoice_reconciliation' ||
+        metadata.legacy_reconciliation === true ||
+        metadata.legacy_reconciliation === 'true';
+    });
+    const legacyMetadata = legacyLine?.metadata || {};
     const paymentReviewFlags = [];
     const invoiceDate = row.due_date ? new Date(row.due_date) : null;
     const invoiceMonth = invoiceDate && invoiceDate.getUTCMonth() + 1;
@@ -546,6 +572,8 @@ async function getStudentLedger(studentId, executor = db) {
       }
     }
     const status = invoiceStatus(amountDue, amountPaid, row.status);
+    const carryForwardHistory = carryForwardSourceIds.has(Number(row.id)) ||
+      status === 'Carried Forward';
     const categoryBalances = invoiceCategoryBalances(
       lines,
       amountDue,
@@ -560,7 +588,7 @@ async function getStudentLedger(studentId, executor = db) {
     return {
       ...row,
       status,
-      counted_in_totals: status !== 'Carried Forward',
+      counted_in_totals: !carryForwardHistory,
       amount_due: amountDue,
       amount_paid: amountPaid,
       outstanding_balance: outstanding,
@@ -583,6 +611,22 @@ async function getStudentLedger(studentId, executor = db) {
         .map((id) => Number(id)))],
       category_balances: legacyCategoryReview ? [] : categoryBalances,
       category_allocation_review_required: legacyCategoryReview,
+      legacy_reconciliation: !carryForwardHistory && legacyLine ? {
+        state: 'RECONCILED',
+        category: legacyMetadata.category || legacyLine.service_key,
+        service_key: legacyMetadata.service_key || legacyLine.service_key,
+        actor_id: legacyMetadata.actor_id == null ? null : Number(legacyMetadata.actor_id),
+        actor_name: legacyMetadata.actor_name || null,
+        classified_at: legacyMetadata.classified_at || null,
+        reason: legacyMetadata.reason || null,
+        previous_classification: legacyMetadata.previous_classification ?? null,
+      } : null,
+      reconciliation_state: carryForwardHistory ? null : (
+        legacyLine ? 'RECONCILED' : (
+          lines.length === 0 && outstanding > 0 ? 'REQUIRES_RECONCILIATION' : null
+        )
+      ),
+      carry_forward_history: carryForwardHistory,
       // This is derived from normalized rows loaded from the persisted
       // invoice-line snapshot, never from current pricing or enrollment.
       snapshot_available: lines.length > 0,
