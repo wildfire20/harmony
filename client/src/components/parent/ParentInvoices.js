@@ -12,6 +12,25 @@ const STATUS_CONFIG = {
 };
 
 const R = (n) => `R ${Number(n || 0).toFixed(2)}`;
+const SERVICE_LABELS = {
+  tuition: 'Tuition',
+  boarding: 'Boarding',
+  transport: 'Transport',
+  aftercare: 'Aftercare',
+  one_off: 'One-off fee',
+};
+const effectiveLegacySubtitle = (invoice) => {
+  const rawCategory = invoice?.legacy_reconciliation?.category;
+  const category = typeof rawCategory === 'string' && !/^\d+$/.test(rawCategory.trim())
+    ? rawCategory.trim().toLowerCase()
+    : '';
+  if (category) {
+    const label = SERVICE_LABELS[category] || category.replace(/_/g, ' ');
+    return `Legacy ${label}`;
+  }
+  return typeof invoice?.description === 'string' && !/^\d+$/.test(invoice.description.trim())
+    ? invoice.description : '';
+};
 
 const ParentInvoices = ({ child }) => {
   const [tab, setTab] = useState('invoices');
@@ -184,8 +203,8 @@ const ParentInvoices = ({ child }) => {
                         <p className="text-gray-700 text-sm font-medium">
                           {dueDate ? dueDate.toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' }) : '—'}
                         </p>
-                        {inv.description && (
-                          <p className="text-gray-400 text-xs truncate max-w-24">{inv.description}</p>
+                        {effectiveLegacySubtitle(inv) && (
+                          <p className="text-gray-400 text-xs truncate max-w-24">{effectiveLegacySubtitle(inv)}</p>
                         )}
                         {inv.discount_lines?.length > 0 && (
                           <p className="text-emerald-600 text-xs">

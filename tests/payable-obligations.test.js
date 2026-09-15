@@ -107,6 +107,7 @@ test('explicit empty approval records an unallocated transaction instead of olde
   const executor = {
     async query(sql, params = []) {
       queries.push({ sql, params });
+      if (sql.includes("set_config('harmony.finance_command'")) return { rows: [] };
       if (sql.includes('SELECT student_number FROM users')) return { rows: [{ student_number: 'TEST-7' }] };
       if (sql.includes('INSERT INTO payment_transactions')) return { rows: [{ id: 900 }] };
       throw new Error(`Unexpected query: ${sql}`);

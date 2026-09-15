@@ -10,8 +10,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { notifyInvoice, notifyPayment } = require('../services/parentNotificationService');
 const { logAudit, getIp } = require('../utils/auditLogger');
 const {
-  getStudentLedger, getFinanceSummary, allocatePayment,
-  buildInvoiceSnapshotLines,
+  getStudentLedger, getFinanceSummary,
   invoiceStatusExpression, loadInvoiceLineItems, buildInvoiceBreakdown, invoiceStatus,
 } = require('../services/financeLedger');
 const {
@@ -23,6 +22,7 @@ const { getCarryForwardSourceIds } = require('../services/carryForwardLineage');
 const {
   CORRECTION_SOURCE, resolveLegacyClassification,
 } = require('../services/legacyClassification');
+const financeCommands = require('../services/financeCommandService');
 
 const router = express.Router();
 const RECONCILABLE_SERVICES = new Map([
@@ -105,38 +105,84 @@ router.post('/generate-monthly', [
       });
     }
     const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const result = await financeCommands.generateMonthlyInvoices({
+      month: Number(req.body.month),
+      year: Number(req.body.year),
+      idempotencyKey: req.get('Idempotency-Key') || req.body.idempotencyKey,
+      actor: {
+        id: req.user.id,
+        name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        role: req.user.role,
+        ipAddress: getIp(req),
+      },
+    });
+    const skipMsg = result.skipped > 0
+      ? ` (${result.skipped} student${result.skipped !== 1 ? 's' : ''} already had invoices — skipped)`
+      : '';
+    return res.status(result.idempotent ? 200 : 201).json({
+      success: true,
+      message: `Successfully generated ${result.invoicesCreated} invoices for ${result.month}/${result.year}${skipMsg}`,
+      invoices: result.invoices,
+      summary: {
+        totalStudents: result.totalStudents,
+        invoicesCreated: result.invoicesCreated,
+        skipped: result.skipped,
+        siblingDiscountsApplied: result.siblingDiscountsApplied,
+        teacherDiscountsApplied: result.teacherDiscountsApplied,
+        month: result.month,
+        year: result.year,
+        dueDate: result.dueDate,
+      },
+    });
+    /*
+     * Historical implementation retained in this comment only for source
+     * archaeology. All monthly accounting now belongs to the command above.
+    if (Object.prototype.hasOwnProperty.call(req.body, 'amountDue')) {
+      return res.status(400).json({
+        success: false,
+        message: 'amountDue is obsolete; monthly invoices use configured service prices, enrollment, and approved discounts',
+      });
+    }
+    const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
 
     const { month, year } = req.body;
     const dueDate = new Date(year, month, 0); // Last day of the month
+    const requestedPeriod = `${year}-${String(month).padStart(2, '0')}`;
+    const currentPeriod = new Date().toISOString().slice(0, 7);
+    const isHistoricalPeriod = requestedPeriod < currentPeriod;
 
     console.log('Generating monthly invoices from configured services:', { month, year });
 
     // New finance-truth generation is intentionally fail-closed until the
     // explicit additive schema is installed. Legacy flags must never drive a
     // new invoice.
+    let enrollmentSchemaAvailable = true;
     try {
       await db.query('SELECT 1 FROM learner_discount_assignments LIMIT 1');
       await db.query('SELECT 1 FROM invoice_line_items LIMIT 1');
       await db.query('SELECT billing_mode, bundle_key, included_service_keys FROM service_prices LIMIT 1');
+      await db.query('SELECT 1 FROM service_enrollments LIMIT 1');
     } catch (schemaError) {
       if (schemaError.code === '42P01' || schemaError.code === '42703') {
+        // The explicitly requested historical compatibility path can still
+        // operate on a pre-core installation. It is never permitted for
+        // current or future periods.
         return res.status(503).json({
           success: false,
-          message: 'Monthly finance-truth generation is unavailable until migrations/mini_phase1_finance_truth.sql is applied',
+          message: 'Monthly finance-truth generation is unavailable until the finance core architecture migration is applied',
         });
+      } else {
+        throw schemaError;
       }
-      throw schemaError;
     }
 
     // Get ALL active students (no enrollment date filter — include everyone active)
     const studentsResult = await db.query(`
-      SELECT u.id, u.student_number, u.first_name, u.last_name, u.grade_id, u.class_id,
-             COALESCE(u.is_boarder, false) AS is_boarder,
-             COALESCE(u.uses_transport, false) AS uses_transport,
-             COALESCE(u.uses_aftercare, false) AS uses_aftercare
+      SELECT u.id, u.student_number, u.first_name, u.last_name, u.grade_id, u.class_id
       FROM users u
       WHERE u.role = 'student' AND u.is_active = true
     `);
@@ -202,6 +248,19 @@ router.post('/generate-monthly', [
         ORDER BY display_order, service_key
       `);
       const periodStart = `${year}-${String(month).padStart(2, '0')}-01`;
+      const enrollmentRows = enrollmentSchemaAvailable
+        ? await getBillingEnrollmentsForLearners(
+          lockedStudentsToInvoice.map((student) => student.id),
+          requestedPeriod,
+          client,
+        )
+        : [];
+      const enrollmentsByStudent = new Map();
+      enrollmentRows.forEach((enrollment) => {
+        const studentId = Number(enrollment.student_id);
+        if (!enrollmentsByStudent.has(studentId)) enrollmentsByStudent.set(studentId, []);
+        enrollmentsByStudent.get(studentId).push(enrollment);
+      });
       for (const student of lockedStudentsToInvoice) {
         const assignmentsResult = await client.query(`
           SELECT id, discount_type, calculation_method, amount, percentage,
@@ -212,7 +271,24 @@ router.post('/generate-monthly', [
             AND (ends_on IS NULL OR ends_on >= $2::date)
           ORDER BY id
         `, [student.id, periodStart]);
-        const lines = buildInvoiceSnapshotLines(student, pricesResult.rows, assignmentsResult.rows);
+        const enrollments = enrollmentsByStudent.get(Number(student.id)) || [];
+        // Legacy flags are an explicit, historical-only compatibility path.
+        // They are never consulted for current or future billing, and no
+        // historical service date is inferred when the flag is absent.
+        if (enrollments.length === 0) {
+          const error = new Error(
+            `No effective service enrollment exists for ${student.student_number} in ${requestedPeriod}; `
+            + 'monthly billing requires a persisted effective enrollment',
+          );
+          error.status = 409;
+          throw error;
+        }
+        const lines = buildInvoiceSnapshotLines(
+          student,
+          pricesResult.rows,
+          assignmentsResult.rows,
+          enrollments,
+        );
         const chargeLines = lines.filter((line) => line.line_type === 'charge' && !line.is_included);
         const discountLines = lines.filter((line) => line.line_type === 'discount');
         const gross = chargeLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
@@ -221,10 +297,17 @@ router.post('/generate-monthly', [
         const invoiceResult = await client.query(`
           INSERT INTO invoices (
             student_id, student_number, amount_due, due_date, status,
+            billing_period, invoice_kind, invoice_source, finance_origin,
             reference_number, created_by, created_at
-          ) VALUES ($1, $2, $3, $4, 'Unpaid', $5, $6, NOW())
+          ) VALUES ($1, $2, $3, $4, 'Unpaid', $5::date, 'monthly',
+                    $6, $7, $8, $9, NOW())
           RETURNING *
-        `, [student.id, student.student_number, netDue, dueDate, student.student_number, req.user.id]);
+        `, [
+          student.id, student.student_number, netDue, dueDate, periodStart,
+          'monthly_generation',
+          'canonical',
+          student.student_number, req.user.id,
+        ]);
         const invoice = invoiceResult.rows[0];
         for (const line of lines) {
           await client.query(`
@@ -290,9 +373,10 @@ router.post('/generate-monthly', [
       }
     });
 
+    */
   } catch (error) {
     console.error('Generate invoices error:', error);
-    res.status(500).json({ 
+    res.status(error.status || 500).json({
       success: false,
       message: 'Failed to generate invoices',
       error: error.message 
@@ -307,27 +391,14 @@ router.post('/recalculate-status', [
   authorize('admin', 'super_admin')
 ], async (req, res) => {
   try {
-    const result = await db.query(`
-      UPDATE invoices SET
-        status = CASE
-          WHEN amount_paid > amount_due THEN 'Overpaid'
-          WHEN amount_due = 0 THEN 'Paid'
-          WHEN amount_paid >= amount_due THEN 'Paid'
-          WHEN amount_paid > 0            THEN 'Partial'
-          ELSE 'Unpaid'
-        END,
-        updated_at = NOW()
-      WHERE status IS DISTINCT FROM (
-        CASE
-          WHEN amount_paid > amount_due THEN 'Overpaid'
-          WHEN amount_due = 0 THEN 'Paid'
-          WHEN amount_paid >= amount_due THEN 'Paid'
-          WHEN amount_paid > 0            THEN 'Partial'
-          ELSE 'Unpaid'
-        END
-      )
-      RETURNING id, status, student_number, amount_due, amount_paid, due_date
-    `);
+    const result = await financeCommands.recalculateInvoiceStatuses({
+      actor: {
+        id: req.user.id,
+        name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        role: req.user.role,
+        ipAddress: getIp(req),
+      },
+    });
 
     console.log(`Recalculated status for ${result.rowCount} invoices`);
 
@@ -387,12 +458,14 @@ router.post('/reconcile-missing-charge', [
     invoice = (await client.query(`
       INSERT INTO invoices
         (student_id, student_number, amount_due, due_date, status,
+         billing_period, invoice_kind, invoice_source, finance_origin,
          reference_number, description, created_by, created_at)
-      VALUES ($1::integer,$2,$3,$4::date,'Unpaid',$5,$6,$7::integer,NOW())
+      VALUES ($1::integer,$2,$3,$4::date,'Unpaid',$5::date,'reconciliation',
+              'legacy_invoice_reconciliation','legacy',$6,$7,$8::integer,NOW())
       RETURNING *
     `, [
-      studentId, learner.student_number, amount.toFixed(2), dueDate, reference,
-      `Reconciled ${label} charge — ${billingPeriod}`, Number(req.user.id),
+      studentId, learner.student_number, amount.toFixed(2), dueDate, billingPeriod,
+      reference, `Reconciled ${label} charge — ${billingPeriod}`, Number(req.user.id),
     ])).rows[0];
     await client.query(`
       INSERT INTO invoice_line_items
@@ -1011,33 +1084,30 @@ router.post('/manual-arrears', [
     const effectiveDueDate = dueDate || `${new Date().getFullYear()}-12-31`;
     const desc = description || 'Manual arrears entry';
 
-    const result = await db.query(`
-      INSERT INTO invoices (student_id, student_number, amount_due, due_date, status, reference_number, description, created_by, created_at)
-      VALUES ($1, $2, $3, $4, 'Unpaid', $5, $6, $7, NOW())
-      RETURNING *
-    `, [student.id, student.student_number, parseFloat(amount), effectiveDueDate, student.student_number, desc, req.user.id]);
-
-    await logAudit({
-      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-      userRole: req.user.role, action: 'manual_arrears_created',
-      entityType: 'invoice', entityId: result.rows[0].id,
-      details: {
-        summary: `Manual arrears invoice of R${parseFloat(amount).toFixed(2)} for ${student.first_name} ${student.last_name}`,
-        student: `${student.first_name} ${student.last_name}`, student_number: student.student_number,
-        amount: parseFloat(amount), description: desc, due_date: effectiveDueDate
+    const commandResult = await financeCommands.createArrears({
+      studentId: student.id,
+      amount: parseFloat(amount),
+      dueDate: effectiveDueDate,
+      description: desc,
+      actor: {
+        id: req.user.id,
+        name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        role: req.user.role,
+        ipAddress: getIp(req),
       },
-      ipAddress: getIp(req)
+      reference: `ARREARS-${student.student_number}-${effectiveDueDate}`,
     });
+    const invoice = commandResult.invoice;
     await notifyInvoice({
-      invoiceId: result.rows[0].id,
+      invoiceId: invoice.id,
       learnerId: student.id,
-      amount: result.rows[0].amount_due,
+      amount: invoice.amount_due,
     });
 
     res.json({
       success: true,
       message: `Arrears invoice of R${parseFloat(amount).toFixed(2)} created for ${student.first_name} ${student.last_name} (${student.student_number})`,
-      invoice: result.rows[0],
+      invoice,
       student: { id: student.id, studentNumber: student.student_number, firstName: student.first_name, lastName: student.last_name }
     });
   } catch (error) {
@@ -1098,80 +1168,29 @@ router.post('/carry-forward', [
     // Default due date to December 31 of the year being carried FROM (not the current year)
     const effectiveDueDate = dueDate || new Date(parseInt(fromYear), 11, 31);
 
-    const client = await db.pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      const created = [];
-      for (const s of students) {
-        const amount = parseFloat(s.amount);
-        if (!amount || amount <= 0) continue;
-
-        // Create the arrears invoice in the current year
-        const invoiceResult = await client.query(`
-          INSERT INTO invoices (
-            student_id, student_number, amount_due, due_date, status,
-            reference_number, description, created_by, created_at
-          ) VALUES ($1, $2, $3, $4, 'Unpaid', $5, $6, $7, NOW())
-          RETURNING *
-        `, [
-          s.student_id,
-          s.student_number,
-          amount,
-          effectiveDueDate,
-          s.student_number,
-          `Arrears from ${fromYear}`,
-          req.user.id
-        ]);
-        created.push(invoiceResult.rows[0]);
-
-        // Mark every source invoice in this aggregate as Carried Forward and
-        // persist the lineage in the same transaction. Exclude the newly
-        // created successor because its due date may share fromYear.
-        await client.query(`
-          UPDATE invoices
-          SET status = 'Carried Forward',
-              carried_forward_to_invoice_id = $1,
-              updated_at = NOW()
-          WHERE student_id = $2
-            AND EXTRACT(YEAR FROM due_date) = $3
-            AND id <> $1
-            AND status NOT IN ('Paid', 'Overpaid', 'Carried Forward')
-            AND outstanding_balance > 0
-        `, [invoiceResult.rows[0].id, s.student_id, parseInt(fromYear)]);
-      }
-
-      await client.query('COMMIT');
-
-      console.log(`Carried forward arrears for ${created.length} students from ${fromYear}`);
-      await Promise.allSettled(created.map((invoice) => notifyInvoice({
-        invoiceId: invoice.id,
-        learnerId: invoice.student_id,
-        amount: invoice.amount_due,
-      })));
-
-      await logAudit({
-        userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-        userRole: req.user.role, action: 'invoice_carry_forward',
-        entityType: 'invoice', entityId: null,
-        details: {
-          summary: `Arrears carried forward for ${created.length} student(s) from ${fromYear}`,
-          from_year: fromYear, students_count: created.length, due_date: effectiveDueDate
-        },
-        ipAddress: getIp(req)
-      });
-
-      res.json({
-        success: true,
-        message: `Arrears carried forward for ${created.length} student${created.length !== 1 ? 's' : ''} from ${fromYear}`,
-        created
-      });
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    const commandResult = await financeCommands.carryForwardBatch({
+      fromYear: parseInt(fromYear, 10),
+      dueDate: effectiveDueDate,
+      students,
+      actor: {
+        id: req.user.id,
+        name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        role: req.user.role,
+        ipAddress: getIp(req),
+      },
+    });
+    const created = commandResult.created;
+    console.log(`Carried forward arrears for ${created.length} students from ${fromYear}`);
+    await Promise.allSettled(created.map((invoice) => notifyInvoice({
+      invoiceId: invoice.id,
+      learnerId: invoice.student_id,
+      amount: invoice.amount_due,
+    })));
+    res.json({
+      success: true,
+      message: `Arrears carried forward for ${created.length} student${created.length !== 1 ? 's' : ''} from ${fromYear}`,
+      created,
+    });
   } catch (error) {
     console.error('Carry forward error:', error);
     res.status(500).json({ success: false, message: 'Failed to carry forward arrears', error: error.message });
@@ -1204,40 +1223,20 @@ router.put('/:id/arrears', [
       return res.status(403).json({ success: false, message: 'Only arrears invoices can be edited here.' });
     }
 
-    const fields = ['due_date = $1', 'updated_at = NOW()'];
-    const params = [due_date];
-    let p = 2;
-
-    if (amount_due !== undefined) {
-      fields.push(`amount_due = $${p++}`);
-      params.push(parseFloat(amount_due));
-      // outstanding_balance is a generated column — PostgreSQL recalculates it automatically
-    }
-    if (description !== undefined) {
-      fields.push(`description = $${p++}`);
-      params.push(description);
-    }
-
-    params.push(parseInt(id));
-    const result = await db.query(
-      `UPDATE invoices SET ${fields.join(', ')} WHERE id = $${p} RETURNING *`,
-      params
-    );
-
-    await logAudit({
-      userId: req.user.id, userName: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
-      userRole: req.user.role, action: 'invoice_arrears_edit',
-      entityType: 'invoice', entityId: parseInt(id),
-      details: {
-        summary: `Arrears invoice #${id} edited`,
-        old_due_date: inv.due_date, new_due_date: due_date,
-        old_amount: inv.amount_due, new_amount: amount_due || inv.amount_due,
-        student_id: inv.student_id
+    const commandResult = await financeCommands.editArrears({
+      invoiceId: id,
+      dueDate: due_date,
+      amountDue: amount_due,
+      description,
+      actor: {
+        id: req.user.id,
+        name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        role: req.user.role,
+        ipAddress: getIp(req),
       },
-      ipAddress: getIp(req)
     });
 
-    res.json({ success: true, message: 'Arrears invoice updated', invoice: result.rows[0] });
+    res.json({ success: true, message: 'Arrears invoice updated', invoice: commandResult.invoice });
   } catch (error) {
     console.error('Edit arrears invoice error:', error);
     res.status(500).json({ success: false, message: 'Failed to update arrears invoice', error: error.message });
@@ -1817,7 +1816,8 @@ router.post('/process-bank-statement', [
 
         console.log(`Invoice found: ${invoice.reference_number}`);
 
-        const allocation = await allocatePayment(client, {
+        const allocation = await financeCommands.recordPayment({
+          executor: client,
           studentId: invoice.student_id,
           amount: transaction.amount,
           paymentDate: transaction.date,
@@ -1825,6 +1825,14 @@ router.post('/process-bank-statement', [
           reference: transaction.reference,
           description: transaction.description,
           recordedBy: req.user.id,
+          matchedInvoiceId: invoice.id,
+          idempotencyKey: `bank:${transaction.reference}:${transaction.amount}:${transaction.date}`,
+          actor: {
+            id: req.user.id,
+            name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+            role: req.user.role,
+          },
+          action: 'bank_import_payment',
         });
         const overpayment = allocation.allocations.find((item) => item.invoiceId == null);
         const applied = allocation.allocations

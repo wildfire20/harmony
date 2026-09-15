@@ -213,14 +213,29 @@ function invoiceCategoryBalances(rawLines = [], amountDue = 0, transactions = []
   return [...balances.entries()].map(([category, amount]) => ({ category, amount }));
 }
 
-function configuredComponents(student, prices) {
+function enrolledServiceKeys(student, enrollmentRows) {
+  if (!Array.isArray(enrollmentRows)) {
+    // This is intentionally the legacy display-only path.  New billing
+    // callers pass an enrollment array (including []) and therefore cannot
+    // accidentally derive a charge from a current Boolean flag.
+    return new Set([
+      'tuition',
+      ...(student.is_boarder ? ['boarding'] : []),
+      ...(student.uses_transport ? ['transport'] : []),
+      ...(student.uses_aftercare ? ['aftercare'] : []),
+    ]);
+  }
+  return new Set(enrollmentRows
+    .filter((row) => row && row.state === 'active')
+    .map((row) => String(row.service_key || '').toLowerCase())
+    .filter((key) => ['tuition', 'boarding', 'transport', 'aftercare'].includes(key)));
+}
+
+function configuredComponents(student, prices, enrollmentRows) {
   const byKey = new Map(prices.map((price) => [price.service_key, price]));
-  const enabled = [
-    ['tuition', true],
-    ['boarding', Boolean(student.is_boarder)],
-    ['transport', Boolean(student.uses_transport)],
-    ['aftercare', Boolean(student.uses_aftercare)],
-  ];
+  const enrolled = enrolledServiceKeys(student, enrollmentRows);
+  const enabled = ['tuition', 'boarding', 'transport', 'aftercare']
+    .map((key) => [key, enrolled.has(key)]);
   let subtotal = 0;
   const components = enabled
     .filter(([key, isEnabled]) => isEnabled && byKey.has(key))
@@ -259,13 +274,9 @@ function configuredComponents(student, prices) {
  * lines, preventing tuition/aftercare from being charged twice while leaving
  * standalone transport billable.
  */
-function configuredBillableLines(student, prices) {
-  const enabled = new Map([
-    ['tuition', true],
-    ['boarding', Boolean(student.is_boarder)],
-    ['transport', Boolean(student.uses_transport)],
-    ['aftercare', Boolean(student.uses_aftercare)],
-  ]);
+function configuredBillableLines(student, prices, enrollmentRows) {
+  const enabled = new Map([...enrolledServiceKeys(student, enrollmentRows)]
+    .map((key) => [key, true]));
   const includedByBundle = new Set();
   const lines = [];
   const eligiblePrices = prices.filter((price) =>
@@ -439,8 +450,8 @@ function calculateApprovedDiscounts(assignments, chargeLines) {
   return discounts;
 }
 
-function buildInvoiceSnapshotLines(student, prices, assignments = []) {
-  const charges = configuredBillableLines(student, prices);
+function buildInvoiceSnapshotLines(student, prices, assignments = [], enrollmentRows) {
+  const charges = configuredBillableLines(student, prices, enrollmentRows);
   return [...charges, ...calculateApprovedDiscounts(assignments, charges)];
 }
 
@@ -749,7 +760,12 @@ async function getFinanceSummary(filters = {}, executor = db) {
 }
 
 /*
- * Allocate one payment atomically on a caller-owned transaction.  Every
+ * Internal ledger primitive. It must only be called by
+ * financeCommandService inside withTransaction(), which sets the transaction
+ * local harmony.finance_command=canonical marker enforced by the finance-core
+ * invoice projection guard. Routes must not call this function directly.
+ *
+ * Allocate one payment atomically on a caller-owned transaction. Every
  * channel (manual entry, bank import, and approved proof) can use this helper.
  * The excess is deliberately recorded as an invoice-less transaction rather
  * than inflating the last invoice; this keeps overpayment/unallocated credit
@@ -1037,6 +1053,9 @@ async function allocatePayment(executor, {
 }
 
 /*
+ * Internal ledger primitive; see allocatePayment above. It is reached only
+ * through financeCommandService's marked command transaction.
+ *
  * Reverse one immutable allocation without broad student/month/year updates.
  * The original event remains untouched; a negative compensating event is
  * recorded and the exact invoice balance is restored under a row lock.

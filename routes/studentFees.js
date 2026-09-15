@@ -34,8 +34,10 @@ async function createOneOffLedgerInvoice(executor, fee, studentId, assignmentId,
     const invoice = await executor.query(`
       INSERT INTO invoices
         (student_id, student_number, amount_due, due_date, status,
+         invoice_kind, invoice_source, finance_origin,
          reference_number, description, created_by, created_at)
-      SELECT u.id, u.student_number, $1, $2, 'Unpaid', $3, $4, $5, CURRENT_TIMESTAMP
+      SELECT u.id, u.student_number, $1, $2, 'Unpaid', 'one_off',
+             'student_fee_assignment', 'canonical', $3, $4, $5, CURRENT_TIMESTAMP
       FROM users u
       WHERE u.id = $6 AND u.role = 'student'
       RETURNING id

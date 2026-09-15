@@ -1,0 +1,251 @@
+HARMONY FINANCE CORE — ARCHITECTURAL STABILIZATION PROJECT
+
+Stop treating the remaining finance problems as isolated defects.
+
+We now have production evidence and a read-only architecture audit showing that several generations of finance logic remain active at the same time.
+
+The goal of this phase is not to fix another individual Parent/Admin screen. The goal is to establish one canonical finance architecture so Tuition, Boarding, Transport, Aftercare, discounts, one-off fees, proofs, manual payments, bank imports, credits, reversals, Admin history, Parent history and exports all represent the same financial truth.
+
+Do not deploy automatically.
+Do not modify production money automatically.
+Do not infer historical service charges.
+Do not automatically reconcile the R32,150 unallocated balance.
+Do not run migrations automatically.
+
+A. Separate legacy history from current/future billing
+
+Existing historical invoices remain immutable financial history.
+
+Ambiguous legacy invoices may use the existing controlled reconciliation/classification workflow.
+
+Do not require 2026 legacy records to magically contain metadata that was never historically captured.
+
+Current and future invoices must not use legacy fallbacks.
+
+B. Establish one financial authority
+
+The permanent rule must be:
+
+Immutable financial events and exact obligation allocations are the source of truth. Invoice totals/statuses are projections of those events and persisted billing snapshots.
+
+No route may independently invent another interpretation of paid/outstanding money.
+
+Audit all existing places that derive or modify:
+
+amount_due
+amount_paid
+status
+outstanding
+credit
+allocation_category
+
+Eliminate competing write logic.
+
+C. Introduce canonical effective-dated service enrollment
+
+A learner's current Boolean flags are insufficient for historical/monthly billing.
+
+Design a canonical service-enrollment model for:
+
+tuition
+boarding
+transport
+aftercare
+
+Each enrollment should support an effective start and optional end date so billing can answer which services were legitimately active for a particular month.
+
+Existing Admin checkboxes may remain as UI conveniences, but current/future billing must consume canonical enrollment records.
+
+Do not backfill historical service enrollment dates by guessing.
+
+If an additive schema change is needed, create a safe idempotent migration and audit command but DO NOT RUN IT.
+
+D. One monthly billing engine
+
+There must be one command/service responsible for generating monthly obligations.
+
+For every active learner and billing period:
+
+determine grade/tuition plan;
+load service enrollments active for that period;
+load approved discounts effective for that period;
+apply bundle rules;
+snapshot exact prices and categories;
+create one authoritative monthly invoice;
+persist immutable invoice line items.
+
+Example normal learner:
+
+Tuition R2,350
+
+Example learner with services:
+
+Tuition R2,350
+Transport R650
+Aftercare R550
+
+Example boarder according to configured school rules:
+
+persist the correct bundle owner and included components so Tuition/Aftercare are never double-charged.
+
+Editing Service Pricing later must not change existing invoice snapshots.
+
+E. One payable-obligations read model
+
+Parent payment choices, Admin allocation targets and server approval validation must consume one shared:
+
+getPayableObligations(learnerId)
+
+The Parent must never receive an option that Admin approval later rejects.
+
+Current/future recurring obligations must come from persisted monthly invoice lines.
+
+Legacy invoice-level obligations remain a separately identified compatibility path.
+
+F. One finance command layer for every write
+
+Create/refactor one transactional finance command service used by:
+
+Parent proof approval;
+Manual payment;
+Bank import;
+Applying existing credit;
+Allocation retargeting;
+Unallocated payment;
+Reversal;
+Payment correction;
+Carry-forward;
+Arrears payment.
+
+It must own transaction boundaries, locks, idempotency, exact obligation validation, allocation categories, audit insertion and final ledger verification.
+
+Routes should orchestrate permissions/input and call this command layer. They must not contain separate accounting algorithms.
+
+G. Normalize proof allocations
+
+selected_obligations JSON cannot remain the long-term relational authority.
+
+Design normalized proof allocation/proposal records referencing exact:
+
+proof_id
+learner_id
+invoice_id
+invoice_line_item_id
+fee_assignment_id
+category
+proposed_amount
+resolution_state
+
+Legacy JSON proposals may remain readable for backwards compatibility but must not control new finance.
+
+H. Practical Parent experience
+
+A Parent whose learner owes Tuition + Boarding + Transport + Aftercare must see each legitimate outstanding service by billing period.
+
+The Parent may select one, several or all obligations and make one payment.
+
+One proof may cover multiple obligations.
+
+One-off fees may be included in the same transfer but remain separately categorized.
+
+Fully paid obligations disappear from the payable screen but remain in history.
+
+Pending obligations remain visible as Pending Review but cannot be submitted twice.
+
+I. Practical Admin experience
+
+Admin payment review must show:
+
+payment total;
+exact selected obligations;
+allocated total;
+unallocated total;
+invalid/stale targets;
+category;
+billing period.
+
+Admin may retarget only to legitimate outstanding obligations.
+
+Significant intentional unallocated credit requires acknowledgement and reason.
+
+J. Reporting
+
+Parent, Admin and Excel must consume the same ledger projection.
+
+Monthly school account:
+
+Tuition / Boarding / Transport / Aftercare / other recurring charges / discounts / net due / paid / outstanding.
+
+One-off charges:
+
+separate report section/sheet.
+
+Payment transaction audit:
+
+separate transaction history.
+
+Fix the current workbook mapping defect where internal numeric values such as 57 appear in Review Flags or invoice fields where human-readable values or blanks should exist.
+
+Also fix the Parent legacy subtitle issue: after an effective correction Boarding → Tuition, the Parent must not continue showing Legacy Boarding invoice beneath the effective Tuition obligation.
+
+K. PostgreSQL integration test environment
+
+Stop relying primarily on mocked finance tests.
+
+Add a dedicated database-backed finance integration suite.
+
+Required golden scenario:
+
+learner is enrolled in Tuition + Boarding/Transport/Aftercare according to configured rules;
+monthly invoice generation persists exact line items;
+Parent sees exactly those outstanding obligations;
+Parent submits one mixed payment;
+Admin receives exactly the same identities;
+Admin approves;
+correct immutable category allocations are recorded;
+ledger updates;
+Parent updates;
+Admin updates;
+workbook matches;
+reversal restores all views.
+
+Also test partial service payments, discounts, one-off fees, multiple Parent accounts, competing proofs, bank imports, duplicate imports, manual payments, unallocated credit, corrections, reversals and concurrent allocation attempts.
+
+This suite becomes a mandatory release gate.
+
+L. Production baseline audit
+
+Provide a read-only production audit command that compares the real Railway database against the canonical expected finance schema and reports:
+
+missing migrations/constraints/indexes/triggers;
+header-versus-ledger discrepancies;
+uncategorized allocations;
+ambiguous legacy proposals;
+duplicate references;
+invalid reversals;
+active services lacking current/future billable snapshots;
+internal/export mapping anomalies.
+
+Do not repair them automatically.
+
+FINAL REPORT
+
+Explain:
+
+current architecture before the refactor;
+canonical architecture after the refactor;
+schema changes/migrations required;
+legacy compatibility strategy;
+service-enrollment design;
+monthly billing design;
+finance command layer;
+normalized proof allocation model;
+Parent/Admin behaviour;
+export changes;
+PostgreSQL integration test coverage;
+production audit command;
+exact safe deployment order.
+
+Do not deploy.
+Do not run migrations.
+Do not change production financial records.

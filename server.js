@@ -59,6 +59,33 @@ const { isStudentPortalEnabled, isParentSelfActivationEnabled } = require('./con
 // Import database
 const db = require('./config/database');
 
+// Startup is allowed to observe finance readiness, never to create or mutate
+// finance schema/data.  Applying migrations is an operator-controlled action.
+const checkFinanceCoreReadiness = async () => {
+  const result = await db.query(`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = ANY($1::text[])
+  `, [[
+    'finance_schema_versions',
+    'service_enrollments',
+    'payment_proof_allocation_proposals',
+    'payment_proof_allocations',
+    'invoice_line_items',
+  ]]);
+  const present = new Set(result.rows.map((row) => row.table_name));
+  const required = [
+    'finance_schema_versions',
+    'service_enrollments',
+    'payment_proof_allocation_proposals',
+    'payment_proof_allocations',
+    'invoice_line_items',
+  ];
+  const missing = required.filter((table) => !present.has(table));
+  return { ready: missing.length === 0, missing };
+};
+
 // Initialize documents table on startup
 const initializeDocumentsTable = async () => {
   try {
@@ -655,6 +682,22 @@ const startServer = async () => {
     await db.query('SELECT 1');
     console.log('✅ Database connected successfully');
 
+    try {
+      const financeReadiness = await checkFinanceCoreReadiness();
+      app.locals.financeCoreReady = financeReadiness.ready;
+      if (financeReadiness.ready) {
+        console.log('✅ Finance core schema is present (read-only startup check)');
+      } else {
+        console.warn(
+          `🔒 Finance core is unavailable until its operator-run migration is applied: `
+          + financeReadiness.missing.join(', '),
+        );
+      }
+    } catch (financeHealthError) {
+      app.locals.financeCoreReady = false;
+      console.warn('🔒 Finance core readiness check failed closed:', financeHealthError.message);
+    }
+
     if (process.env.ENABLE_STARTUP_SCHEMA_CHANGES !== 'true') {
       console.log('🔒 Startup schema/data changes are disabled');
       return server;
@@ -684,20 +727,9 @@ const startServer = async () => {
       console.warn('⚠️ Graded document columns initialization failed:', gradedDocError.message);
     }
     
-    try {
-      await initializeInvoiceSystem();
-      console.log('✅ Invoice system initialized');
-    } catch (invoiceError) {
-      console.warn('⚠️ Invoice system initialization failed:', invoiceError.message);
-    }
-    
-    try {
-      const { initializeEnhancedPaymentSystem } = require('./init-enhanced-payment-system');
-      await initializeEnhancedPaymentSystem();
-      console.log('✅ Enhanced Payment System initialized');
-    } catch (enhancedPaymentError) {
-      console.warn('⚠️ Enhanced Payment System initialization failed:', enhancedPaymentError.message);
-    }
+    // Finance schema/data initialization is intentionally not performed here.
+    // Use the reviewed migration and read-only audit command as an explicit
+    // operator action; finance routes fail closed while it is absent.
     
     // Parent portal schema
     try {
@@ -711,8 +743,6 @@ const startServer = async () => {
       // Add parent authentication support columns
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30)`);
       await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false`);
-      await db.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS description TEXT`);
-
       // Push notification subscriptions for parents
       await db.query(`
         CREATE TABLE IF NOT EXISTS parent_push_subscriptions (
@@ -775,104 +805,9 @@ const startServer = async () => {
       console.warn('⚠️ Staff attendance tables initialization failed:', staffAttendanceError.message);
     }
 
-    // Enrollment flags + proof of payment + one-off fees
-    try {
-      await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_boarder BOOLEAN DEFAULT false`);
-      await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS uses_transport BOOLEAN DEFAULT false`);
-      await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS uses_aftercare BOOLEAN DEFAULT false`);
-      await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_sibling_discount BOOLEAN DEFAULT false`);
-      await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_teacher_discount BOOLEAN DEFAULT false`);
-
-      await db.query(`
-        CREATE TABLE IF NOT EXISTS pending_payments (
-          id SERIAL PRIMARY KEY,
-          parent_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          amount NUMERIC(10,2) NOT NULL,
-          payment_method VARCHAR(50) NOT NULL,
-          reference VARCHAR(255),
-          notes TEXT,
-          receipt_file_name VARCHAR(255),
-          receipt_file_path TEXT,
-          receipt_s3_key TEXT,
-          receipt_s3_url TEXT,
-          receipt_mime_type VARCHAR(100),
-          receipt_data BYTEA,
-          status VARCHAR(20) DEFAULT 'pending',
-          submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          reviewed_at TIMESTAMP,
-          reviewed_by INTEGER REFERENCES users(id),
-          admin_note TEXT
-        )
-      `);
-      await db.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS receipt_data BYTEA`);
-      await db.query(`CREATE INDEX IF NOT EXISTS idx_pending_payments_parent ON pending_payments(parent_id)`);
-      await db.query(`CREATE INDEX IF NOT EXISTS idx_pending_payments_student ON pending_payments(student_id)`);
-      await db.query(`CREATE INDEX IF NOT EXISTS idx_pending_payments_status ON pending_payments(status)`);
-
-      await db.query(`
-        CREATE TABLE IF NOT EXISTS student_one_off_fees (
-          id SERIAL PRIMARY KEY,
-          name VARCHAR(255) NOT NULL,
-          description TEXT,
-          amount NUMERIC(10,2) NOT NULL,
-          grade_id INTEGER REFERENCES grades(id) ON DELETE SET NULL,
-          due_date DATE,
-          is_active BOOLEAN DEFAULT true,
-          created_by INTEGER REFERENCES users(id),
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
-      await db.query(`
-        CREATE TABLE IF NOT EXISTS student_fee_assignments (
-          id SERIAL PRIMARY KEY,
-          fee_id INTEGER NOT NULL REFERENCES student_one_off_fees(id) ON DELETE CASCADE,
-          student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE(fee_id, student_id)
-        )
-      `);
-      await db.query(`CREATE INDEX IF NOT EXISTS idx_sfa_student ON student_fee_assignments(student_id)`);
-      await db.query(`CREATE INDEX IF NOT EXISTS idx_sfa_fee ON student_fee_assignments(fee_id)`);
-
-      // Service pricing table
-      await db.query(`
-        CREATE TABLE IF NOT EXISTS service_prices (
-          id SERIAL PRIMARY KEY,
-          service_key VARCHAR(50) UNIQUE NOT NULL,
-          label VARCHAR(100) NOT NULL,
-          description TEXT,
-          amount NUMERIC(10,2) NOT NULL DEFAULT 0,
-          display_order INTEGER DEFAULT 99,
-          updated_by INTEGER REFERENCES users(id),
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
-      // Seed default services if not already present
-      const defaultServices = [
-        { key: 'tuition',   label: 'Monthly Tuition',   desc: 'Base monthly school fee',        order: 1 },
-        { key: 'boarding',  label: 'Boarding Fee',       desc: 'Monthly boarding & accommodation',order: 2 },
-        { key: 'transport', label: 'Transport Fee',      desc: 'Monthly school transport',        order: 3 },
-        { key: 'aftercare', label: 'Aftercare Fee',      desc: 'Monthly aftercare programme',     order: 4 },
-      ];
-      for (const s of defaultServices) {
-        await db.query(`
-          INSERT INTO service_prices (service_key, label, description, amount, display_order)
-          VALUES ($1, $2, $3, 0, $4)
-          ON CONFLICT (service_key) DO NOTHING
-        `, [s.key, s.label, s.desc, s.order]);
-      }
-
-      console.log('✅ Enrollment flags, pending payments, one-off fees, and service prices initialized');
-    } catch (billingError) {
-      console.warn('⚠️ Billing extension initialization failed:', billingError.message);
-    }
-
-    // Note: quick-db-fix.js and fix-database-schema.js are legacy scripts
-    // Schema is now managed via CREATE TABLE IF NOT EXISTS + ALTER TABLE ADD COLUMN IF NOT EXISTS above
-    
+    // Finance schema/data initialization is intentionally not performed here.
+    // The read-only readiness check above makes missing schema visible while
+    // finance routes fail closed until an operator applies the migration.
     console.log('🎉 Server fully initialized and ready!');
     
   } catch (error) {

@@ -27,18 +27,18 @@ test('payment-history workbook uses meaningful cells and canonical pending one-o
       payment_review_flags: [], review_required: false,
       service_charge_lines: [], one_off_charge_lines: [{
         id: 501, line_type: 'charge', service_key: 'one_off_fee',
-        label: 'Fun Day', description: 'Fresh test obligation', amount: 1200,
+        label: 57, description: 57, amount: 1200,
         metadata: { category: 'one_off', fee_id: 4 },
       }],
       line_items: [{
         id: 501, line_type: 'charge', service_key: 'one_off_fee',
-        label: 'Fun Day', amount: 1200, metadata: { category: 'one_off', fee_id: 4 },
+        label: 57, description: 57, amount: 1200, metadata: { category: 'one_off', fee_id: 4 },
       }],
     }],
     transactions: [{
       id: 1, invoice_id: null, amount: 32150, payment_date: '2026-09-15',
       payment_method: 'manual_entry', reference_number: null,
-      review_flags: ['unallocated_payment'], review_required: true,
+      review_flags: ['unallocated_payment', 41], review_required: true,
     }],
     service_components: [],
   });
@@ -83,4 +83,5 @@ test('payment-history workbook uses meaningful cells and canonical pending one-o
   assert.ok(values.includes('Legacy snapshot unavailable'));
   assert.ok(values.includes('unallocated_payment'));
   assert.equal(values.some((value) => value === 41 || value === '41'), false);
+  assert.equal(values.some((value) => value === 57 || value === '57'), false);
 });

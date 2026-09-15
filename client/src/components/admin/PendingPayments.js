@@ -78,6 +78,8 @@ export default function PendingPayments() {
   const [allocationReason, setAllocationReason] = useState('');
   const [allocationOptions, setAllocationOptions] = useState([]);
   const [unallocatedAcknowledged, setUnallocatedAcknowledged] = useState(false);
+  const allocationRequestId = React.useRef(0);
+  const allocationAbortController = React.useRef(null);
 
   const viewReceipt = async (id, fileName) => {
     receiptTriggerRef.current = document.activeElement;
@@ -147,14 +149,39 @@ export default function PendingPayments() {
       ? selected.selected_obligations.map((item) => ({ ...item })) : []);
     setAllocationReason('');
     setUnallocatedAcknowledged(false);
-    if (selected?.status === 'pending') {
-      fetch(`${API_BASE}/payment-proofs/${selected.id}/allocation-options`, { headers: authHeaders() })
-        .then((response) => response.json())
-        .then((data) => setAllocationOptions(data.options || []))
-        .catch(() => setAllocationOptions([]));
-    } else {
-      setAllocationOptions([]);
-    }
+
+    // A detail modal can be changed before the previous options request
+    // resolves. Abort the old request and also guard the response with an
+    // identity token: not every browser cancels an already-completed fetch.
+    const requestId = ++allocationRequestId.current;
+    allocationAbortController.current?.abort();
+    allocationAbortController.current = null;
+    setAllocationOptions([]);
+    if (selected?.status !== 'pending') return undefined;
+
+    const controller = new AbortController();
+    allocationAbortController.current = controller;
+    fetch(`${API_BASE}/payment-proofs/${selected.id}/allocation-options`, {
+      headers: authHeaders(),
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Could not load allocation options');
+        return response.json();
+      })
+      .then((data) => {
+        if (requestId === allocationRequestId.current && !controller.signal.aborted) {
+          setAllocationOptions(Array.isArray(data.options) ? data.options : []);
+        }
+      })
+      .catch((error) => {
+        if (error.name === 'AbortError' || requestId !== allocationRequestId.current) return;
+        setAllocationOptions([]);
+      });
+
+    return () => {
+      controller.abort();
+    };
   }, [selected]);
 
   const saveAllocationAdjustment = async () => {
