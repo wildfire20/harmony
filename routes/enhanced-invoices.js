@@ -26,6 +26,7 @@ const normalizeManualPaymentMethod = (value) => {
 };
 const { logAudit, getIp } = require('../utils/auditLogger');
 const { allocatePayment, getStudentLedger, reversePayment } = require('../services/financeLedger');
+const { getPayableObligations } = require('../services/payableObligations');
 
 function dateOnly(value) {
   if (value == null || value === '') return '';
@@ -813,7 +814,10 @@ router.get('/student-payment-history/:studentNumber', [
     // Every history row and total comes from the authoritative ledger. Raw
     // payment month aggregation is intentionally not used: a transaction's
     // month can disagree with the invoice it was allocated to (HAR049).
-    const authoritativeLedger = await getStudentLedger(student.id);
+    const [authoritativeLedger, payableObligations] = await Promise.all([
+      getStudentLedger(student.id),
+      getPayableObligations(student.id),
+    ]);
     const monthlyHistory = [];
     const oneOffHistory = [];
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 
@@ -832,6 +836,12 @@ router.get('/student-payment-history/:studentNumber', [
       // One-off obligations belong on their own report. A pure one-off invoice
       // must never appear as an ordinary monthly school-account row.
       oneOffLines.forEach((line) => {
+        const payable = payableObligations.find((obligation) =>
+          Number(obligation.invoice_id) === Number(inv.id) &&
+          Number(obligation.invoice_line_item_id) === Number(line.id));
+        const oneOffStatus = payable?.status === 'PENDING_REVIEW'
+          ? 'Pending Review'
+          : paymentStatus;
         oneOffHistory.push({
           invoiceId: inv.id,
           fee: line.label || line.description || 'One-off fee',
@@ -842,7 +852,7 @@ router.get('/student-payment-history/:studentNumber', [
             ? inv.allocated_effective_payments : 0,
           outstanding: oneOffLines.length === 1 && !recurringLines.length
             ? inv.outstanding_balance : Number(line.amount) || 0,
-          status: paymentStatus,
+          status: oneOffStatus,
           reference: inv.reference_number || '-',
         });
       });
@@ -1000,7 +1010,7 @@ router.get('/student-payment-history/:studentNumber', [
 
       // Summary section
       const summaryRow = feeStructureRow + feeStructureHeight + 2;
-      worksheet.getCell(`A${summaryRow}`).value = 'PAYMENT SUMMARY';
+      worksheet.getCell(`A${summaryRow}`).value = 'OVERALL ACCOUNT SUMMARY';
       worksheet.getCell(`A${summaryRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
       
       worksheet.getCell(`A${summaryRow + 1}`).value = 'Total Amount Due:';
@@ -1100,8 +1110,8 @@ router.get('/student-payment-history/:studentNumber', [
         const row = worksheet.getRow(rowNum);
         row.values = [
           month.year,
-          month.month,
-           spreadsheetText(Object.entries(month.serviceCharges || {}).map(([key, value]) => `${key}: R${Number(value).toFixed(2)}`).join('; ')),
+           month.month,
+           spreadsheetText(Object.entries(month.serviceCharges || {}).map(([key, value]) => `${key}: R${Number(value).toFixed(2)}`).join('; ') || 'Legacy snapshot unavailable'),
            month.grossCharges,
            -(month.discountLines || []).reduce((sum, line) => sum + Number(line.amount || 0), 0),
            month.amountDue,
@@ -1109,7 +1119,7 @@ router.get('/student-payment-history/:studentNumber', [
            month.outstanding,
            month.credit,
            month.paymentStatus,
-           (month.reviewFlags || []).map((flag) => flag.type).join(', '),
+           spreadsheetText((month.reviewFlags || []).map((flag) => flag.type).join(', ') || 'No review flags'),
             spreadsheetText(month.reference)
         ];
         
@@ -1279,7 +1289,9 @@ router.get('/student-payment-history/:studentNumber', [
       });
       
       // Generate buffer
-      const buffer = await workbook.xlsx.writeBuffer();
+      // Inline strings avoid leaking shared-string table indexes (for example
+      // literal "41") in spreadsheet viewers that do not resolve them.
+      const buffer = await workbook.xlsx.writeBuffer({ useSharedStrings: false });
       
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename=Payment_History_${student.student_number}_${new Date().toISOString().split('T')[0]}.xlsx`);

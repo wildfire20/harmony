@@ -10,6 +10,9 @@
  */
 const db = require('../config/database');
 const { getCarryForwardSourceIds } = require('./carryForwardLineage');
+const {
+  isClassificationCorrection, resolveLegacyClassification,
+} = require('./legacyClassification');
 const { appendPeriodFilters, parseInvoiceFilterQuery } = require('../utils/invoiceQuery');
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
@@ -39,12 +42,18 @@ function lineAmount(row) {
 }
 
 function normaliseInvoiceLines(rows) {
-  return rows.map((row) => {
+  const resolved = resolveLegacyClassification(rows).lines;
+  return resolved.map((row) => {
     const type = String(row.line_type || row.type || 'charge').toLowerCase();
+    const correction = isClassificationCorrection(row);
     const amount = lineAmount(row);
     return {
       id: row.id,
-      line_type: type === 'discount' || type === 'adjustment' ? 'discount' : 'charge',
+      line_type: correction
+        ? 'classification_correction'
+        : type === 'discount' || type === 'adjustment'
+        ? 'discount'
+        : 'charge',
       service_key: row.service_key || null,
       bundle_key: row.bundle_key || null,
       label: row.label || row.description || row.service_key || 'Charge',
@@ -90,7 +99,7 @@ async function loadInvoiceLineItems(executor, invoiceIds) {
 
 function buildInvoiceBreakdown(invoice, rawLines = [], reviewFlags = []) {
   const lines = normaliseInvoiceLines(rawLines);
-  const charges = lines.filter((line) => line.line_type === 'charge');
+  const charges = lines.filter((line) => line.line_type === 'charge' && !isClassificationCorrection(line));
   const discounts = lines.filter((line) => line.line_type === 'discount');
   const amountDue = money(invoice.amount_due);
   const amountPaid = money(invoice.amount_paid);
@@ -140,7 +149,7 @@ function buildInvoiceBreakdown(invoice, rawLines = [], reviewFlags = []) {
       reason: legacyMetadata.reason || null,
       previous_classification: legacyMetadata.previous_classification ?? null,
     } : null,
-    snapshot_available: lines.length > 0,
+    snapshot_available: lines.some((line) => !isClassificationCorrection(line)),
     payment_review_flags: reviewFlags,
     review_required: reviewFlags.length > 0,
   };
@@ -515,8 +524,8 @@ async function getStudentLedger(studentId, executor = db) {
     }
   }
   const linesByInvoice = new Map();
-  normaliseInvoiceLines(lineRows).forEach((line, index) => {
-    const invoiceId = Number(lineRows[index].invoice_id);
+  lineRows.forEach((line) => {
+    const invoiceId = Number(line.invoice_id);
     if (!linesByInvoice.has(invoiceId)) linesByInvoice.set(invoiceId, []);
     linesByInvoice.get(invoiceId).push(line);
   });
@@ -533,8 +542,8 @@ async function getStudentLedger(studentId, executor = db) {
     const amountPaid = money(row.amount_paid);
     const outstanding = nonNegative(amountDue - amountPaid);
     const overpaid = nonNegative(amountPaid - amountDue);
-    const lines = linesByInvoice.get(row.id) || [];
-    const charges = lines.filter((line) => line.line_type === 'charge');
+    const lines = normaliseInvoiceLines(linesByInvoice.get(row.id) || []);
+    const charges = lines.filter((line) => line.line_type === 'charge' && !isClassificationCorrection(line));
     const discounts = lines.filter((line) => line.line_type === 'discount');
     const grossCharges = money(charges.reduce((sum, line) => sum + line.amount, 0));
     const discountTotal = money(discounts.reduce((sum, line) => sum + line.amount, 0));

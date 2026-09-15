@@ -19,6 +19,7 @@ const {
   acquireInvoiceObligationLocks,
   normaliseCategory,
 } = require('../services/invoiceObligationLocks');
+const { resolveLegacyClassification } = require('../services/legacyClassification');
 const { detectType } = require('../services/admissionsDocumentService');
 const { notifyPayment } = require('../services/parentNotificationService');
 
@@ -276,7 +277,7 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
           WHERE fa.id=$${params.length}::integer AND fa.student_id=i.student_id AND fa.fee_id=$${params.length - 1}::integer
         )`);
       }
-    } else if (category) {
+    } else if (category && invoiceLineItemId == null) {
       params.push(category);
       clauses.push(`li.service_key = $${params.length}`);
     }
@@ -286,8 +287,11 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
              li.service_key, li.amount AS line_amount, li.metadata,
              COALESCE((
                SELECT json_agg(json_build_object(
+                 'id', all_li.id,
                  'line_type', all_li.line_type,
                  'service_key', all_li.service_key,
+                 'label', all_li.label,
+                 'description', all_li.description,
                  'amount', all_li.amount,
                  'is_included', all_li.is_included,
                  'metadata', all_li.metadata
@@ -386,22 +390,26 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
       throw error;
     }
     const line = result.rows[0];
-    const metadata = line.metadata || {};
+    const invoiceLines = Array.isArray(line.invoice_lines) ? line.invoice_lines : [{
+      id: line.invoice_line_item_id,
+      line_type: 'charge',
+      service_key: line.service_key,
+      amount: line.line_amount,
+      is_included: false,
+      metadata: line.metadata || {},
+    }];
+    const effectiveLines = resolveLegacyClassification(invoiceLines).lines;
+    const effectiveLine = effectiveLines.find((item) =>
+      Number(item.id) === Number(line.invoice_line_item_id)) || line;
+    const metadata = effectiveLine.metadata || {};
     const ledgerCategory = metadata.category === 'one_off' || metadata.fee_id != null
-      ? 'one_off' : line.service_key || 'other';
+      ? 'one_off' : effectiveLine.service_key || 'other';
     if (category && category !== ledgerCategory) {
       const error = new Error(`selector ${index + 1} category ${category} does not match ledger category ${ledgerCategory}`);
       error.status = 422;
       error.safeMessage = 'One of the selected payment items does not match its invoice. Please review the allocation before approving.';
       throw error;
     }
-    const invoiceLines = Array.isArray(line.invoice_lines) ? line.invoice_lines : [{
-      line_type: 'charge',
-      service_key: line.service_key,
-      amount: line.line_amount,
-      is_included: false,
-      metadata,
-    }];
     const invoiceTransactions = Array.isArray(line.invoice_transactions) ? line.invoice_transactions : [];
     const invoiceCategories = invoiceAllocationCategories(invoiceLines);
     const hasCategorisedPayments = invoiceTransactions.some((transaction) =>
@@ -414,13 +422,17 @@ const resolvePaymentProposals = async (executor, studentId, obligations) => {
       error.obligationCategory = ledgerCategory;
       throw error;
     }
-    const availableAmount = metadata.legacy_invoice_level === true
-      ? Math.max(0, Number(line.amount_due) - Number(line.amount_paid))
-      : Number(invoiceCategoryBalances(
+    const categoryAvailable = Number(invoiceCategoryBalances(
       invoiceLines,
       line.amount_due,
       invoiceTransactions,
     ).find((balance) => balance.category === ledgerCategory)?.amount || 0);
+    const invoiceOutstanding = Math.max(0, Number(line.amount_due) - Number(line.amount_paid));
+    const availableAmount = metadata.legacy_invoice_level === true
+      ? Math.max(0, Number(line.amount_due) - Number(line.amount_paid))
+      : (invoiceCategories.length === 1
+        ? Math.min(categoryAvailable, invoiceOutstanding)
+        : categoryAvailable);
     const categoryLabel = `${ledgerCategory.charAt(0).toUpperCase()}${ledgerCategory.slice(1).replace(/_/g, ' ')}`;
     if (availableAmount <= 0 || Number(line.amount_paid) >= Number(line.amount_due)) {
       const error = new Error(`selector ${index + 1} (${ledgerCategory}) is already fully paid`);
@@ -845,7 +857,25 @@ router.get('/', requireAdmin, async (req, res) => {
       ${where}
       ORDER BY pp.submitted_at DESC
     `, params);
-    res.json({ submissions: result.rows });
+    const submissions = result.rows.map((submission) => {
+      let selected = submission.selected_obligations;
+      if (typeof selected === 'string') {
+        try { selected = JSON.parse(selected); } catch (_) { selected = []; }
+      }
+      const ambiguous = (Array.isArray(selected) ? selected : []).some((item) => {
+        const hasIdentity = item?.obligation_id || item?.invoice_id ||
+          item?.invoice_line_item_id || item?.fee_id || item?.assignment_id;
+        return !hasIdentity && Boolean(item?.category || item?.service_key);
+      });
+      return {
+        ...submission,
+        legacy_allocation_review: ambiguous ? {
+          code: 'LEGACY_AMBIGUOUS_ALLOCATION',
+          message: 'Legacy ambiguous allocation — Admin retarget required',
+        } : null,
+      };
+    });
+    res.json({ submissions });
   } catch (err) {
     console.error('Admin list proofs error:', err);
     res.status(500).json({ message: 'Server error' });

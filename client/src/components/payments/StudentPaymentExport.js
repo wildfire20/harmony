@@ -122,7 +122,9 @@ const StudentPaymentExport = () => {
     }
     setLegacySaving(true);
     try {
-      const response = await fetch(`/api/invoices/${legacyTarget.invoiceId}/classify-legacy`, {
+      const correction = legacyTarget.reconciliation?.state === 'RECONCILED';
+      const endpoint = correction ? 'correct-legacy-classification' : 'classify-legacy';
+      const response = await fetch(`/api/invoices/${legacyTarget.invoiceId}/${endpoint}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ category: legacyCategory, reason: legacyReason.trim() }),
@@ -348,12 +350,27 @@ const StudentPaymentExport = () => {
                               </div>
                             )}
                             {month.reconciliation?.state === 'RECONCILED' && (
-                              <div className="mt-2 text-xs text-emerald-700">
-                                Reconciled as {String(month.reconciliation.category || '').replaceAll('_', ' ')}
-                                {month.reconciliation.actor_name ? ` by ${month.reconciliation.actor_name}` : ''}
-                                {month.reconciliation.classified_at ? ` on ${new Date(month.reconciliation.classified_at).toLocaleString()}` : ''}
-                                {month.reconciliation.reason ? ` — ${month.reconciliation.reason}` : ''}
-                              </div>
+                              <>
+                                <div className="mt-2 text-xs text-emerald-700">
+                                  Reconciled as {String(month.reconciliation.category || '').replaceAll('_', ' ')}
+                                  {month.reconciliation.actor_name ? ` by ${month.reconciliation.actor_name}` : ''}
+                                  {month.reconciliation.classified_at ? ` on ${new Date(month.reconciliation.classified_at).toLocaleString()}` : ''}
+                                  {month.reconciliation.reason ? ` — ${month.reconciliation.reason}` : ''}
+                                </div>
+                                {!month.carryForwardHistory && Number(month.outstanding || 0) > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setLegacyTarget(month);
+                                      setLegacyCategory(month.reconciliation.category === 'tuition' ? 'boarding' : 'tuition');
+                                      setLegacyReason('');
+                                    }}
+                                    className="mt-1 text-xs text-amber-700 underline"
+                                  >
+                                    Correct classification
+                                  </button>
+                                )}
+                              </>
                             )}
                           </td>
                         </tr>
@@ -371,7 +388,11 @@ const StudentPaymentExport = () => {
           <form onSubmit={submitLegacyClassification} className="w-full max-w-lg mx-4 rounded-lg bg-white p-6 shadow-xl">
             <div className="flex items-start justify-between">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Classify Existing Invoice</h3>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {legacyTarget.reconciliation?.state === 'RECONCILED'
+                    ? 'Correct Legacy Classification'
+                    : 'Classify Existing Invoice'}
+                </h3>
                 <p className="mt-1 text-xs text-gray-500">
                   Invoice #{legacyTarget.invoiceId} · {legacyTarget.month} {legacyTarget.year} · preserves the existing balance
                 </p>
@@ -399,7 +420,9 @@ const StudentPaymentExport = () => {
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setLegacyTarget(null)} className="rounded border px-4 py-2 text-gray-700">Cancel</button>
               <button type="submit" disabled={legacySaving} className="rounded bg-amber-600 px-4 py-2 text-white disabled:opacity-50">
-                {legacySaving ? 'Saving…' : 'Classify invoice'}
+                {legacySaving ? 'Saving…' : (
+                  legacyTarget.reconciliation?.state === 'RECONCILED' ? 'Append correction' : 'Classify invoice'
+                )}
               </button>
             </div>
           </form>

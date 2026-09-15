@@ -1,0 +1,410 @@
+Harmony Finance — Legacy Classification, Historical Allocation & Export Integrity Fix
+
+Production testing and a newly exported HAR049 payment-history workbook have exposed additional finance inconsistencies.
+
+DO NOT deploy automatically.
+DO NOT run migrations automatically.
+DO NOT modify production financial records automatically.
+DO NOT reverse or reallocate PROOF-5 automatically.
+DO NOT disable immutable finance protections.
+
+CONFIRMED PRODUCTION EVIDENCE
+
+Learner:
+
+Milton MUNDIRWA
+HAR049
+
+Current account totals:
+
+Total billed:       R22,650
+Total paid:         R15,600
+Outstanding:         R7,050
+Unallocated credit: R32,150
+
+Do not change these totals merely through classification.
+
+1. April legacy invoice was incorrectly classified
+
+Production invoice:
+
+Invoice ID: 9484
+Period: April 2026
+Amount due: R2,350
+Amount paid: R1,400
+Outstanding: R950
+
+Admin attempted:
+
+Classify Existing Invoice → Tuition
+
+and received:
+
+409
+Canonical payable read models did not preserve the legacy invoice obligation
+
+The same invoice was then classified as:
+
+Boarding
+
+and succeeded.
+
+The exported workbook now confirms invoice 9484 contains a persisted:
+
+charge
+service_key = boarding
+amount = R2,350
+
+Parent therefore shows:
+
+Boarding
+Legacy Boarding invoice
+R950 outstanding
+
+This proves the wrong category was actually persisted.
+
+2. Diagnose why Tuition 409s while Boarding succeeds
+
+Inspect:
+
+routes/invoices.js
+services/payableObligations.js
+pendingMatches()
+getPayableObligations()
+POST /api/invoices/:id/classify-legacy
+
+Specifically test old pending selections that contain only:
+
+{
+  "category": "tuition",
+  "amount": 2350
+}
+
+with no:
+
+invoice_id
+invoice_line_item_id
+obligation_id
+
+Determine whether the category-only selector is matching every Tuition obligation and making a newly classified Tuition invoice appear PENDING_REVIEW, causing the classifier's:
+
+payableMatch.is_payable
+
+postcondition to fail.
+
+Return the exact result.
+
+3. Category-only pending proposals must not reserve every invoice
+
+A legacy pending proposal containing only:
+
+category = tuition
+
+cannot uniquely identify April, July, August or September.
+
+It must not reserve every Tuition obligation.
+
+Exact reservation should require sufficient authoritative identity such as:
+
+obligation_id
+
+or:
+
+invoice_id + category
+
+and, where appropriate:
+
+invoice_line_item_id
+fee_id
+assignment_id
+
+Ambiguous historical proposals must be marked:
+
+Legacy ambiguous allocation — Admin retarget required
+
+rather than reserving all obligations in the category.
+
+4. Fix classification postcondition
+
+Classification integrity must verify:
+
+invoice still exists
+same learner
+selected category persisted
+net due unchanged
+amount paid unchanged
+outstanding unchanged
+reconciliation metadata present
+ledger classification = RECONCILED
+no financial fields changed
+
+It must NOT require:
+
+is_payable === true
+
+because temporary pending-payment reservation state and structural classification validity are different concepts.
+
+Exact pending reservations should still block classification before insertion.
+
+5. Add safe legacy classification correction
+
+April invoice 9484 is now incorrectly classified as Boarding.
+
+Existing immutable invoice-line evidence must not be edited or deleted.
+
+Do NOT:
+
+UPDATE invoice_line_items
+DELETE invoice_line_items
+disable immutability
+create replacement invoice
+
+Implement an append-only:
+
+Correct Legacy Classification
+
+workflow.
+
+It should support:
+
+Boarding → Tuition
+
+with:
+
+previous category
+new category
+Admin
+reason
+timestamp
+
+The latest valid correction becomes the effective classification, while the original QA classification remains in audit history.
+
+Apply the effective category consistently to:
+
+Parent payable obligations
+Admin history
+finance ledger
+allocation targets
+payment approval
+CSV/XLSX exports
+
+If the current schema cannot represent append-only corrections safely, propose the smallest additive idempotent migration.
+
+Do not run it.
+
+6. NEW FINDING — investigate PROOF-5 before changing production
+
+The exported Payment Transactions Audit contains:
+
+PROOF-5
+Amount: R1,200
+Invoice ID: 9484
+Payment method: proof_of_payment
+
+Invoice 9484 is the April recurring invoice.
+
+Meanwhile the exported One-Off Fees sheet contains:
+
+Fun Day
+Invoice ID: 11386
+Amount due: R1,200
+Paid: R0
+Outstanding: R1,200
+
+Investigate whether PROOF-5 was intended to pay the R1,200 Fun Day / one-off fee but was historically allocated to invoice 9484 by an older automatic-allocation path.
+
+Do not infer or change anything from amount similarity alone.
+
+Provide a read-only diagnostic path that correlates:
+
+pending payment/proof ID
+selected_obligations at submission
+proof amount
+receipt
+approval audit entry
+resulting payment_transaction
+resulting invoice_id
+allocation_category
+
+If PROOF-5 can be proven to have been a one-off test payment incorrectly allocated to April, recommend the existing immutable reversal/replacement workflow.
+
+Do not perform the correction automatically.
+
+7. Explain April R1,400 paid amount
+
+Current April:
+
+amount due = R2,350
+amount paid = R1,400
+outstanding = R950
+
+Production history previously contained a genuine R200 April payment.
+
+The exported audit now also contains:
+
+PROOF-5 = R1,200 → invoice 9484
+
+Determine from production evidence whether:
+
+R200 + R1,200 = R1,400
+
+is the exact source of April's current paid amount.
+
+Return evidence, not assumptions.
+
+8. NEW FINDING — Excel export contains literal 41 corruption
+
+The exported workbook currently contains literal:
+
+41
+
+in places where meaningful values should exist.
+
+Examples:
+
+Monthly School Account:
+
+January Service Charges = 41
+February Service Charges = 41
+March Service Charges = 41
+Review Flags = 41
+
+and the unallocated-payment row contains 41 in unrelated fields.
+
+Find the exact export serialization bug.
+
+Empty arrays, empty strings, nulls, review flags or service-component lists must never turn into numeric 41.
+
+Correct output should use context-appropriate values:
+
+blank
+N/A
+Legacy snapshot unavailable
+No review flags
+
+or actual service names.
+
+Add regression tests that inspect generated workbook cell values, not merely route success.
+
+9. NEW FINDING — pending one-off status differs between Parent and export
+
+Parent Portal currently shows the R1,200 Fun Day obligation as:
+
+PENDING REVIEW
+
+The exported One-Off Fees worksheet currently shows:
+
+Due / Unpaid
+
+Both views must use the same canonical pending-reservation logic.
+
+If an active proof reserves that one-off obligation:
+
+Parent = Pending Review
+Admin = Pending Review
+XLSX = Pending Review
+
+When rejected:
+
+Due / Unpaid
+
+When approved:
+
+Paid
+
+Do not derive export status only from invoice.amount_paid.
+
+10. Export summary clarity
+
+The workbook now separates:
+
+Monthly School Account
+One-Off Fees
+Payment Transactions Audit
+Invoice Breakdown
+
+Keep that.
+
+But clearly distinguish:
+
+recurring school-account totals
+one-off totals
+overall account totals
+
+If the top summary includes one-off invoices in Total Due, label it:
+
+Overall Account Summary
+
+so Admin does not assume it represents Tuition/services only.
+
+11. R0.01 QA reversal is confirmed
+
+The exported audit contains both:
+
+PROOF-8 +R0.01
+PROOF-8 -R0.01
+
+Therefore do not propose any further R0.01 cleanup unless a later production audit shows a discrepancy.
+
+12. Preserve R32,150 unallocated credit
+
+The workbook confirms:
+
+Unallocated payments = R32,150
+
+Do not automatically apply, offset, delete or refund it.
+
+It remains a separate Admin reconciliation task.
+
+13. Do not classify July/August/September automatically
+
+Current unresolved balances include:
+
+July      R200
+August  R2,350
+September R2,350
+
+Keep these Requires reconciliation until their historical category is actually confirmed.
+
+Do not infer Tuition from:
+
+R2,350 amount
+current pricing
+enrollment flags
+14. Tests
+
+Add regression coverage for:
+
+category-only Tuition pending selector
+exact invoice Tuition selector
+Tuition classification with unrelated ambiguous proof
+Boarding → Tuition correction
+original classification preserved
+effective classification used everywhere
+no balance changes during classification/correction
+PROOF allocation diagnostic
+XLSX cells never containing bogus 41
+one-off Pending Review parity across Parent/Admin/XLSX
+R0.01 reversal pair excluded from effective paid amount
+unallocated R32,150 remains separate
+Final report
+
+Return:
+
+Exact Tuition 409 root cause
+Why Boarding succeeded
+Fix to reservation matching
+Fix to classifier postcondition
+Safe classification-correction design
+Read-only PROOF-5 findings
+Whether PROOF-5 explains April's R1,400 amount paid
+Cause of Excel 41 corruption
+Cause/fix of one-off Pending Review export mismatch
+Any migration required
+Files changed
+Tests and results
+Exact production repair order
+
+Do not deploy automatically.
+Do not run migrations automatically.
+Do not alter PROOF-5 or invoice 9484 during development.

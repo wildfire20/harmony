@@ -431,6 +431,11 @@ export default function PendingPayments() {
               <p className="text-sm text-gray-400 mt-0.5">#{selected.id} &bull; {fmtTime(selected.submitted_at)}</p>
             </div>
             <div className="p-5 space-y-4">
+              {selected.legacy_allocation_review && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-900" role="alert">
+                  {selected.legacy_allocation_review.message}
+                </div>
+              )}
               {/* Student info */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-gray-50 rounded-xl p-3">

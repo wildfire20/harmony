@@ -17,6 +17,7 @@ const ACTION_LABELS = {
   invoice_carry_forward:      'Arrears carried forward',
   manual_arrears_created:     'Manual arrears invoice created',
   LEGACY_INVOICE_CLASSIFIED:  'Existing legacy invoice classified',
+  LEGACY_INVOICE_CLASSIFICATION_CORRECTED: 'Legacy invoice classification corrected',
   payment_proof_approve:      'Payment proof approved',
   payment_proof_reject:       'Payment proof rejected',
   payment_proof_delete:       'Payment proof deleted',

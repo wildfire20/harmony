@@ -9,6 +9,7 @@
  */
 const db = require('../config/database');
 const { getCarryForwardSourceIds } = require('./carryForwardLineage');
+const { resolveLegacyClassification } = require('./legacyClassification');
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const nonNegative = (value) => Math.max(0, money(value));
@@ -57,12 +58,19 @@ function lineLabel(line, category) {
 
 function pendingMatches(item, obligation) {
   if (!item || typeof item !== 'object') return false;
+  const obligationId = String(item.obligation_id || '');
   const invoiceId = item.invoice_id == null ? null : Number(item.invoice_id);
   const lineId = item.invoice_line_item_id == null ? null : Number(item.invoice_line_item_id);
   const feeId = item.fee_id == null ? null : Number(item.fee_id);
+  const assignmentId = item.assignment_id == null ? null : Number(item.assignment_id);
+  const hasStableIdentity = Boolean(obligationId) || invoiceId != null ||
+    lineId != null || feeId != null || assignmentId != null;
+  if (!hasStableIdentity) return false;
+  if (obligationId && obligationId !== String(obligation.obligation_id || '')) return false;
   if (invoiceId != null && invoiceId !== Number(obligation.invoice_id)) return false;
   if (lineId != null && lineId !== Number(obligation.invoice_line_item_id)) return false;
   if (feeId != null && feeId !== Number(obligation.one_off_fee_id)) return false;
+  if (assignmentId != null && assignmentId !== Number(obligation.assignment_id)) return false;
   const category = String(item.category || item.service_key || '').replace(/^one_off:\d+$/, 'one_off');
   return !category || category === obligation.category;
 }
@@ -178,11 +186,12 @@ async function getPayableObligations(studentId, executor = db, options = {}) {
 
   const invoiceIds = invoiceResult.rows.map((row) => Number(row.id));
   const carryForwardSourceIds = await getCarryForwardSourceIds(executor, invoiceResult.rows);
-  const [lineResult, transactions, pendingRows] = await Promise.all([
-    loadLines(executor, invoiceIds),
-    loadTransactions(executor, studentId),
-    loadPending(executor, studentId, options),
-  ]);
+  // A transaction-bound pg Client may execute only one query at a time. Keep
+  // these reads sequential so classification/proof transactions do not rely on
+  // deprecated concurrent client.query behaviour.
+  const lineResult = await loadLines(executor, invoiceIds);
+  const transactions = await loadTransactions(executor, studentId);
+  const pendingRows = await loadPending(executor, studentId, options);
   const linesByInvoice = new Map();
   lineResult.rows.forEach((line) => {
     const id = Number(line.invoice_id);
@@ -205,7 +214,7 @@ async function getPayableObligations(studentId, executor = db, options = {}) {
     if (carryForwardSourceIds.has(invoiceId)) return;
     const amountDue = money(invoice.amount_due);
     const amountPaid = money(invoice.amount_paid);
-    const invoiceLines = linesByInvoice.get(invoiceId) || [];
+    const invoiceLines = resolveLegacyClassification(linesByInvoice.get(invoiceId) || []).lines;
     const charges = invoiceLines.filter((line) =>
       String(line.line_type || 'charge').toLowerCase() === 'charge' &&
       !Boolean(line.is_included) && money(line.amount) > 0);
@@ -321,11 +330,17 @@ function makeObligation({
   const identity = `invoice:${Number(invoice.id)}:${invoiceLineItemId == null
     ? 'legacy' : `line:${Number(invoiceLineItemId)}`}`;
   const pendingAmount = pendingRows.reduce((sum, row) => {
-    const selected = Array.isArray(row.selected_obligations) ? row.selected_obligations : [];
+    let selected = row.selected_obligations;
+    if (typeof selected === 'string') {
+      try { selected = JSON.parse(selected); } catch (_) { selected = []; }
+    }
+    selected = Array.isArray(selected) ? selected : [];
     return sum + selected.filter((item) => pendingMatches(item, {
       invoice_id: invoice.id,
       invoice_line_item_id: invoiceLineItemId,
       one_off_fee_id: oneOffFeeId,
+      assignment_id: assignmentId,
+      obligation_id: identity,
       category,
     })).reduce((inner, item) => inner + money(item.amount), 0);
   }, 0);

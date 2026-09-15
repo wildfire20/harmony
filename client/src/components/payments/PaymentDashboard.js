@@ -320,7 +320,7 @@ const PaymentDashboard = () => {
 
   const openLegacyClassification = (invoice) => {
     setLegacyInvoice(invoice);
-    setLegacyCategory('tuition');
+    setLegacyCategory(invoice.legacy_reconciliation?.category === 'tuition' ? 'boarding' : 'tuition');
     setLegacyReason('');
   };
 
@@ -332,7 +332,9 @@ const PaymentDashboard = () => {
     }
     setLegacySaving(true);
     try {
-      const response = await fetch(`/api/invoices/${legacyInvoice.id}/classify-legacy`, {
+      const correction = legacyInvoice.legacy_reconciliation?.state === 'RECONCILED';
+      const endpoint = correction ? 'correct-legacy-classification' : 'classify-legacy';
+      const response = await fetch(`/api/invoices/${legacyInvoice.id}/${endpoint}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ category: legacyCategory, reason: legacyReason.trim() }),
@@ -942,9 +944,20 @@ const PaymentDashboard = () => {
                               </button>
                             )}
                             {legacyReconciliation?.state === 'RECONCILED' && (
-                              <div className="text-xs text-emerald-700 font-medium">
-                                Reconciled as {String(legacyReconciliation.category || '').replaceAll('_', ' ')}
-                              </div>
+                              <>
+                                <div className="text-xs text-emerald-700 font-medium">
+                                  Reconciled as {String(legacyReconciliation.category || '').replaceAll('_', ' ')}
+                                </div>
+                                {!isCarriedForwardHistory && Number(invoice.outstanding_balance || 0) > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openLegacyClassification(invoice)}
+                                    className="mt-1 text-xs text-amber-700 underline"
+                                  >
+                                    Correct classification
+                                  </button>
+                                )}
+                              </>
                             )}
                             {isCarriedForwardHistory && (
                               <div className="text-xs text-slate-600 font-medium">Carried forward history · classification unavailable</div>
@@ -1035,7 +1048,11 @@ const PaymentDashboard = () => {
           <form onSubmit={handleClassifyLegacy} className="bg-white rounded-lg p-6 w-full max-w-lg mx-4">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-lg font-medium text-gray-900">Reconcile Existing Invoice</h3>
+                <h3 className="text-lg font-medium text-gray-900">
+                  {legacyInvoice.legacy_reconciliation?.state === 'RECONCILED'
+                    ? 'Correct Legacy Classification'
+                    : 'Reconcile Existing Invoice'}
+                </h3>
                 <p className="text-xs text-gray-500 mt-1">
                   {legacyInvoice.first_name} {legacyInvoice.last_name} · {formatCurrency(legacyInvoice.amount_due)} due ·
                   {' '}{formatCurrency(legacyInvoice.amount_paid)} paid · {formatCurrency(legacyInvoice.outstanding_balance)} outstanding
@@ -1045,7 +1062,7 @@ const PaymentDashboard = () => {
             </div>
             <p className="text-sm text-gray-600 mb-4">
               This attaches provenance to invoice #{legacyInvoice.id} and preserves its amount, payment history, and allocations.
-              It does not create a new invoice.
+              It does not create a new invoice or remove prior classification evidence.
             </p>
             <label className="block text-sm font-medium text-gray-700 mb-3">
               Classification
@@ -1079,7 +1096,11 @@ const PaymentDashboard = () => {
                 Cancel
               </button>
               <button type="submit" disabled={legacySaving} className="px-4 py-2 rounded-md bg-amber-600 text-white disabled:opacity-50">
-                {legacySaving ? 'Saving…' : 'Classify existing invoice'}
+                {legacySaving ? 'Saving…' : (
+                  legacyInvoice.legacy_reconciliation?.state === 'RECONCILED'
+                    ? 'Append correction'
+                    : 'Classify existing invoice'
+                )}
               </button>
             </div>
           </form>

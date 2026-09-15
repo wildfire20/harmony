@@ -20,6 +20,9 @@ const {
 const { acquireInvoiceObligationLocks } = require('../services/invoiceObligationLocks');
 const { getPayableObligations } = require('../services/payableObligations');
 const { getCarryForwardSourceIds } = require('../services/carryForwardLineage');
+const {
+  CORRECTION_SOURCE, resolveLegacyClassification,
+} = require('../services/legacyClassification');
 
 const router = express.Router();
 const RECONCILABLE_SERVICES = new Map([
@@ -645,7 +648,7 @@ router.post('/:id/classify-legacy', [
       Number(obligation.invoice_id) === invoiceId && obligation.category === category);
     const ledgerAfter = await getStudentLedger(invoice.student_id, client);
     const ledgerMatch = ledgerAfter?.invoices?.find((item) => Number(item.id) === invoiceId);
-    if (!payableMatch || !payableMatch.is_payable ||
+    if (!payableMatch ||
         Number(payableMatch.net_due) !== amountDue ||
         Number(payableMatch.amount_outstanding) !== outstanding ||
         payableMatch.reconciliation_state ||
@@ -755,6 +758,233 @@ router.post('/:id/classify-legacy', [
     message: `Existing invoice classified as ${LEGACY_CLASSIFICATION_SERVICES.get(category)}`,
     ...classified,
   });
+});
+
+// Correct a mistaken legacy classification without changing or deleting the
+// original immutable charge. The correction is a zero-value append-only line;
+// finance read models resolve the latest valid correction as the effective
+// category while retaining the original line as historical evidence.
+router.post('/:id/correct-legacy-classification', [
+  authenticate,
+  authorize('admin', 'super_admin'),
+], async (req, res) => {
+  const invoiceId = positiveInteger(req.params.id);
+  const category = String(req.body?.category || req.body?.service_key || '').trim().toLowerCase();
+  const reason = String(req.body?.reason || '').trim();
+  if (!invoiceId || !LEGACY_CLASSIFICATION_SERVICES.has(category) ||
+      reason.length < 10 || reason.length > 500) {
+    return res.status(422).json({
+      success: false,
+      message: 'A valid invoice, recurring category, and a meaningful reason of 10–500 characters are required.',
+    });
+  }
+
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    await acquireInvoiceObligationLocks(client, [{ invoiceId, category }]);
+    const invoiceResult = await client.query(`
+      SELECT i.id, i.student_id, i.amount_due, i.amount_paid,
+             i.outstanding_balance, i.overpaid_amount, i.due_date,
+             i.reference_number, i.status
+      FROM invoices i
+      WHERE i.id = $1::integer
+      FOR UPDATE
+    `, [invoiceId]);
+    const invoice = invoiceResult.rows[0];
+    if (!invoice) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+    const carryForwardSourceIds = await getCarryForwardSourceIds(client, [invoice]);
+    if (carryForwardSourceIds.has(invoiceId) || invoice.status === 'Carried Forward') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'Carried-forward history cannot be reclassified.',
+      });
+    }
+
+    const linesResult = await client.query(`
+      SELECT id, invoice_id, line_type, service_key, label, description,
+             quantity, unit_amount, amount, is_included, metadata
+      FROM invoice_line_items
+      WHERE invoice_id = $1::integer
+      ORDER BY id
+    `, [invoiceId]);
+    const beforeResolution = resolveLegacyClassification(linesResult.rows);
+    const original = beforeResolution.initial;
+    const currentCategory = beforeResolution.category;
+    const permittedLines = linesResult.rows.every((line) =>
+      Number(line.id) === Number(original?.id) ||
+      String(line?.metadata?.source || '') === CORRECTION_SOURCE);
+    if (!original || !permittedLines || !currentCategory) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'Only a previously classified single-charge legacy invoice can use this correction.',
+      });
+    }
+    if (currentCategory === category) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: `This invoice is already effectively classified as ${LEGACY_CLASSIFICATION_SERVICES.get(category)}.`,
+      });
+    }
+
+    const pendingResult = await client.query(`
+      SELECT id, selected_obligations
+      FROM pending_payments
+      WHERE student_id = $1::integer AND status = 'pending'
+    `, [invoice.student_id]);
+    const pendingReferencesInvoice = pendingResult.rows.some((pending) => {
+      let selected = pending.selected_obligations;
+      if (typeof selected === 'string') {
+        try { selected = JSON.parse(selected); } catch (_) { selected = []; }
+      }
+      return (Array.isArray(selected) ? selected : []).some((item) => {
+        const obligationId = String(item?.obligation_id || '');
+        return Number(item?.invoice_id) === invoiceId ||
+          obligationId === `invoice:${invoiceId}:legacy` ||
+          obligationId.startsWith(`invoice:${invoiceId}:line:`);
+      });
+    });
+    if (pendingReferencesInvoice) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'This invoice has an active exact pending payment proof and cannot be corrected until it is reviewed.',
+      });
+    }
+
+    const allocationResult = await client.query(`
+      SELECT pt.id, pt.amount,
+             to_jsonb(pt)->>'allocation_category' AS allocation_category
+      FROM payment_transactions pt
+      LEFT JOIN payment_transactions reversal
+        ON reversal.reverses_transaction_id = pt.id
+      WHERE pt.invoice_id = $1::integer
+        AND pt.reverses_transaction_id IS NULL
+        AND reversal.id IS NULL
+      ORDER BY pt.id
+    `, [invoiceId]);
+    const allocationCategories = [...new Set(
+      allocationResult.rows.map((row) => row.allocation_category).filter(Boolean),
+    )];
+    if (allocationCategories.some((value) => value !== category)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'Categorized historical allocations conflict with this correction and require explicit payment reconciliation first.',
+      });
+    }
+
+    const amountDue = Number(invoice.amount_due);
+    const amountPaid = Number(invoice.amount_paid);
+    const outstanding = Math.max(amountDue - amountPaid, 0);
+    const correctedAt = new Date().toISOString();
+    const metadata = {
+      source: CORRECTION_SOURCE,
+      correction_type: 'category',
+      target_line_id: Number(original.id),
+      previous_category: currentCategory,
+      new_category: category,
+      reason,
+      actor_id: Number(req.user.id),
+      actor_name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim() || null,
+      corrected_at: correctedAt,
+    };
+    const correctionResult = await client.query(`
+      INSERT INTO invoice_line_items
+        (invoice_id, line_type, service_key, label, description,
+         quantity, unit_amount, amount, is_included, metadata)
+      VALUES ($1::integer, 'charge', $2, $3, $4,
+              1, 0, 0, true, $5::jsonb)
+      RETURNING id, invoice_id, line_type, service_key, label, description,
+                amount, is_included, metadata
+    `, [
+      invoiceId,
+      category,
+      LEGACY_CLASSIFICATION_SERVICES.get(category),
+      `Corrected legacy classification from ${currentCategory} to ${category}`,
+      JSON.stringify(metadata),
+    ]);
+
+    const ledgerAfter = await getStudentLedger(invoice.student_id, client);
+    const ledgerMatch = ledgerAfter?.invoices?.find((item) => Number(item.id) === invoiceId);
+    const afterInvoiceResult = await client.query(`
+      SELECT id, student_id, amount_due, amount_paid, outstanding_balance,
+             overpaid_amount, due_date, reference_number, status
+      FROM invoices WHERE id = $1::integer
+    `, [invoiceId]);
+    const after = afterInvoiceResult.rows[0];
+    const unchanged = after &&
+      String(after.amount_due) === String(invoice.amount_due) &&
+      String(after.amount_paid) === String(invoice.amount_paid) &&
+      String(after.outstanding_balance) === String(invoice.outstanding_balance) &&
+      String(after.overpaid_amount) === String(invoice.overpaid_amount) &&
+      String(after.due_date).slice(0, 10) === String(invoice.due_date).slice(0, 10) &&
+      (after.reference_number || null) === (invoice.reference_number || null) &&
+      (after.status || null) === (invoice.status || null);
+    if (!unchanged || !ledgerMatch ||
+        ledgerMatch.legacy_reconciliation?.category !== category ||
+        Number(ledgerMatch.net_due) !== amountDue ||
+        Number(ledgerMatch.allocated_effective_payments) !== amountPaid ||
+        Number(ledgerMatch.outstanding_balance) !== outstanding) {
+      throw Object.assign(new Error('Canonical finance models did not preserve the corrected legacy invoice'), {
+        status: 409,
+      });
+    }
+
+    await logAudit({
+      executor: client,
+      required: true,
+      userId: req.user.id,
+      userName: metadata.actor_name,
+      userRole: req.user.role,
+      action: 'LEGACY_INVOICE_CLASSIFICATION_CORRECTED',
+      entityType: 'invoice',
+      entityId: invoiceId,
+      details: {
+        invoice_id: invoiceId,
+        student_id: Number(invoice.student_id),
+        target_line_id: Number(original.id),
+        previous_classification: currentCategory,
+        new_classification: category,
+        actor: { id: Number(req.user.id), name: metadata.actor_name, role: req.user.role },
+        reason,
+        corrected_at: correctedAt,
+      },
+      ipAddress: getIp(req),
+    });
+    await client.query('COMMIT');
+    return res.status(200).json({
+      success: true,
+      message: `Legacy classification corrected from ${LEGACY_CLASSIFICATION_SERVICES.get(currentCategory) || currentCategory} to ${LEGACY_CLASSIFICATION_SERVICES.get(category)}`,
+      invoice: after,
+      correction: correctionResult.rows[0],
+      financial_invariants: {
+        invoice_id: invoiceId,
+        amount_due: amountDue,
+        amount_paid: amountPaid,
+        outstanding,
+        unchanged: true,
+      },
+    });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error.status === 409 || error.code === '23505') {
+      return res.status(409).json({
+        success: false,
+        message: error.safeMessage || error.message || 'Classification correction conflicted with another finance action.',
+      });
+    }
+    console.error('Legacy classification correction error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to correct legacy classification' });
+  } finally {
+    client.release();
+  }
 });
 
 // Manual arrears entry: admin creates an arrears invoice for a specific student
@@ -1161,27 +1391,15 @@ router.get('/', [
     result.rows = result.rows.map((invoice) => ({
       ...(() => {
         const lineItems = linesByInvoice.get(Number(invoice.id)) || [];
-        const classifiedLine = lineItems.find((line) => {
-          const metadata = line.metadata && typeof line.metadata === 'object' ? line.metadata : {};
-          return metadata.source === LEGACY_CLASSIFICATION_SOURCE ||
-            metadata.legacy_reconciliation === true ||
-            metadata.legacy_reconciliation === 'true';
-        });
-        const metadata = classifiedLine?.metadata || {};
+        const classification = resolveLegacyClassification(lineItems);
+        const classifiedLine = classification.initial;
+        const metadata = classification.metadata || {};
         const carryForwardHistory = carryForwardSourceIds.has(Number(invoice.id)) ||
           invoice.status === 'Carried Forward';
+        const breakdown = buildInvoiceBreakdown(invoice, lineItems, flagsByInvoice.get(Number(invoice.id)) || []);
         return {
-          ...buildInvoiceBreakdown(invoice, lineItems, flagsByInvoice.get(Number(invoice.id)) || []),
-          legacy_reconciliation: !carryForwardHistory && classifiedLine ? {
-            state: 'RECONCILED',
-            category: metadata.category || classifiedLine.service_key,
-            service_key: metadata.service_key || classifiedLine.service_key,
-            actor_id: metadata.actor_id == null ? null : Number(metadata.actor_id),
-            actor_name: metadata.actor_name || null,
-            classified_at: metadata.classified_at || null,
-            reason: metadata.reason || null,
-            previous_classification: metadata.previous_classification ?? null,
-          } : null,
+          ...breakdown,
+          legacy_reconciliation: carryForwardHistory ? null : breakdown.legacy_reconciliation,
           reconciliation_state: carryForwardHistory ? null : (
             classifiedLine ? 'RECONCILED' : (
               !lineData.available ||

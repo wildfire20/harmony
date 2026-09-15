@@ -6,7 +6,8 @@ const db = require('../config/database');
 const invoiceRouter = require('../routes/invoices');
 const paymentProofRouter = require('../routes/paymentProofs');
 const { buildInvoiceBreakdown, getStudentLedger } = require('../services/financeLedger');
-const { getPayableObligations } = require('../services/payableObligations');
+const { getPayableObligations, pendingMatches } = require('../services/payableObligations');
+const { resolveLegacyClassification } = require('../services/legacyClassification');
 
 const invoiceHandler = invoiceRouter.stack
   .find((layer) => layer.route?.path === '/:id/classify-legacy')
@@ -197,6 +198,145 @@ test('classification conflicts with active pending proof or conflicting payment 
   assert.equal(res.statusCode, 409);
   assert.match(res.body.message, /conflicting payment allocation/);
   assert.equal(client.state.inserted.length, 0);
+});
+
+test('category-only historical proposals are ambiguous and exact invoice selectors reserve only their invoice', async () => {
+  const obligation = {
+    obligation_id: 'invoice:44:line:901',
+    invoice_id: 44,
+    invoice_line_item_id: 901,
+    category: 'tuition',
+  };
+  assert.equal(pendingMatches({ category: 'tuition', amount: 2350 }, obligation), false);
+  assert.equal(pendingMatches({ invoice_id: 44, category: 'tuition', amount: 950 }, obligation), true);
+  assert.equal(pendingMatches({ invoice_id: 45, category: 'tuition', amount: 950 }, obligation), false);
+
+  const unrelatedAmbiguous = await classify({
+    lines: [],
+    pending: [{ id: 88, selected_obligations: [{ category: 'tuition', amount: 2350 }] }],
+  });
+  assert.equal(unrelatedAmbiguous.res.statusCode, 200);
+  assert.equal(unrelatedAmbiguous.client.state.committed, true);
+});
+
+test('append-only correction preserves original evidence and changes only effective classification', async () => {
+  const initial = {
+    id: 901, invoice_id: 44, line_type: 'charge', service_key: 'boarding',
+    label: 'Boarding', amount: 2350, is_included: false,
+    metadata: {
+      source: 'legacy_invoice_reconciliation', legacy_reconciliation: true,
+      category: 'boarding', actor_id: 3, classified_at: '2026-09-15T10:00:00.000Z',
+    },
+  };
+  const correction = {
+    id: 902, invoice_id: 44, line_type: 'charge',
+    service_key: 'tuition', label: 'Tuition', amount: 0, is_included: true,
+    metadata: {
+      source: 'legacy_classification_correction', correction_type: 'category',
+      target_line_id: 901, previous_category: 'boarding', new_category: 'tuition',
+      actor_id: 4, corrected_at: '2026-09-15T11:00:00.000Z',
+    },
+  };
+  const resolved = resolveLegacyClassification([initial, correction]);
+  assert.equal(resolved.category, 'tuition');
+  assert.equal(resolved.lines.find((line) => line.id === 901).service_key, 'tuition');
+  assert.equal(resolved.lines.find((line) => line.id === 902).line_type, 'charge');
+  assert.equal(initial.service_key, 'boarding');
+  assert.equal(correction.amount, 0);
+
+  const breakdown = buildInvoiceBreakdown(invoice, [initial, correction]);
+  assert.equal(breakdown.amount_due, 2350);
+  assert.equal(breakdown.amount_paid, 1400);
+  assert.equal(breakdown.outstanding_balance, 950);
+  assert.equal(breakdown.gross_charges, 2350);
+  assert.equal(breakdown.legacy_reconciliation.category, 'tuition');
+  assert.equal(breakdown.line_items.filter((line) => line.line_type === 'charge').length, 1);
+  assert.equal(breakdown.line_items.filter((line) => line.line_type === 'classification_correction').length, 1);
+
+  assert.match(invoiceSource, /correct-legacy-classification/);
+  assert.match(invoiceSource, /CORRECTION_SOURCE/);
+  const correctionRoute = invoiceSource.slice(
+    invoiceSource.indexOf("router.post('/:id/correct-legacy-classification'"),
+    invoiceSource.indexOf("router.post('/manual-arrears'"),
+  );
+  assert.doesNotMatch(correctionRoute, /UPDATE invoice_line_items|DELETE FROM invoice_line_items|INSERT INTO invoices|INSERT INTO payment_transactions/);
+  assert.match(correctionRoute, /LEGACY_INVOICE_CLASSIFICATION_CORRECTED/);
+});
+
+test('payment proposal resolution approves the corrected effective category using the original line identity', async () => {
+  const { resolvePaymentProposals } = paymentProofRouter;
+  const initialMetadata = {
+    source: 'legacy_invoice_reconciliation', legacy_reconciliation: true,
+    category: 'boarding',
+  };
+  const correctionMetadata = {
+    source: 'legacy_classification_correction', target_line_id: 901,
+    previous_category: 'boarding', new_category: 'tuition',
+  };
+  const executor = {
+    async query(sql) {
+      if (/FROM invoices i[\s\S]*JOIN invoice_line_items li/.test(sql)) {
+        return { rows: [{
+          id: 44, due_date: '2026-04-30', amount_due: 2350, amount_paid: 1400,
+          invoice_line_item_id: 901, label: 'Boarding', service_key: 'boarding',
+          line_amount: 2350, metadata: initialMetadata,
+          invoice_lines: [
+            {
+              id: 901, line_type: 'charge', service_key: 'boarding',
+              label: 'Boarding', amount: 2350, is_included: false,
+              metadata: initialMetadata,
+            },
+            {
+              id: 902, line_type: 'charge', service_key: 'tuition',
+              label: 'Tuition', amount: 0, is_included: true,
+              metadata: correctionMetadata,
+            },
+          ],
+          invoice_transactions: [],
+        }] };
+      }
+      throw new Error(`Unexpected corrected proposal query: ${sql}`);
+    },
+  };
+  const resolved = await resolvePaymentProposals(executor, 7, [{
+    obligation_id: 'invoice:44:line:901',
+    invoice_id: 44,
+    invoice_line_item_id: 901,
+    category: 'tuition',
+    amount: 950,
+  }]);
+  assert.deepEqual(resolved, [{
+    invoiceId: 44,
+    invoiceLineItemId: 901,
+    obligationId: null,
+    amount: 950,
+    category: 'tuition',
+    availableAmount: 950,
+  }]);
+});
+
+test('admin proof review explicitly marks category-only historical proposals for retargeting', async () => {
+  assert.match(routeSource, /LEGACY_AMBIGUOUS_ALLOCATION/);
+  assert.match(routeSource, /Legacy ambiguous allocation — Admin retarget required/);
+  const pendingUi = fs.readFileSync('client/src/components/admin/PendingPayments.js', 'utf8');
+  assert.match(pendingUi, /legacy_allocation_review/);
+
+  const adminListHandler = paymentProofRouter.stack
+    .find((layer) => layer.route?.path === '/' && layer.route.methods?.get)
+    .route.stack.at(-1).handle;
+  const originalQuery = db.query;
+  db.query = async () => ({ rows: [
+    { id: 1, selected_obligations: [{ category: 'tuition', amount: 2350 }] },
+    { id: 2, selected_obligations: [{ invoice_id: 44, category: 'tuition', amount: 950 }] },
+  ] });
+  const res = response();
+  try {
+    await adminListHandler({ query: { status: 'pending', search: '' } }, res);
+  } finally {
+    db.query = originalQuery;
+  }
+  assert.equal(res.body.submissions[0].legacy_allocation_review.code, 'LEGACY_AMBIGUOUS_ALLOCATION');
+  assert.equal(res.body.submissions[1].legacy_allocation_review, null);
 });
 
 test('line-less carried-forward source with successor is rejected and never duplicated as payable', async () => {
