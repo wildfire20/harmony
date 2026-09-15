@@ -21,6 +21,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { spawnSync } = require('node:child_process');
 const express = require('express');
 const { Pool } = require('pg');
 const { runFinanceCoreAudit } = require('../scripts/audit-finance-core');
@@ -62,6 +63,44 @@ const request = (server, method, route, body, headers = {}) => new Promise((reso
 });
 
 const quoteIdentifier = (value) => `"${String(value).replace(/"/g, '""')}"`;
+
+function readonlyUrlForSchema(url, schema) {
+  const scoped = new URL(url);
+  scoped.searchParams.set('options', `-csearch_path=${schema}`);
+  return scoped.toString();
+}
+
+function runFinanceOperatorScript(scriptName, readonlyUrl) {
+  const env = {
+    ...process.env,
+    FINANCE_READONLY_DATABASE_URL: readonlyUrl,
+    FINANCE_READONLY_DATABASE_SSL: process.env.FINANCE_TEST_DATABASE_SSL || 'false',
+    DATABASE_URL: 'postgresql://wrong:wrong@127.0.0.1:1/wrong_database',
+    PGHOST: '127.0.0.1',
+    PGPORT: '1',
+    PGDATABASE: 'wrong_database',
+    PGUSER: 'wrong_user',
+    PGPASSWORD: 'wrong_password',
+  };
+  return spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', scriptName)], {
+    cwd: path.join(__dirname, '..'),
+    env,
+    encoding: 'utf8',
+    timeout: 120000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+}
+
+function runWithoutReadonlyUrl(scriptName) {
+  const env = { ...process.env };
+  delete env.FINANCE_READONLY_DATABASE_URL;
+  return spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', scriptName)], {
+    cwd: path.join(__dirname, '..'),
+    env,
+    encoding: 'utf8',
+    timeout: 30000,
+  });
+}
 
 const baseSchema = `
   CREATE TABLE grades (
@@ -221,6 +260,27 @@ async function runSuite() {
     await pool.query('SELECT 1');
     await installBaseFinanceDatabase(pool, schema);
     database = scopedDatabase(pool, schema);
+    const operatorUrl = readonlyUrlForSchema(databaseUrl, schema);
+
+    const missingUrl = runWithoutReadonlyUrl('preflight-finance-core.js');
+    assert.notEqual(missingUrl.status, 0);
+    assert.match(
+      missingUrl.stderr,
+      /FINANCE_READONLY_DATABASE_URL is required; refusing to infer a database/,
+    );
+
+    const operatorPreMigration = runFinanceOperatorScript(
+      'preflight-finance-core.js',
+      operatorUrl,
+    );
+    assert.equal(
+      operatorPreMigration.status,
+      0,
+      `${operatorPreMigration.stdout}\n${operatorPreMigration.stderr}`,
+    );
+    assert.match(operatorPreMigration.stdout, new RegExp(`schema: ${schema}`));
+    assert.match(operatorPreMigration.stdout, /transaction_read_only: on/);
+    assert.match(operatorPreMigration.stdout, /"ok": true/);
 
     const preMigrationClient = await database.pool.connect();
     try {
@@ -270,6 +330,18 @@ async function runSuite() {
     }
 
     await applyFinanceCoreMigration(pool, schema);
+
+    for (const scriptName of ['audit-finance-core.js', 'preflight-finance-core.js']) {
+      const operatorPostMigration = runFinanceOperatorScript(scriptName, operatorUrl);
+      assert.equal(
+        operatorPostMigration.status,
+        0,
+        `${operatorPostMigration.stdout}\n${operatorPostMigration.stderr}`,
+      );
+      assert.match(operatorPostMigration.stdout, new RegExp(`schema: ${schema}`));
+      assert.match(operatorPostMigration.stdout, /transaction_read_only: on/);
+      assert.match(operatorPostMigration.stdout, /"ok": true/);
+    }
 
     // Make every production service used by the mounted routes point at the
     // disposable schema.  This cache substitution is test-only and is undone

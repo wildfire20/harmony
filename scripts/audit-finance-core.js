@@ -4,7 +4,10 @@
  */
 require('dotenv').config();
 
-const db = require('../config/database');
+const {
+  createFinanceReadonlyPool,
+  beginVerifiedReadonlySession,
+} = require('./finance-readonly-database');
 
 const REQUIRED_TABLES = [
   'finance_schema_versions',
@@ -700,10 +703,10 @@ async function runFinanceCoreAudit(client, options = {}) {
 }
 
 async function main() {
-  const pool = db.pool || db;
+  const pool = createFinanceReadonlyPool();
   const client = await pool.connect();
   try {
-    await client.query('BEGIN READ ONLY');
+    await beginVerifiedReadonlySession(client);
     const result = await runFinanceCoreAudit(client);
     await client.query('ROLLBACK');
     console.log(JSON.stringify(result, null, 2));

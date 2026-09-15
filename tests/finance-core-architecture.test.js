@@ -136,7 +136,7 @@ test('finance-core audit contract is read-only', () => {
     path.join(__dirname, '..', 'scripts', 'audit-finance-core.js'),
     'utf8',
   );
-  assert.match(source, /BEGIN READ ONLY/);
+  assert.match(source, /beginVerifiedReadonlySession/);
   assert.match(source, /finance_audit_optional_/);
   assert.match(source, /ROLLBACK TO SAVEPOINT/);
   assert.match(source, /ROLLBACK/);
@@ -169,13 +169,28 @@ test('finance-core preflight and deployment order are explicit and read-only', (
   );
   const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   const order = fs.readFileSync(path.join(__dirname, '..', 'FINANCE_CORE_DEPLOYMENT_ORDER.md'), 'utf8');
-  assert.match(preflight, /BEGIN READ ONLY/);
+  const readonlyDatabase = fs.readFileSync(
+    path.join(__dirname, '..', 'scripts', 'finance-readonly-database.js'),
+    'utf8',
+  );
+  assert.match(preflight, /beginVerifiedReadonlySession/);
   assert.match(preflight, /targetTables/);
   assert.match(preflight, /hasCanonicalIdentityColumns/);
   assert.match(preflight, /canonicalMonthlyDuplicates/);
   assert.match(preflight, /overlapping_active_enrollment/);
   assert.doesNotMatch(preflight, /\b(INSERT|UPDATE|DELETE|ALTER|CREATE TABLE)\b/);
   assert.equal(packageJson.scripts['preflight:finance-core'], 'node scripts/preflight-finance-core.js');
+  assert.match(readonlyDatabase, /FINANCE_READONLY_DATABASE_URL is required/);
+  assert.match(readonlyDatabase, /BEGIN READ ONLY/);
+  assert.match(readonlyDatabase, /SHOW transaction_read_only/);
+  assert.match(readonlyDatabase, /current_database\(\)/);
+  assert.doesNotMatch(readonlyDatabase, /process\.env\.(DATABASE_URL|PGHOST|PGDATABASE|PGUSER|PGPASSWORD)/);
+  assert.doesNotMatch(preflight, /config\/database/);
+  assert.doesNotMatch(
+    fs.readFileSync(path.join(__dirname, '..', 'scripts', 'audit-finance-core.js'), 'utf8'),
+    /config\/database/,
+  );
+  assert.match(order, /FINANCE_READONLY_DATABASE_URL/);
   assert.match(order, /Production pre-migration preflight/i);
   assert.match(order, /Missing Finance Core target tables and columns are\s+expected/i);
   assert.match(order, /backup\/checkpoint/i);

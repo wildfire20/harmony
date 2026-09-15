@@ -8,7 +8,10 @@
  */
 require('dotenv').config();
 
-const db = require('../config/database');
+const {
+  createFinanceReadonlyPool,
+  beginVerifiedReadonlySession,
+} = require('./finance-readonly-database');
 
 const REQUIRED_BASE_TABLES = [
   'users',
@@ -251,13 +254,10 @@ async function runFinanceCorePreflight(client) {
 }
 
 async function main() {
-  if (!db.pool || typeof db.pool.connect !== 'function') {
-    throw new Error('Finance-core preflight requires the configured PostgreSQL pool; no fallback database is permitted');
-  }
-  const pool = db.pool;
+  const pool = createFinanceReadonlyPool();
   const client = await pool.connect();
   try {
-    await client.query('BEGIN READ ONLY');
+    await beginVerifiedReadonlySession(client);
     const result = await runFinanceCorePreflight(client);
     await client.query('ROLLBACK');
     console.log(JSON.stringify(result, null, 2));
@@ -268,6 +268,7 @@ async function main() {
     throw error;
   } finally {
     client.release();
+    await pool.end();
   }
 }
 

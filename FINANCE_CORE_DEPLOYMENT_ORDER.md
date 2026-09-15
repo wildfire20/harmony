@@ -15,7 +15,7 @@ Run the full release gate against the disposable Finance Core test database.
 Run only the preflight against the intended production database/schema:
 
 ```sh
-npm run preflight:finance-core
+FINANCE_READONLY_DATABASE_URL="$PRODUCTION_DATABASE_URL" npm run preflight:finance-core
 ```
 
 This command is read-only and is designed for the schema that exists before
@@ -55,8 +55,8 @@ restored to a known state.
 Run both commands again:
 
 ```sh
-npm run audit:finance-core
-npm run preflight:finance-core
+FINANCE_READONLY_DATABASE_URL="$PRODUCTION_DATABASE_URL" npm run audit:finance-core
+FINANCE_READONLY_DATABASE_URL="$PRODUCTION_DATABASE_URL" npm run preflight:finance-core
 ```
 
 The strict post-migration audit must confirm the schema version, immutable payment
