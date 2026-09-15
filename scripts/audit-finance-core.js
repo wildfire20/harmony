@@ -282,23 +282,33 @@ async function runFinanceCoreAudit(client, options = {}) {
   }));
 
   const headerLedger = await optionalSection(client, findings, 'header_vs_ledger', `
-    SELECT i.id, i.student_id, i.amount_paid,
+    SELECT i.id, i.student_id, i.amount_paid, i.finance_origin, i.invoice_kind,
            COALESCE(SUM(CASE WHEN pt.reverses_transaction_id IS NULL
                              AND reversal.id IS NULL THEN pt.amount ELSE 0 END), 0) AS ledger_paid
     FROM invoices i
     LEFT JOIN payment_transactions pt ON pt.invoice_id = i.id
     LEFT JOIN payment_transactions reversal ON reversal.reverses_transaction_id = pt.id
-    GROUP BY i.id, i.student_id, i.amount_paid
+    GROUP BY i.id, i.student_id, i.amount_paid, i.finance_origin, i.invoice_kind
     HAVING ROUND(COALESCE(i.amount_paid, 0)::numeric, 2) <>
            ROUND(COALESCE(SUM(CASE WHEN pt.reverses_transaction_id IS NULL
                              AND reversal.id IS NULL THEN pt.amount ELSE 0 END), 0)::numeric, 2)
     ORDER BY i.id
   `);
-  checks.headerVsLedger = { count: headerLedger.length };
+  const canonicalHeaderLedger = headerLedger.filter(
+    (row) => row.finance_origin === 'canonical',
+  );
+  checks.headerVsLedger = {
+    totalCount: headerLedger.length,
+    canonicalCount: canonicalHeaderLedger.length,
+    noncanonicalCount: headerLedger.length - canonicalHeaderLedger.length,
+  };
   headerLedger.forEach((row) => findings.push({
     section: 'header_vs_ledger',
-    severity: 'error',
-    code: 'amount_paid_mismatch',
+    severity: row.finance_origin === 'canonical' ? 'error' : 'warning',
+    code: row.finance_origin === 'canonical'
+      ? 'canonical_amount_paid_mismatch'
+      : 'historical_amount_paid_mismatch',
+    classification: row.finance_origin === 'canonical' ? 'canonical' : 'noncanonical',
     ...row,
   }));
 

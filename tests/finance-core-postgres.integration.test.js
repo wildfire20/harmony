@@ -851,6 +851,81 @@ async function runSuite() {
     );
     assert.equal(concurrentRows.rows[0].count, 1);
 
+    const historicalMismatchRows = await database.query(`
+      INSERT INTO invoices
+        (student_id, student_number, amount_due, amount_paid, due_date, status,
+         reference_number, finance_origin)
+      VALUES
+        (3, 'FIN-GATE-001', 10, 10, '2020-02-29', 'Paid', 'HISTORICAL-NULL', NULL),
+        (3, 'FIN-GATE-001', 20, 20, '2020-03-31', 'Paid', 'HISTORICAL-LEGACY', 'legacy'),
+        (3, 'FIN-GATE-001', 30, 30, '2020-04-30', 'Paid', 'HISTORICAL-UNKNOWN', 'unknown')
+      RETURNING id
+    `);
+    const historicalAuditClient = await database.pool.connect();
+    try {
+      await historicalAuditClient.query('BEGIN READ ONLY');
+      const historicalAudit = await runFinanceCoreAudit(historicalAuditClient, {
+        currentPeriod: '2029-01',
+      });
+      assert.equal(historicalAudit.ok, true, JSON.stringify(historicalAudit.findings));
+      assert.deepEqual(historicalAudit.checks.headerVsLedger, {
+        totalCount: 3,
+        canonicalCount: 0,
+        noncanonicalCount: 3,
+      });
+      const historicalFindings = historicalAudit.findings.filter(
+        (finding) => finding.section === 'header_vs_ledger',
+      );
+      assert.equal(historicalFindings.length, 3);
+      assert.ok(historicalFindings.every(
+        (finding) => finding.severity === 'warning'
+          && finding.code === 'historical_amount_paid_mismatch'
+          && finding.classification === 'noncanonical',
+      ));
+      assert.deepEqual(
+        historicalFindings.map((finding) => finding.finance_origin),
+        [null, 'legacy', 'unknown'],
+      );
+      await historicalAuditClient.query('ROLLBACK');
+    } finally {
+      historicalAuditClient.release();
+    }
+
+    const canonicalMismatch = (await database.query(`
+      INSERT INTO invoices
+        (student_id, student_number, amount_due, amount_paid, due_date, status,
+         reference_number, finance_origin, invoice_kind, invoice_source)
+      VALUES
+        (3, 'FIN-GATE-001', 40, 40, '2029-02-28', 'Paid',
+         'CANONICAL-MISMATCH', 'canonical', 'one_off', 'integration_test')
+      RETURNING id
+    `)).rows[0];
+    const canonicalAuditClient = await database.pool.connect();
+    try {
+      await canonicalAuditClient.query('BEGIN READ ONLY');
+      const canonicalAudit = await runFinanceCoreAudit(canonicalAuditClient, {
+        currentPeriod: '2029-01',
+      });
+      assert.equal(canonicalAudit.ok, false);
+      assert.deepEqual(canonicalAudit.checks.headerVsLedger, {
+        totalCount: 4,
+        canonicalCount: 1,
+        noncanonicalCount: 3,
+      });
+      const canonicalFinding = canonicalAudit.findings.find(
+        (finding) => finding.id === canonicalMismatch.id
+          && finding.section === 'header_vs_ledger',
+      );
+      assert.equal(canonicalFinding.severity, 'error');
+      assert.equal(canonicalFinding.code, 'canonical_amount_paid_mismatch');
+      assert.equal(canonicalFinding.classification, 'canonical');
+      await canonicalAuditClient.query('ROLLBACK');
+    } finally {
+      canonicalAuditClient.release();
+    }
+    await database.query('DELETE FROM invoices WHERE id=$1', [canonicalMismatch.id]);
+    assert.equal(historicalMismatchRows.rows.length, 3);
+
     const postMigrationClient = await database.pool.connect();
     try {
       await postMigrationClient.query('BEGIN READ ONLY');
