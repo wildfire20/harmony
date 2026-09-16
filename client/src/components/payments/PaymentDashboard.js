@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Upload, 
   Download, 
@@ -23,6 +23,10 @@ import LoadingSpinner from '../common/LoadingSpinner';
 import toast from 'react-hot-toast';
 import EnhancedPaymentUploader from './EnhancedPaymentUploader';
 import StudentPaymentExport from './StudentPaymentExport';
+import {
+  isBillingReadinessReady,
+  isCurrentBillingReadinessResponse,
+} from './billingReadinessRequest';
 
 const PaymentDashboard = () => {
   const { user, token } = useAuth();
@@ -57,6 +61,14 @@ const PaymentDashboard = () => {
   });
   const [billingReadiness, setBillingReadiness] = useState(null);
   const [billingReadinessLoading, setBillingReadinessLoading] = useState(false);
+  const billingReadinessRequestIdRef = useRef(0);
+  const billingReadinessAbortRef = useRef(null);
+  const selectedBillingPeriod = `${generateForm.year}-${String(generateForm.month).padStart(2, '0')}`;
+  const billingReadyForSelectedPeriod = isBillingReadinessReady({
+    readiness: billingReadiness,
+    loading: billingReadinessLoading,
+    selectedPeriod: selectedBillingPeriod,
+  });
 
   // Ghost invoice modal states
   const [showGhostModal, setShowGhostModal] = useState(false);
@@ -197,6 +209,10 @@ const PaymentDashboard = () => {
   };
 
   const handleGenerateInvoices = async () => {
+    if (!billingReadyForSelectedPeriod) {
+      toast.error('Billing readiness must pass for the selected period before generating invoices.');
+      return;
+    }
     try {
       setUploadLoading(true);
       const response = await fetch('/api/invoices/generate-monthly', {
@@ -229,30 +245,73 @@ const PaymentDashboard = () => {
   };
 
   const fetchBillingReadiness = async () => {
-    const period = `${generateForm.year}-${String(generateForm.month).padStart(2, '0')}`;
+    const requestedPeriod = selectedBillingPeriod;
+    const requestId = ++billingReadinessRequestIdRef.current;
+    billingReadinessAbortRef.current?.abort();
+    const controller = new AbortController();
+    billingReadinessAbortRef.current = controller;
     setBillingReadinessLoading(true);
     try {
-      const response = await fetch(`/api/admin/monthly-billing-readiness?period=${period}`, {
+      const response = await fetch(`/api/admin/monthly-billing-readiness?period=${requestedPeriod}`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || 'Could not check billing readiness');
+      if (!isCurrentBillingReadinessResponse({
+        requestId,
+        latestRequestId: billingReadinessRequestIdRef.current,
+        requestedPeriod,
+        responsePeriod: data.period,
+      })) return;
       setBillingReadiness(data);
     } catch (error) {
+      if (error.name === 'AbortError' ||
+          requestId !== billingReadinessRequestIdRef.current) return;
       setBillingReadiness({
+        period: requestedPeriod,
         ready: false,
         hardFailures: [{ code: 'readiness_unavailable', message: error.message }],
       });
     } finally {
-      setBillingReadinessLoading(false);
+      if (requestId === billingReadinessRequestIdRef.current) {
+        billingReadinessAbortRef.current = null;
+        setBillingReadinessLoading(false);
+      }
     }
+  };
+
+  const invalidateBillingReadiness = () => {
+    billingReadinessRequestIdRef.current += 1;
+    billingReadinessAbortRef.current?.abort();
+    billingReadinessAbortRef.current = null;
+    setBillingReadiness(null);
+    setBillingReadinessLoading(false);
+  };
+
+  const handleGeneratePeriodChange = (field, value) => {
+    invalidateBillingReadiness();
+    setGenerateForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const closeGenerateModal = () => {
+    invalidateBillingReadiness();
+    setShowGenerateModal(false);
   };
 
   useEffect(() => {
     if (showGenerateModal && isAdmin) {
       setBillingReadiness(null);
       fetchBillingReadiness();
+    } else {
+      setBillingReadiness(null);
+      setBillingReadinessLoading(false);
     }
+    return () => {
+      billingReadinessRequestIdRef.current += 1;
+      billingReadinessAbortRef.current?.abort();
+      billingReadinessAbortRef.current = null;
+    };
   }, [showGenerateModal, generateForm.month, generateForm.year]);
 
   const handleExportCSV = async () => {
@@ -1143,7 +1202,7 @@ const PaymentDashboard = () => {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-medium text-gray-900">Generate Monthly Invoices</h3>
               <button
-                onClick={() => setShowGenerateModal(false)}
+                onClick={closeGenerateModal}
                 className="text-gray-400 hover:text-gray-600"
               >
                 ×
@@ -1155,7 +1214,7 @@ const PaymentDashboard = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Month</label>
                 <select
                   value={generateForm.month}
-                  onChange={(e) => setGenerateForm(prev => ({ ...prev, month: e.target.value }))}
+                  onChange={(e) => handleGeneratePeriodChange('month', e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {Array.from({ length: 12 }, (_, i) => (
@@ -1170,7 +1229,7 @@ const PaymentDashboard = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
                 <select
                   value={generateForm.year}
-                  onChange={(e) => setGenerateForm(prev => ({ ...prev, year: e.target.value }))}
+                  onChange={(e) => handleGeneratePeriodChange('year', e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {Array.from({ length: 3 }, (_, i) => {
@@ -1221,14 +1280,14 @@ const PaymentDashboard = () => {
 
               <div className="flex justify-end space-x-3 pt-4">
                 <button
-                  onClick={() => setShowGenerateModal(false)}
+                  onClick={closeGenerateModal}
                   className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleGenerateInvoices}
-                  disabled={uploadLoading || billingReadinessLoading || !billingReadiness || !billingReadiness.ready}
+                  disabled={uploadLoading || !billingReadyForSelectedPeriod}
                   className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
                 >
                   {uploadLoading ? 'Generating...' : 'Generate Invoices'}

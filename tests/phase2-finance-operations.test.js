@@ -186,6 +186,85 @@ test('Admin service enrollment API authenticates, validates, audits, idempotentl
   }
 });
 
+test('student update rejects legacy finance indicators before querying and still permits normal edits', async () => {
+  const state = { queries: 0, updates: 0, audits: 0 };
+  const database = {
+    async query(sql, params = []) {
+      state.queries += 1;
+      if (/SELECT first_name/.test(sql)) {
+        return {
+          rows: [{
+            id: 7, student_number: 'L-007', first_name: 'Before', last_name: 'Learner',
+            grade_id: 1, class_id: 2, is_active: true, is_boarder: true,
+            uses_transport: false, uses_aftercare: false,
+            has_sibling_discount: false, has_teacher_discount: false,
+          }],
+        };
+      }
+      if (/UPDATE users/.test(sql)) {
+        state.updates += 1;
+        return {
+          rows: [{
+            id: 7, student_number: 'L-007', first_name: params[0],
+            last_name: 'Learner', grade_id: 1, class_id: 2, is_active: true,
+            is_boarder: true, uses_transport: false, uses_aftercare: false,
+          }],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+  mock('../config/database', database);
+  mock('../middleware/auth', {
+    authenticate: (req, _res, next) => {
+      req.user = { id: 99, role: 'admin', first_name: 'A', last_name: 'Admin' };
+      next();
+    },
+    authorize: () => (_req, _res, next) => next(),
+  });
+  mock('../utils/auditLogger', {
+    logAudit: async () => { state.audits += 1; },
+    getIp: () => '127.0.0.1',
+  });
+  ['../routes/admin', '../services/monthlyBillingReadiness']
+    .forEach((name) => { delete require.cache[require.resolve(name)]; });
+  try {
+    const app = express();
+    app.use(express.json());
+    app.use('/api/admin', require('../routes/admin'));
+
+    for (const field of [
+      'is_boarder',
+      'uses_transport',
+      'uses_aftercare',
+      'has_sibling_discount',
+      'has_teacher_discount',
+    ]) {
+      const response = await request(app, 'PUT', '/api/admin/students/7', {
+        first_name: 'Blocked',
+        [field]: false,
+      });
+      assert.equal(response.status, 409);
+      assert.equal(response.body.code, 'LEGACY_FINANCE_INDICATORS_READ_ONLY');
+    }
+    assert.equal(state.queries, 0);
+    assert.equal(state.updates, 0);
+    assert.equal(state.audits, 0);
+
+    const response = await request(app, 'PUT', '/api/admin/students/7', {
+      first_name: 'Updated',
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.student.first_name, 'Updated');
+    assert.equal(state.updates, 1);
+    assert.equal(state.audits, 1);
+  } finally {
+    restoreModules();
+    ['../routes/admin', '../services/monthlyBillingReadiness']
+      .forEach((name) => { delete require.cache[require.resolve(name)]; });
+  }
+});
+
 test('service enrollment effective-period boundaries are inclusive and dates are explicit', async () => {
   const repository = require('../services/serviceEnrollmentRepository');
   assert.deepEqual(repository.periodBounds('2028-02'), {
@@ -318,6 +397,95 @@ test('StudentManagement exposes dated finance services and keeps old flags/disco
   assert.match(source, /no value is inferred/);
   assert.match(api, /getMonthlyBillingReadiness/);
   assert.match(api, /Idempotency-Key/);
+});
+
+test('Phase 3D finance UI safety contracts prevent implicit finance mutations', () => {
+  const studentSource = fs.readFileSync(project('client/src/components/admin/StudentManagement.js'), 'utf8');
+  const dashboardSource = fs.readFileSync(project('client/src/components/payments/PaymentDashboard.js'), 'utf8');
+  const initialServiceForm = studentSource.match(
+    /const \[serviceForm,[\s\S]*?useState\(\{([\s\S]*?)\}\);/,
+  )?.[1] || '';
+  const editReset = studentSource.match(
+    /const handleEdit = \(student\) => \{([\s\S]*?)\n  \};/,
+  )?.[1] || '';
+  const legacyFields = [
+    'is_boarder',
+    'uses_transport',
+    'uses_aftercare',
+    'has_sibling_discount',
+    'has_teacher_discount',
+  ];
+
+  assert.match(initialServiceForm, /effective_start:\s*''/);
+  assert.match(initialServiceForm, /effective_end:\s*''/);
+  assert.match(studentSource, /Choose an explicit Finance Service start date\./);
+  assert.match(studentSource, /effective_start:\s*'',\s*effective_end:\s*''/);
+  assert.match(editReset, /effective_start:\s*''/);
+  assert.match(editReset, /effective_end:\s*''/);
+  assert.match(studentSource, /YES — recorded/);
+  assert.match(studentSource, /NO — not recorded/);
+  legacyFields.forEach((field) => {
+    assert.doesNotMatch(studentSource, new RegExp(`register\\(['\"]${field}['\"]\\)`));
+    assert.doesNotMatch(editReset, new RegExp(`${field}\\s*:`));
+  });
+
+  assert.match(dashboardSource, /new AbortController\(\)/);
+  assert.match(dashboardSource, /billingReadinessRequestIdRef\.current \+= 1/);
+  assert.match(dashboardSource, /isCurrentBillingReadinessResponse/);
+  assert.match(dashboardSource, /handleGeneratePeriodChange\('month'/);
+  assert.match(dashboardSource, /handleGeneratePeriodChange\('year'/);
+  assert.match(dashboardSource, /if \(!billingReadyForSelectedPeriod\)/);
+  assert.equal(
+    (dashboardSource.match(/onClick=\{closeGenerateModal\}/g) || []).length,
+    2,
+    'both Generate Invoices modal dismissal controls must invalidate readiness',
+  );
+  assert.match(
+    dashboardSource,
+    /disabled=\{uploadLoading \|\| !billingReadyForSelectedPeriod\}/,
+  );
+});
+
+test('billing readiness response identity rejects stale requests and wrong periods', () => {
+  const {
+    isBillingReadinessReady,
+    isCurrentBillingReadinessResponse,
+  } = require(
+    '../client/src/components/payments/billingReadinessRequest',
+  );
+  assert.equal(isCurrentBillingReadinessResponse({
+    requestId: 1,
+    latestRequestId: 2,
+    requestedPeriod: '2026-09',
+    responsePeriod: '2026-09',
+  }), false);
+  assert.equal(isCurrentBillingReadinessResponse({
+    requestId: 2,
+    latestRequestId: 2,
+    requestedPeriod: '2026-10',
+    responsePeriod: '2026-09',
+  }), false);
+  assert.equal(isCurrentBillingReadinessResponse({
+    requestId: 2,
+    latestRequestId: 2,
+    requestedPeriod: '2026-10',
+    responsePeriod: '2026-10',
+  }), true);
+  assert.equal(isBillingReadinessReady({
+    readiness: { period: '2026-09', ready: true },
+    loading: false,
+    selectedPeriod: '2026-10',
+  }), false);
+  assert.equal(isBillingReadinessReady({
+    readiness: { period: '2026-10', ready: true },
+    loading: true,
+    selectedPeriod: '2026-10',
+  }), false);
+  assert.equal(isBillingReadinessReady({
+    readiness: { period: '2026-10', ready: true },
+    loading: false,
+    selectedPeriod: '2026-10',
+  }), true);
 });
 
 test('bundle snapshots include tuition and aftercare once while transport remains separate', () => {

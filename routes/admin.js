@@ -1180,9 +1180,23 @@ router.put('/students/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const legacyFinanceIndicatorFields = [
+      'is_boarder',
+      'uses_transport',
+      'uses_aftercare',
+      'has_sibling_discount',
+      'has_teacher_discount',
+    ];
+    if (legacyFinanceIndicatorFields.some((field) =>
+      Object.prototype.hasOwnProperty.call(req.body, field))) {
+      return res.status(409).json({
+        code: 'LEGACY_FINANCE_INDICATORS_READ_ONLY',
+        message: 'Legacy finance indicators are read-only. Use Finance Services and approved discount assignments.',
+      });
+    }
+
     const { id } = req.params;
-    const { first_name, last_name, grade_id, class_id, is_active,
-            is_boarder, uses_transport, uses_aftercare, has_sibling_discount } = req.body;
+    const { first_name, last_name, grade_id, class_id, is_active } = req.body;
 
     // Fetch current values so we can record which fields genuinely changed
     const beforeResult = await db.query(
@@ -1227,36 +1241,6 @@ router.put('/students/:id', [
       params.push(is_active);
     }
 
-    if (is_boarder !== undefined) {
-      paramCount++;
-      updateFields.push(`is_boarder = $${paramCount}`);
-      params.push(Boolean(is_boarder));
-    }
-
-    if (uses_transport !== undefined) {
-      paramCount++;
-      updateFields.push(`uses_transport = $${paramCount}`);
-      params.push(Boolean(uses_transport));
-    }
-
-    if (uses_aftercare !== undefined) {
-      paramCount++;
-      updateFields.push(`uses_aftercare = $${paramCount}`);
-      params.push(Boolean(uses_aftercare));
-    }
-
-    if (has_sibling_discount !== undefined) {
-      paramCount++;
-      updateFields.push(`has_sibling_discount = $${paramCount}`);
-      params.push(Boolean(has_sibling_discount));
-    }
-
-    if (req.body.has_teacher_discount !== undefined) {
-      paramCount++;
-      updateFields.push(`has_teacher_discount = $${paramCount}`);
-      params.push(Boolean(req.body.has_teacher_discount));
-    }
-
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'No fields to update' });
     }
@@ -1280,8 +1264,7 @@ router.put('/students/:id', [
     const updatedStudent = result.rows[0];
 
     // Determine which fields genuinely changed by comparing before vs after values
-    const trackableFields = ['first_name','last_name','grade_id','class_id','is_active',
-      'is_boarder','uses_transport','uses_aftercare','has_sibling_discount','has_teacher_discount'];
+    const trackableFields = ['first_name','last_name','grade_id','class_id','is_active'];
     const changedFields = trackableFields.filter(k => {
       if (!(k in req.body)) return false;
       // Normalise for comparison (DB booleans vs JS booleans, ints vs strings)

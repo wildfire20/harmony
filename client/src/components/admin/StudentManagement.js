@@ -22,7 +22,7 @@ const StudentManagement = () => {
   const [serviceSaving, setServiceSaving] = useState(false);
   const [serviceForm, setServiceForm] = useState({
     service_key: 'tuition',
-    effective_start: new Date().toISOString().slice(0, 10),
+    effective_start: '',
     effective_end: '',
   });
   const [discountForm, setDiscountForm] = useState({
@@ -287,23 +287,28 @@ const StudentManagement = () => {
   const handleEdit = (student) => {
     setShowAddForm(false); // Close add form if open
     setEditingStudent(student);
+    setServiceForm({
+      service_key: 'tuition',
+      effective_start: '',
+      effective_end: '',
+    });
     reset({
       first_name: student.first_name,
       last_name: student.last_name,
       student_number: student.student_number,
       grade_id: student.grade_id,
       class_id: student.class_id,
-      is_boarder: student.is_boarder || false,
-      uses_transport: student.uses_transport || false,
-      uses_aftercare: student.uses_aftercare || false,
-      has_sibling_discount: student.has_sibling_discount || false,
-      has_teacher_discount: student.has_teacher_discount || false,
     });
   };
 
   const handleCancelEdit = () => {
     setEditingStudent(null);
     setShowAddForm(false);
+    setServiceForm({
+      service_key: 'tuition',
+      effective_start: '',
+      effective_end: '',
+    });
     reset();
   };
 
@@ -354,6 +359,14 @@ const StudentManagement = () => {
   const createServiceEnrollment = async (event) => {
     event.preventDefault();
     if (!editingStudent) return;
+    const startDate = String(serviceForm.effective_start || '');
+    const parsedStartDate = new Date(`${startDate}T00:00:00Z`);
+    if (!/^\d{4}-(0[1-9]|1[0-2])-\d{2}$/.test(startDate) ||
+        Number.isNaN(parsedStartDate.getTime()) ||
+        parsedStartDate.toISOString().slice(0, 10) !== startDate) {
+      toast.error('Choose an explicit Finance Service start date.');
+      return;
+    }
     setServiceSaving(true);
     try {
       const response = await adminAPI.createServiceEnrollment({
@@ -362,7 +375,7 @@ const StudentManagement = () => {
         effective_end: serviceForm.effective_end || undefined,
       });
       setServiceEnrollments((current) => [...current, response.data.enrollment]);
-      setServiceForm((current) => ({ ...current, effective_end: '' }));
+      setServiceForm((current) => ({ ...current, effective_start: '', effective_end: '' }));
       toast.success('Finance service enrollment created');
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to create finance service enrollment');
@@ -770,8 +783,8 @@ const StudentManagement = () => {
                             {/* Enrollment Flags */}
                             <div>
                               <p className="text-sm font-semibold text-gray-700 mb-2">Legacy service indicators (not billing)</p>
-                              <p className="text-xs text-gray-500 mb-2">These old flags are display-only and never create a bill. Use the Finance Services section below for dated billing enrollment. Legacy discount indicators do not create new financial discounts.</p>
-                              <div className="student-enrollment-controls">
+                              <p className="text-xs text-gray-500 mb-2">Historical reference values only. They cannot be edited here and never create a bill. Use Finance Services and approved discount assignments for billing.</p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 {[
                                   { field: 'is_boarder', label: 'Boarding' },
                                   { field: 'uses_transport', label: 'Transport' },
@@ -779,14 +792,12 @@ const StudentManagement = () => {
                                   { field: 'has_sibling_discount', label: 'Legacy sibling discount indicator (not billing)' },
                                   { field: 'has_teacher_discount', label: "Legacy staff-child discount indicator (not billing)" },
                                 ].map(({ field, label }) => (
-                                  <label key={field} className="student-enrollment-control">
-                                    <input
-                                      type="checkbox"
-                                      {...register(field)}
-                                      className="student-enrollment-checkbox"
-                                    />
-                                    <span>{label}</span>
-                                  </label>
+                                  <div key={field} className="flex items-center justify-between gap-3 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+                                    <span className="text-gray-700">{label}</span>
+                                    <span className={`font-semibold ${editingStudent?.[field] ? 'text-amber-800' : 'text-gray-500'}`}>
+                                      {editingStudent?.[field] ? 'YES — recorded' : 'NO — not recorded'}
+                                    </span>
+                                  </div>
                                 ))}
                               </div>
                             </div>
