@@ -17,6 +17,8 @@
     "test:email": "node --test tests/admissions-email.test.js",
     "test:portal:integration": "node --test tests/admissions-portal-postgres.integration.test.js",
     "test:finance:integration": "node scripts/run-finance-core-integration.js",
+    "test:finance:october": "node --test tests/populate-october-finance-postgres.integration.test.js",
+    "finance:populate-october": "node scripts/populate-october-finance.js",
     "release-gate": "npm run test:security && npm run test:finance:integration && npm run build",
     "test:admissions-documents": "node --test tests/admissions-documents.test.js",
     "verify:email": "node scripts/verify-email.js",
