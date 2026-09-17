@@ -89,16 +89,56 @@ test('fixed, percentage and service-scoped assignments are cumulative and capped
     { line_type: 'charge', service_key: 'boarding', amount: 50 },
   ];
   const discounts = calculateApprovedDiscounts([
-    { id: 1, discount_type: 'staff', calculation_method: 'fixed', amount: 80, applicable_service_key: 'tuition', reason: 'staff' },
-    { id: 2, discount_type: 'sibling', calculation_method: 'percentage', percentage: 50, applicable_service_key: 'tuition', reason: 'sibling' },
+    { id: 1, discount_type: 'custom', calculation_method: 'fixed', amount: 80, applicable_service_key: 'tuition', reason: 'fixed tuition' },
+    { id: 2, discount_type: 'custom', calculation_method: 'percentage', percentage: 50, applicable_service_key: 'tuition', reason: 'percentage tuition' },
     { id: 3, discount_type: 'custom', calculation_method: 'fixed', amount: 100, applicable_service_key: 'boarding', reason: 'custom' },
   ], charges);
-  assert.deepEqual(discounts.map((line) => [line.label, line.amount]), [
-    ['Staff discount', 80],
-    ['Sibling discount', 20],
-    ['Custom approved discount', 50],
+  assert.deepEqual(discounts.map((line) => [line.discount_assignment_id, line.amount]), [
+    [1, 80],
+    [2, 20],
+    [3, 50],
   ]);
-  assert.ok(discounts.reduce((sum, line) => sum + line.amount, 0) <= 150);
+  assert.equal(discounts.reduce((sum, line) => sum + line.amount, 0), 150);
+});
+
+test('staff tuition discount takes precedence over sibling discount regardless of order', () => {
+  const charges = [
+    { line_type: 'charge', service_key: 'tuition', amount: 2350 },
+    { line_type: 'charge', service_key: 'boarding', amount: 1600 },
+  ];
+  const staff = {
+    id: 31,
+    discount_type: 'staff',
+    calculation_method: 'percentage',
+    percentage: 50,
+    applicable_service_key: 'tuition',
+    reason: 'staff',
+  };
+  const sibling = {
+    id: 32,
+    discount_type: 'sibling',
+    calculation_method: 'fixed',
+    amount: 100,
+    applicable_service_key: 'tuition',
+    reason: 'sibling',
+  };
+
+  const staffFirst = calculateApprovedDiscounts([staff, sibling], charges);
+  const siblingFirst = calculateApprovedDiscounts([sibling, staff], charges);
+
+  assert.deepEqual(siblingFirst, staffFirst);
+  assert.deepEqual(
+    staffFirst.map((line) => [line.discount_assignment_id, line.amount]),
+    [[31, 1175]],
+  );
+  assert.equal(staffFirst[0].service_key, 'tuition');
+  assert.ok(staffFirst.every((line) => line.discount_assignment_id !== 32));
+  assert.ok(staffFirst.every((line) => line.service_key !== 'boarding'));
+  assert.equal(
+    charges.reduce((sum, line) => sum + line.amount, 0)
+      - staffFirst.reduce((sum, line) => sum + line.amount, 0),
+    2775,
+  );
 });
 
 test('discount caps apply to invoice and service capacity with stable assignment identity', () => {
