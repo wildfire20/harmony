@@ -15,3 +15,4 @@
 - [Canonical finance core](canonical-finance-core.md) — future billing uses effective enrollments, immutable snapshots/events, normalized proof identities, and one guarded command layer.
 - [Finance date-only boundaries](finance-date-only-boundaries.md) — PostgreSQL financial DATE fields must cross read boundaries as canonical text, never timezone-converted Date objects.
 - [Finance release phases](finance-release-phases.md) — phase strictness and disposable release fixtures must stay aligned with the effective billing policy.
+- [Pre-v4 finance fixtures](pre-v4-finance-fixtures.md) — old-marker tests must seed only billing modes accepted before the v4 migration.

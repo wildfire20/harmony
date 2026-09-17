@@ -47,16 +47,16 @@ function readManifest(path = MANIFEST_PATH, { allowFixture = false } = {}) {
 }
 
 function parseArgs(argv) {
-  const apply = argv.includes('--apply');
-  const pathArg = argv.find((arg) => arg.startsWith('--manifest='));
-  return { apply, manifestPath: pathArg ? pathArg.slice(11) : MANIFEST_PATH };
+  if (argv.length === 0) return { apply: false, manifestPath: MANIFEST_PATH };
+  if (argv.length === 1 && argv[0] === '--apply') return { apply: true, manifestPath: MANIFEST_PATH };
+  throw new Error('Usage: node scripts/populate-october-finance.js [--apply]');
 }
 
 function poolFor(env, apply) {
   if (!apply) return createFinanceReadonlyPool(env);
   const url = String(env.FINANCE_OCTOBER_APPLY_DATABASE_URL || '').trim();
   if (!url) throw new Error('FINANCE_OCTOBER_APPLY_DATABASE_URL is required with --apply; refusing to infer a database');
-  return new Pool({ connectionString: url, ssl: env.FINANCE_OCTOBER_APPLY_DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false, max: 1 });
+  return new Pool({ connectionString: url, ssl: env.FINANCE_OCTOBER_APPLY_DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false, max: 1, connectionTimeoutMillis: 10000 });
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -130,7 +130,7 @@ async function verifyContract(client, manifest, lock = false) {
   const calculatedDiscounts = users.rows.flatMap((u) => {
     const rows = [];
     if (u.has_teacher_discount) rows.push({ student_id: Number(u.student_id), student_number: u.student_number, discount_type: 'staff', calculation_method: 'percentage', amount: null, percentage: 50, applicable_service_key: 'tuition', starts_on: manifest.effective_start, ends_on: null, approved_by: 1, reason: REASON, is_active: true });
-    if (u.has_sibling_discount) rows.push({ student_id: Number(u.student_id), student_number: u.student_number, discount_type: 'sibling', calculation_method: 'fixed', amount: 100, percentage: null, applicable_service_key: 'tuition', starts_on: manifest.effective_start, ends_on: null, approved_by: 1, reason: REASON, is_active: true });
+    else if (u.has_sibling_discount) rows.push({ student_id: Number(u.student_id), student_number: u.student_number, discount_type: 'sibling', calculation_method: 'fixed', amount: 100, percentage: null, applicable_service_key: 'tuition', starts_on: manifest.effective_start, ends_on: null, approved_by: 1, reason: REASON, is_active: true });
     return rows;
   });
   if (!same(calculatedDiscounts, discounts)) throw new Error('Legacy discount selections differ from approved preview');
@@ -147,11 +147,34 @@ async function verifyContract(client, manifest, lock = false) {
   return { actor: actor.rows[0], users: users.rows, expected, discounts };
 }
 
-async function existingState(client, manifest) {
+async function existingState(client, manifest, lock = false) {
   const start = manifest.effective_start;
-  const e = await client.query(`SELECT id, student_id, service_key, effective_start::text AS effective_start, effective_end::text AS effective_end, state, idempotency_key FROM service_enrollments WHERE effective_start = $1::date OR idempotency_key LIKE $2 ORDER BY id FOR UPDATE`, [start, `${OPERATION_KEY}:%`]);
-  const d = await client.query(`SELECT id, student_id, discount_type, calculation_method, amount, percentage, applicable_service_key, starts_on::text AS starts_on, ends_on::text AS ends_on, approved_by, reason, is_active FROM learner_discount_assignments WHERE starts_on = $1::date OR reason = $2 ORDER BY id FOR UPDATE`, [start, REASON]);
+  const e = await client.query(`SELECT id, student_id, service_key, effective_start::text AS effective_start, effective_end::text AS effective_end, state, idempotency_key FROM service_enrollments
+    WHERE (effective_start < $1::date AND (effective_end IS NULL OR effective_end >= $1::date))
+       OR effective_start >= $1::date OR idempotency_key LIKE $2 ORDER BY id${lock ? ' FOR UPDATE' : ''}`, [start, `${OPERATION_KEY}:%`]);
+  const d = await client.query(`SELECT id, student_id, discount_type, calculation_method, amount, percentage, applicable_service_key, starts_on::text AS starts_on, ends_on::text AS ends_on, approved_by, reason, is_active FROM learner_discount_assignments
+    WHERE (starts_on <= $1::date AND (ends_on IS NULL OR ends_on >= $1::date))
+       OR starts_on > $1::date OR reason = $2 ORDER BY id${lock ? ' FOR UPDATE' : ''}`, [start, REASON]);
   return { enrollments: e.rows, discounts: d.rows };
+}
+
+async function verifySchemaMarkers(client) {
+  const result = await client.query(`SELECT schema_key, version FROM finance_schema_versions
+    WHERE schema_key IN ('finance_core_architecture','finance_operations_readiness')`);
+  const versions = new Map(result.rows.map((r) => [r.schema_key, Number(r.version)]));
+  if ((versions.get('finance_core_architecture') || 0) < 4 ||
+      (versions.get('finance_operations_readiness') || 0) < 4) {
+    throw new Error('Finance schema markers finance_core_architecture and finance_operations_readiness must both be >= 4');
+  }
+}
+
+async function lockPopulationTables(client) {
+  // This intentionally blocks writers which could invalidate the roster or
+  // absent-row overlap checks, while retaining ordinary SELECT visibility.
+  for (const table of ['finance_schema_versions', 'users', 'service_prices',
+    'service_enrollments', 'learner_discount_assignments', 'audit_logs']) {
+    await client.query(`LOCK TABLE ${table} IN SHARE ROW EXCLUSIVE MODE`);
+  }
 }
 
 function assertState(state, contract, manifest) {
@@ -164,7 +187,9 @@ function assertState(state, contract, manifest) {
     effective_end: null, state: 'active',
     idempotency_key: `${OPERATION_KEY}:${r.student_id}:${r.service_key}`,
   }));
-  if (state.enrollments.length && !same(state.enrollments.map(enrollmentPayload), expectedEnrollmentPayload)) {
+  const expectedKeys = new Set(expectedEnrollmentPayload.map((r) => `${r.student_id}:${r.service_key}:${r.effective_start}`));
+  const relevantEnrollments = state.enrollments.filter((r) => expectedKeys.has(`${r.student_id}:${r.service_key}:${r.effective_start}`) || r.idempotency_key?.startsWith(`${OPERATION_KEY}:`));
+  if (relevantEnrollments.length && !same(relevantEnrollments.map(enrollmentPayload), expectedEnrollmentPayload)) {
     throw new Error('Conflicting or partial October enrollment state');
   }
   const discountPayload = (r) => ({
@@ -178,12 +203,58 @@ function assertState(state, contract, manifest) {
     delete payload.student_number;
     return payload;
   });
-  if (state.discounts.length && !same(state.discounts.map(discountPayload), expectedDiscountPayload)) {
+  const expectedDiscountKeys = new Set(expectedDiscountPayload.map((r) => `${r.student_id}:${r.discount_type}:${r.applicable_service_key}:${r.starts_on}`));
+  const relevantDiscounts = state.discounts.filter((r) => expectedDiscountKeys.has(`${r.student_id}:${r.discount_type}:${r.applicable_service_key}:${r.starts_on}`) || r.reason === REASON);
+  if (relevantDiscounts.length && !same(relevantDiscounts.map(discountPayload), expectedDiscountPayload)) {
     throw new Error('Conflicting or partial October discount state');
+  }
+  if (state.enrollments.some((r) => !expectedKeys.has(`${r.student_id}:${r.service_key}:${r.effective_start}`) &&
+      contract.expected.some((p) => p.student_id === Number(r.student_id) && p.service_key === r.service_key))) {
+    throw new Error('Overlapping enrollment conflicts with approved October period');
+  }
+  if (state.discounts.some((r) => !expectedDiscountKeys.has(`${r.student_id}:${r.discount_type}:${r.applicable_service_key}:${r.starts_on}`) &&
+      contract.discounts.some((p) => p.student_id === Number(r.student_id) && p.applicable_service_key === r.applicable_service_key && r.is_active))) {
+    throw new Error('Overlapping discount assignment conflicts with approved October period');
   }
 }
 
-async function execute({ env = process.env, apply = false, manifestPath = MANIFEST_PATH, logger = console.log, injectedFailure = false, allowFixture = false, pool: suppliedPool = null } = {}) {
+async function completedAudit(client, state, contract, hash, manifest) {
+  const prior = await client.query(
+    `SELECT user_id, user_role, details FROM audit_logs
+     WHERE action = $1 AND details->>'operation_key' = $2 ORDER BY id`,
+    [AUDIT_ACTION, OPERATION_KEY],
+  );
+  if (!prior.rowCount) return false;
+  if (prior.rowCount !== 1 || state.enrollments.length < contract.expected.length ||
+      state.discounts.length < contract.discounts.length) {
+    throw new Error('Completed audit has incomplete rows');
+  }
+  const details = prior.rows[0].details || {};
+  const idsEqual = (a, b) => same((a || []).map(Number).sort((x, y) => x - y), (b || []).map(Number).sort((x, y) => x - y));
+  const enrollmentIds = state.enrollments
+    .filter((r) => r.idempotency_key?.startsWith(`${OPERATION_KEY}:`)).map((r) => Number(r.id));
+  const discountIds = state.discounts
+    .filter((r) => r.reason === REASON).map((r) => Number(r.id));
+  if (Number(prior.rows[0].user_id) !== 1 || prior.rows[0].user_role !== 'super_admin' ||
+      details.actor?.id !== 1 || details.actor?.role !== 'super_admin' ||
+      details.preview_sha256 !== hash || details.effective_start !== manifest.effective_start ||
+      !idsEqual(details.enrollment_ids, enrollmentIds) ||
+      !idsEqual(details.discount_ids, discountIds) ||
+      stable(details.assignments) !== stable(contract.discounts)) {
+    throw new Error('Completed audit evidence does not match the approved October population');
+  }
+  return true;
+}
+
+function hasRelevantState(state, contract, manifest) {
+  const start = manifest.effective_start;
+  return state.enrollments.some((r) => contract.expected.some((p) => Number(p.student_id) === Number(r.student_id) && p.service_key === r.service_key) ||
+    r.idempotency_key?.startsWith(`${OPERATION_KEY}:`)) ||
+    state.discounts.some((r) => contract.discounts.some((p) => Number(p.student_id) === Number(r.student_id) && p.applicable_service_key === r.applicable_service_key) ||
+      r.reason === REASON || (r.starts_on <= start && (!r.ends_on || r.ends_on >= start)));
+}
+
+async function execute({ env = process.env, apply = false, manifestPath = MANIFEST_PATH, logger = console.log, injectedFailure = false, injectedAuditFailure = false, injectedAfterAuditFailure = false, afterLocks = null, allowFixture = false, pool: suppliedPool = null } = {}) {
   const { manifest, hash } = readManifest(manifestPath, { allowFixture });
   const pool = suppliedPool || poolFor(env, apply);
   const ownsPool = !suppliedPool;
@@ -191,40 +262,39 @@ async function execute({ env = process.env, apply = false, manifestPath = MANIFE
   try {
     if (!apply) {
       const session = await beginVerifiedReadonlySession(client, () => {});
+      await verifySchemaMarkers(client);
       await verifyContract(client, manifest);
+      const state = await existingState(client, manifest);
+      const contract = { expected: expectedEnrollments(manifest), discounts: expectedDiscounts(manifest) };
+      assertState(state, contract, manifest);
+      if (await completedAudit(client, state, contract, hash, manifest)) {
+        await client.query('ROLLBACK');
+        const result = { plan: false, noop: true, status: 'verified_completed_noop', verified: true };
+        logger(JSON.stringify(result));
+        return result;
+      }
+      if (hasRelevantState(state, contract, manifest)) throw new Error('Partial or conflicting population exists without completed audit evidence');
       await client.query('ROLLBACK');
-      logger(JSON.stringify({ plan: true, transaction_read_only: session.transactionReadOnly, manifest_sha256: hash, operation_key: OPERATION_KEY, enrollments: manifest.proposals.length, discounts: manifest.discounts.proposals.length }));
-      return { plan: true };
+      const result = { plan: true, status: 'eligible_first_application', transaction_read_only: session.transactionReadOnly, manifest_sha256: hash, operation_key: OPERATION_KEY, enrollments: manifest.proposals.length, discounts: manifest.discounts.proposals.length };
+      logger(JSON.stringify(result));
+      return result;
     }
     await client.query('BEGIN');
-    await client.query(`SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '60s'`);
+    await client.query(`SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '60s'; SET LOCAL idle_in_transaction_session_timeout = '60s'`);
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [OPERATION_KEY]);
+    await lockPopulationTables(client);
+    if (afterLocks) await afterLocks(client);
+    await verifySchemaMarkers(client);
     const contract = await verifyContract(client, manifest, true);
-    const state = await existingState(client, manifest);
+    const state = await existingState(client, manifest, true);
     assertState(state, contract, manifest);
-    const priorAudit = await client.query(`SELECT user_id, user_role, details FROM audit_logs WHERE action = $1 AND details->>'operation_key' = $2 FOR UPDATE`, [AUDIT_ACTION, OPERATION_KEY]);
-    if (priorAudit.rowCount) {
-      if (priorAudit.rowCount !== 1 ||
-          state.enrollments.length !== contract.expected.length ||
-          state.discounts.length !== contract.discounts.length) throw new Error('Completed audit has incomplete rows');
-      const details = priorAudit.rows[0].details || {};
-      const expectedEnrollmentIds = state.enrollments.map((row) => Number(row.id));
-      const expectedDiscountIds = state.discounts.map((row) => Number(row.id));
-      const idsEqual = (a, b) => same((a || []).map(Number).sort((x, y) => x - y), (b || []).map(Number).sort((x, y) => x - y));
-      if (Number(priorAudit.rows[0].user_id) !== 1 ||
-          priorAudit.rows[0].user_role !== 'super_admin' ||
-          details.actor?.id !== 1 ||
-          details.actor?.role !== 'super_admin' ||
-          details.preview_sha256 !== hash ||
-          details.effective_start !== manifest.effective_start ||
-          !idsEqual(details.enrollment_ids, expectedEnrollmentIds) ||
-          !idsEqual(details.discount_ids, expectedDiscountIds) ||
-          stable(details.assignments) !== stable(contract.discounts)) {
-        throw new Error('Completed audit evidence does not match the approved October population');
-      }
+    if (await completedAudit(client, state, contract, hash, manifest)) {
       await client.query('ROLLBACK');
-      return { applied: false, noop: true };
+      const result = { applied: false, noop: true, verified: true };
+      logger(JSON.stringify(result));
+      return result;
     }
+    if (hasRelevantState(state, contract, manifest)) throw new Error('Partial or conflicting population exists without completed audit evidence');
     if (state.enrollments.length || state.discounts.length) throw new Error('Unexpected pre-existing effective October rows');
     const enrollmentIds = [];
     for (const row of contract.expected) {
@@ -239,10 +309,20 @@ async function execute({ env = process.env, apply = false, manifestPath = MANIFE
     if (injectedFailure) throw new Error('Injected late failure');
     const readiness = await getMonthlyBillingReadiness('2026-10', client);
     if (!readiness.ready) throw new Error(`October readiness failed: ${readiness.hardFailures.map((x) => x.code).join(', ')}`);
+    // Compare every stored business column, not merely the generated IDs.
+    const reread = await existingState(client, manifest, true);
+    assertState(reread, contract, manifest);
     const actorName = `${contract.actor.first_name || ''} ${contract.actor.last_name || ''}`.trim();
+    if (injectedAuditFailure) throw new Error('Injected audit insert failure');
     await client.query(`INSERT INTO audit_logs (user_id, user_name, user_role, action, entity_type, entity_id, details) VALUES (1,$1,'super_admin',$2,'finance_october_population',NULL,$3)`, [actorName, AUDIT_ACTION, JSON.stringify({ actor: { id: 1, role: 'super_admin' }, operation_key: OPERATION_KEY, preview_sha256: hash, effective_start: manifest.effective_start, reason: REASON, enrollment_ids: enrollmentIds, discount_ids: discountIds, assignments: contract.discounts })]);
+    const verifiedState = await existingState(client, manifest, true);
+    assertState(verifiedState, contract, manifest);
+    if (!await completedAudit(client, verifiedState, contract, hash, manifest)) throw new Error('Inserted audit evidence could not be verified');
+    if (injectedAfterAuditFailure) throw new Error('Injected failure after verified audit');
     await client.query('COMMIT');
-    return { applied: true, enrollmentIds, discountIds };
+    const result = { applied: true, enrollmentIds, discountIds };
+    logger(JSON.stringify(result));
+    return result;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     throw error;
@@ -250,11 +330,16 @@ async function execute({ env = process.env, apply = false, manifestPath = MANIFE
 }
 
 if (require.main === module) {
-  const args = parseArgs(process.argv.slice(2));
-  execute({ apply: args.apply, manifestPath: args.manifestPath }).catch((error) => {
+  try {
+    const args = parseArgs(process.argv.slice(2));
+    execute({ apply: args.apply, manifestPath: args.manifestPath }).catch((error) => {
+      console.error(`October finance population failed: ${error.message}`);
+      process.exitCode = 1;
+    });
+  } catch (error) {
     console.error(`October finance population failed: ${error.message}`);
     process.exitCode = 1;
-  });
+  }
 }
 
-module.exports = { execute, readManifest, expectedEnrollments, expectedDiscounts, OPERATION_KEY, MANIFEST_SHA256, REASON };
+module.exports = { execute, readManifest, expectedEnrollments, expectedDiscounts, parseArgs, OPERATION_KEY, MANIFEST_SHA256, REASON };
