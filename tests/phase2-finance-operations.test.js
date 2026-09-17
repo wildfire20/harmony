@@ -514,6 +514,197 @@ test('bundle snapshots include tuition and aftercare once while transport remain
   ]);
 });
 
+test('Phase 4A preview pure policy helpers produce deduped sources, prices, discounts and totals', () => {
+  const preview = require('../scripts/preview-finance-service-bootstrap');
+  const students = [
+    { student_id: 1, student_number: 'B1', first_name: 'Board', last_name: 'Er',
+      is_boarder: true, uses_transport: false, uses_aftercare: false,
+      has_teacher_discount: true, has_sibling_discount: true },
+    { student_id: 2, student_number: 'N2', first_name: 'Non', last_name: 'Board',
+      is_boarder: false, uses_transport: true, uses_aftercare: true,
+      has_teacher_discount: false, has_sibling_discount: true },
+  ];
+  const proposals = preview.buildServiceProposals(students, [{
+    student_id: 1, service_key: 'tuition', state: 'ended',
+  }], '2026-10-01');
+  assert.deepEqual(proposals.filter((row) => row.student_id === 1)
+    .map((row) => [row.service_key, row.source, row.status]), [
+      ['tuition', 'existing_enrollment', 'already_effective'],
+      ['boarding', 'boarding_package', 'proposal'],
+      ['transport', 'boarding_package', 'proposal'],
+      ['aftercare', 'boarding_package', 'proposal'],
+    ]);
+  assert.deepEqual(proposals.filter((row) => row.student_id === 2)
+    .map((row) => row.source), [
+    'active_student', 'standalone_legacy_transport', 'standalone_legacy_aftercare',
+  ]);
+  assert.equal(new Set(proposals.map((row) => `${row.student_id}:${row.service_key}`)).size,
+    proposals.length);
+  const retained = preview.buildServiceProposals([
+    { student_id: 3, student_number: 'E3', first_name: 'Existing', last_name: 'Transport',
+      is_boarder: false, uses_transport: false, uses_aftercare: false },
+  ], [{ student_id: 3, service_key: 'transport', state: 'ended',
+    reason: 'operator-approved historical service' }], '2026-10-01');
+  assert.equal(retained.find((row) => row.service_key === 'transport').status, 'already_effective');
+  assert.equal(retained.find((row) => row.service_key === 'transport').source, 'existing_enrollment');
+  assert.equal(retained.find((row) => row.service_key === 'transport').reason,
+    'operator-approved historical service');
+  const discounts = preview.buildDiscountPreview(students, [], '2026-10-01');
+  assert.deepEqual(discounts.proposals.map((row) => [
+    row.student_id, row.discount_type, row.calculation_method, row.amount, row.percentage,
+  ]), [[1, 'staff', 'percentage', 0, 50], [2, 'sibling', 'fixed', 100, null]]);
+  assert.equal(discounts.suppressed.length, 1);
+  assert.equal(discounts.proposals.some((row) => row.student_id === 1 &&
+    row.discount_type === 'sibling'), false);
+  const explicitStaffLegacySibling = preview.buildDiscountPreview([{
+    student_id: 4, student_number: 'S4', first_name: 'Staff', last_name: 'Sibling',
+    has_teacher_discount: false, has_sibling_discount: true,
+  }], [{ id: 40, student_id: 4, discount_type: 'staff',
+    applicable_service_key: 'tuition' }], '2026-10-01');
+  assert.equal(explicitStaffLegacySibling.proposals.some((row) => row.discount_type === 'sibling'), false);
+  assert.equal(explicitStaffLegacySibling.suppressed.length, 1);
+  assert.equal(preview.compareServicePrices([
+    { service_key: 'tuition', amount: 2350, billing_mode: 'standalone', included_service_keys: [] },
+    { service_key: 'boarding', amount: 1600, billing_mode: 'bundle',
+      bundle_key: 'harmony_boarding_package', included_service_keys: ['transport', 'aftercare'] },
+    { service_key: 'transport', amount: 650, billing_mode: 'standalone', included_service_keys: [] },
+    { service_key: 'aftercare', amount: 550, billing_mode: 'standalone', included_service_keys: [] },
+  ]).every((row) => !row.changes_required), true);
+  assert.deepEqual(preview.calculatePolicyTotals(), { tuition: 2350, boarding: 1600, gross: 3950 });
+  assert.deepEqual(preview.calculatePolicyTotals('staff'), { tuition: 1175, boarding: 1600, gross: 2775 });
+  assert.deepEqual(preview.calculatePolicyTotals('sibling'), { tuition: 2250, boarding: 1600, gross: 3850 });
+  const previewSource = fs.readFileSync(project('scripts/preview-finance-service-bootstrap.js'), 'utf8');
+  assert.match(previewSource, /beginVerifiedReadonlySession/);
+  assert.match(previewSource, /await client\.query\('ROLLBACK'\)/);
+  const queryTemplates = [...previewSource.matchAll(/client\.query\(`([\s\S]*?)`/g)]
+    .map((match) => match[1]);
+  queryTemplates.forEach((sql) => {
+    assert.doesNotMatch(sql, /\b(?:INSERT|UPDATE|DELETE)\b/i);
+  });
+});
+
+test('Phase 4A readiness blocks incomplete Boarding packages and staff-sibling conflicts', async () => {
+  const { getMonthlyBillingReadiness } = require('../services/monthlyBillingReadiness');
+  const students = [{
+    id: 41,
+    student_number: 'POLICY-41',
+    has_sibling_discount: false,
+    has_teacher_discount: false,
+  }];
+  const prices = [
+    { service_key: 'tuition', amount: 2350, billing_mode: 'standalone', included_service_keys: [] },
+    { service_key: 'boarding', amount: 1600, billing_mode: 'bundle',
+      bundle_key: 'harmony_boarding_package', included_service_keys: ['transport', 'aftercare'] },
+    { service_key: 'transport', amount: 650, billing_mode: 'standalone', included_service_keys: [] },
+    { service_key: 'aftercare', amount: 550, billing_mode: 'standalone', included_service_keys: [] },
+  ];
+  const enrollments = [
+    { id: 1, student_id: 41, service_key: 'tuition',
+      effective_start: '2026-10-01', effective_end: null, state: 'active' },
+    { id: 2, student_id: 41, service_key: 'boarding',
+      effective_start: '2026-10-01', effective_end: null, state: 'active' },
+  ];
+  const assignments = [
+    { id: 10, student_id: 41, discount_type: 'staff',
+      starts_on: '2026-10-01', ends_on: null },
+    { id: 11, student_id: 41, discount_type: 'sibling',
+      starts_on: '2026-10-01', ends_on: null },
+  ];
+  const executor = {
+    async query(sql) {
+      if (/FROM users/.test(sql)) return { rows: students };
+      if (/FROM service_prices/.test(sql)) return { rows: prices };
+      if (/FROM service_enrollments/.test(sql)) return { rows: enrollments };
+      if (/FROM learner_discount_assignments/.test(sql)) return { rows: assignments };
+      return { rows: [] };
+    },
+  };
+  const readiness = await getMonthlyBillingReadiness('2026-10', executor);
+  assert.equal(readiness.ready, false);
+  assert.equal(readiness.hardFailures
+    .filter((failure) => failure.code === 'incomplete_boarding_package').length, 2);
+  assert.ok(readiness.hardFailures
+    .some((failure) => failure.code === 'conflicting_discount_assignments'));
+});
+
+test('Phase 4A UI discount start date is blank/reset and validated before API', () => {
+  const source = fs.readFileSync(project('client/src/components/admin/StudentManagement.js'), 'utf8');
+  assert.match(source, /starts_on:\s*''/);
+  assert.match(source, /approved discount start date \(YYYY-MM-DD\)/);
+  assert.match(source, /setDiscountForm\(\(current\) => \(\{ \.\.\.current, starts_on: '' \}\)\)/);
+  assert.match(source, /starts_on: '', ends_on: ''/);
+});
+
+test('Phase 4A ledger keeps Boarding included evidence zero-valued and gives staff precedence', () => {
+  const { buildInvoiceSnapshotLines } = require('../services/financeLedger');
+  const prices = [
+    { service_key: 'tuition', label: 'Tuition', amount: 2350, billing_mode: 'standalone',
+      bundle_key: null, included_service_keys: [] },
+    { service_key: 'boarding', label: 'Boarding', amount: 1600, billing_mode: 'bundle',
+      bundle_key: 'harmony_boarding_package', included_service_keys: ['transport', 'aftercare'] },
+    { service_key: 'transport', label: 'Transport', amount: 650, billing_mode: 'standalone',
+      bundle_key: null, included_service_keys: [] },
+    { service_key: 'aftercare', label: 'Aftercare', amount: 550, billing_mode: 'standalone',
+      bundle_key: null, included_service_keys: [] },
+  ];
+  const lines = buildInvoiceSnapshotLines({}, prices, [
+    { id: 1, discount_type: 'sibling', calculation_method: 'fixed', amount: 100,
+      applicable_service_key: 'tuition' },
+    { id: 2, discount_type: 'staff', calculation_method: 'percentage', percentage: 50,
+      applicable_service_key: 'tuition' },
+  ], [
+    { state: 'active', service_key: 'tuition' },
+    { state: 'active', service_key: 'boarding' },
+    { state: 'active', service_key: 'transport' },
+    { state: 'active', service_key: 'aftercare' },
+  ]);
+  assert.deepEqual(lines.filter((line) => line.line_type === 'charge')
+    .map((line) => [line.service_key, line.amount, line.is_included]), [
+    ['boarding', 1600, false], ['transport', 0, true],
+    ['aftercare', 0, true], ['tuition', 2350, false],
+  ]);
+  assert.deepEqual(lines.filter((line) => line.line_type === 'discount')
+    .map((line) => [line.discount_assignment_id, line.amount]), [[2, 1175]]);
+});
+
+test('Phase 4A readiness blocks wrong Harmony package pricing but accepts exact policy', async () => {
+  const { getMonthlyBillingReadiness } = require('../services/monthlyBillingReadiness');
+  const students = [{ id: 8, student_number: 'H8', first_name: 'Harmony', last_name: 'Boarder' }];
+  const enrollments = [
+    { id: 1, student_id: 8, service_key: 'tuition' },
+    { id: 2, student_id: 8, service_key: 'boarding' },
+    { id: 3, student_id: 8, service_key: 'transport' },
+    { id: 4, student_id: 8, service_key: 'aftercare' },
+  ];
+  const prices = (boardingMode = 'bundle', bundleKey = 'harmony_boarding_package') => [
+    { service_key: 'tuition', amount: 2350, billing_mode: 'standalone',
+      bundle_key: null, included_service_keys: [] },
+    { service_key: 'boarding', amount: 1600, billing_mode: boardingMode,
+      bundle_key: bundleKey, included_service_keys: ['transport', 'aftercare'] },
+    { service_key: 'transport', amount: 650, billing_mode: 'standalone',
+      bundle_key: null, included_service_keys: [] },
+    { service_key: 'aftercare', amount: 550, billing_mode: 'standalone',
+      bundle_key: null, included_service_keys: [] },
+  ];
+  const run = async (priceRows) => {
+    let enrollmentQuery = 0;
+    return getMonthlyBillingReadiness('2026-10', { async query(sql) {
+      if (/FROM users/.test(sql)) return { rows: students };
+      if (/FROM service_prices/.test(sql)) return { rows: priceRows };
+      if (/FROM learner_discount_assignments/.test(sql)) return { rows: [] };
+      if (/FROM service_enrollments/.test(sql)) {
+        enrollmentQuery += 1;
+        return { rows: enrollmentQuery === 1 ? enrollments : enrollments };
+      }
+      return { rows: [] };
+    } });
+  };
+  const wrong = await run(prices('standalone', null));
+  assert.ok(wrong.hardFailures.some((item) => item.code === 'invalid_harmony_billing_policy'));
+  const valid = await run(prices());
+  assert.equal(valid.hardFailures.some((item) => item.code === 'invalid_harmony_billing_policy'), false);
+});
+
 test('bank, proof and manual channels converge on canonical command/ledger paths', () => {
   const source = (name) => fs.readFileSync(project(name), 'utf8');
   const invoices = source('routes/invoices.js');

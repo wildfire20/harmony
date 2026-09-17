@@ -31,7 +31,7 @@ const StudentManagement = () => {
     amount: '',
     percentage: '',
     applicable_service_key: '',
-    starts_on: new Date().toISOString().slice(0, 10),
+    starts_on: '',
     ends_on: '',
     reason: '',
   });
@@ -287,6 +287,7 @@ const StudentManagement = () => {
   const handleEdit = (student) => {
     setShowAddForm(false); // Close add form if open
     setEditingStudent(student);
+    setDiscountForm((current) => ({ ...current, starts_on: '' }));
     setServiceForm({
       service_key: 'tuition',
       effective_start: '',
@@ -303,6 +304,7 @@ const StudentManagement = () => {
 
   const handleCancelEdit = () => {
     setEditingStudent(null);
+    setDiscountForm((current) => ({ ...current, starts_on: '' }));
     setShowAddForm(false);
     setServiceForm({
       service_key: 'tuition',
@@ -319,18 +321,29 @@ const StudentManagement = () => {
   const createDiscountAssignment = async (event) => {
     event.preventDefault();
     if (!editingStudent) return;
+    const startsOn = String(discountForm.starts_on || '').trim();
+    const parsedStartsOn = new Date(`${startsOn}T00:00:00Z`);
+    if (!/^\d{4}-(0[1-9]|1[0-2])-\d{2}$/.test(startsOn) ||
+        Number.isNaN(parsedStartsOn.getTime()) ||
+        parsedStartsOn.toISOString().slice(0, 10) !== startsOn) {
+      toast.error('Choose an explicit approved discount start date (YYYY-MM-DD).');
+      return;
+    }
     setDiscountSaving(true);
     try {
       const payload = {
         student_id: editingStudent.id,
         ...discountForm,
+        starts_on: startsOn,
         amount: discountForm.calculation_method === 'fixed' ? Number(discountForm.amount) : undefined,
         percentage: discountForm.calculation_method === 'percentage' ? Number(discountForm.percentage) : undefined,
         ends_on: discountForm.ends_on || undefined,
       };
       const response = await adminAPI.createDiscountAssignment(payload);
       setDiscountAssignments((current) => [response.data.assignment, ...current]);
-      setDiscountForm((current) => ({ ...current, amount: '', percentage: '', reason: '', ends_on: '' }));
+      setDiscountForm((current) => ({
+        ...current, amount: '', percentage: '', reason: '', starts_on: '', ends_on: '',
+      }));
       toast.success('Explicit discount assignment created');
     } catch (error) {
       const status = error.response?.status;

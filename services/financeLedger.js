@@ -315,6 +315,7 @@ function configuredBillableLines(student, prices, enrollmentRows) {
       ? price.included_service_keys : [];
     if (includedByBundle.has(price.service_key)) continue;
     if (price.billing_mode === 'bundle_component' && price.bundle_key &&
+        includedByBundle.has(price.service_key) &&
         lines.some((line) => line.bundle_key === price.bundle_key)) continue;
     const amount = money(price.amount);
     lines.push({
@@ -374,10 +375,25 @@ function calculateApprovedDiscounts(assignments, chargeLines) {
       if (seenAssignmentIds.has(id)) return false;
       seenAssignmentIds.add(id);
       return true;
+    })
+    // Finance policy gives staff precedence over sibling.  Sort explicitly so
+    // callers cannot create two discounts by changing join/order semantics.
+    .sort((left, right) => {
+      const rank = (assignment) => assignment.discount_type === 'staff' ? 0
+        : assignment.discount_type === 'sibling' ? 1 : 2;
+      return rank(left) - rank(right);
     });
+  const hasStaffAssignment = approvedAssignments.some(
+    (assignment) => assignment.discount_type === 'staff',
+  );
   for (const assignment of approvedAssignments) {
-    const targets = assignment.applicable_service_key
-      ? billableCharges.filter((line) => line.service_key === assignment.applicable_service_key)
+    // Staff and sibling policy assignments are Tuition-only, regardless of a
+    // stale or over-broad service selector supplied by an older client.
+    if (assignment.discount_type === 'sibling' && hasStaffAssignment) continue;
+    const policyService = ['staff', 'sibling'].includes(assignment.discount_type)
+      ? 'tuition' : assignment.applicable_service_key;
+    const targets = policyService
+      ? billableCharges.filter((line) => line.service_key === policyService)
       : billableCharges;
     const targetGross = money(targets.reduce((sum, line) => sum + line.amount, 0));
     const targetServices = new Set(targets.map((line) => line.service_key));
@@ -400,7 +416,7 @@ function calculateApprovedDiscounts(assignments, chargeLines) {
     if (amount <= 0) continue;
     discounts.push({
       line_type: 'discount',
-      service_key: assignment.applicable_service_key || null,
+      service_key: policyService || null,
       label: {
         staff: 'Staff discount',
         sibling: 'Sibling discount',
@@ -417,10 +433,10 @@ function calculateApprovedDiscounts(assignments, chargeLines) {
         calculation_method: assignment.calculation_method,
       },
     });
-    if (assignment.applicable_service_key) {
+    if (policyService) {
       discountedByService.set(
-        assignment.applicable_service_key,
-        money((discountedByService.get(assignment.applicable_service_key) || 0) + amount),
+        policyService,
+        money((discountedByService.get(policyService) || 0) + amount),
       );
     } else if (targetGross > 0) {
       // Track a general discount against service capacity. Start with the

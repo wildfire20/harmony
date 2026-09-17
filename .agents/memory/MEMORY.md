@@ -14,4 +14,4 @@
 - [Legacy finance category isolation](legacy-finance-category-isolation.md) — partially paid multi-service invoices without category events must fail closed; never infer old allocation ownership.
 - [Canonical finance core](canonical-finance-core.md) — future billing uses effective enrollments, immutable snapshots/events, normalized proof identities, and one guarded command layer.
 - [Finance date-only boundaries](finance-date-only-boundaries.md) — PostgreSQL financial DATE fields must cross read boundaries as canonical text, never timezone-converted Date objects.
-- [Finance release phases](finance-release-phases.md) — pre-migration preflight tolerates absent target schema; strict audit runs only after migration, with transaction-safe optional checks.
+- [Finance release phases](finance-release-phases.md) — phase strictness and disposable release fixtures must stay aligned with the effective billing policy.

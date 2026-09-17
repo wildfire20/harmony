@@ -166,6 +166,39 @@ async function getMonthlyBillingReadiness(period, executor = db) {
     }
   });
 
+  // Harmony Finance Phase 4A has one exact billable policy.  General price
+  // validation above remains useful for malformed configurations, while this
+  // blocker prevents a valid-looking but financially different bundle from
+  // reaching invoice generation.
+  const harmonyPolicy = {
+    tuition: { amount: 2350, billing_mode: 'standalone', bundle_key: null, included: [] },
+    boarding: {
+      amount: 1600, billing_mode: 'bundle', bundle_key: 'harmony_boarding_package',
+      included: ['transport', 'aftercare'],
+    },
+    transport: { amount: 650, billing_mode: 'standalone', bundle_key: null, included: [] },
+    aftercare: { amount: 550, billing_mode: 'standalone', bundle_key: null, included: [] },
+  };
+  Object.entries(harmonyPolicy).forEach(([serviceKey, required]) => {
+    const price = priceMap.get(serviceKey);
+    const included = parseIncluded(price?.included_service_keys)
+      .map((item) => String(item).toLowerCase()).sort();
+    const expectedIncluded = [...required.included].sort();
+    if (!price || Number(price.amount) !== required.amount ||
+        String(price.billing_mode || 'standalone') !== required.billing_mode ||
+        (price.bundle_key || null) !== required.bundle_key ||
+        JSON.stringify(included) !== JSON.stringify(expectedIncluded)) {
+      hardFailures.push(blocker('invalid_harmony_billing_policy',
+        `Harmony billing policy for ${serviceKey} does not match the required Phase 4A configuration.`, {
+          service_key: serviceKey,
+          required: {
+            amount: required.amount, billing_mode: required.billing_mode,
+            bundle_key: required.bundle_key, included_service_keys: required.included,
+          },
+        }));
+    }
+  });
+
   const knownServices = new Set(SERVICE_KEYS);
   (prices || []).forEach((price) => {
     const key = String(price.service_key || '').toLowerCase();
@@ -219,6 +252,18 @@ async function getMonthlyBillingReadiness(period, executor = db) {
           }));
       }
     });
+    if (rows.some((row) => row.service_key === 'boarding')) {
+      ['tuition', 'transport', 'aftercare'].forEach((requiredService) => {
+        if (!rows.some((row) => row.service_key === requiredService)) {
+          hardFailures.push(blocker('incomplete_boarding_package',
+            `Learner ${student.student_number || student.id} has Boarding without ${requiredService} in the effective package.`, {
+              student_id: Number(student.id),
+              service_key: requiredService,
+              package_key: 'harmony_boarding_package',
+            }));
+        }
+      });
+    }
   });
 
   // Detect historical overlaps without relying on the database constraint.  A
@@ -262,6 +307,22 @@ async function getMonthlyBillingReadiness(period, executor = db) {
           }));
       }
     });
+  });
+  (assignments || []).forEach((assignment) => {
+    const sameLearner = (assignmentByStudent.get(Number(assignment.student_id)) || []);
+    const conflicting = sameLearner.find((other) =>
+      other.discount_type !== assignment.discount_type &&
+      ['staff', 'sibling'].includes(other.discount_type) &&
+      ['staff', 'sibling'].includes(assignment.discount_type));
+    if (assignment.discount_type === 'staff' && conflicting) {
+      hardFailures.push(blocker('conflicting_discount_assignments',
+        `Learner ${assignment.student_id} has overlapping staff and sibling discount assignments.`, {
+          student_id: Number(assignment.student_id),
+          staff_assignment_id: Number(assignment.id),
+          sibling_assignment_id: Number(conflicting.id),
+          period: requestedPeriod,
+        }));
+    }
   });
 
   return {

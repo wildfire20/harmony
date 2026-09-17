@@ -191,12 +191,14 @@ const baseSchema = `
 
 const seedPrices = `
   INSERT INTO service_prices
-    (service_key, label, description, amount, display_order, billing_mode, included_service_keys)
+    (service_key, label, description, amount, display_order, billing_mode,
+     included_service_keys, bundle_key)
   VALUES
-    ('tuition', 'Tuition', 'Monthly tuition', 2350, 1, 'standalone', '[]'),
-    ('boarding', 'Boarding', 'Monthly boarding', 1600, 2, 'standalone', '[]'),
-    ('transport', 'Transport', 'Monthly transport', 650, 3, 'standalone', '[]'),
-    ('aftercare', 'Aftercare', 'Monthly aftercare', 550, 4, 'standalone', '[]');
+    ('tuition', 'Tuition', 'Monthly tuition', 2350, 1, 'standalone', '[]', NULL),
+    ('boarding', 'Boarding', 'Monthly boarding', 1600, 2, 'bundle',
+     '["transport","aftercare"]', 'harmony_boarding_package'),
+    ('transport', 'Transport', 'Monthly transport', 650, 3, 'standalone', '[]', NULL),
+    ('aftercare', 'Aftercare', 'Monthly aftercare', 550, 4, 'standalone', '[]', NULL);
 `;
 
 async function installBaseFinanceDatabase(pool, schema) {
@@ -554,25 +556,20 @@ async function runSuite() {
       SELECT id, service_key, line_type, amount, is_included, metadata
       FROM invoice_line_items WHERE invoice_id=$1 ORDER BY id
     `, [monthlyInvoice.id]);
-    assert.deepEqual(monthlyLines.rows.map((row) => [row.service_key, row.line_type, Number(row.amount)]), [
-      ['tuition', 'charge', 2350],
-      ['boarding', 'charge', 1600],
-      ['transport', 'charge', 650],
-      ['aftercare', 'charge', 550],
-      ['tuition', 'discount', 100],
+    assert.deepEqual(monthlyLines.rows.map((row) => [
+      row.service_key, row.line_type, Number(row.amount), row.is_included,
+    ]), [
+      ['boarding', 'charge', 1600, false],
+      ['transport', 'charge', 0, true],
+      ['aftercare', 'charge', 0, true],
+      ['tuition', 'charge', 2350, false],
+      ['tuition', 'discount', 100, false],
     ]);
-    assert.equal(Number(monthlyInvoice.amount_due), 5050);
+    assert.equal(Number(monthlyInvoice.amount_due), 3850);
     // Isolated A-E fixture: exercise each service/bundle/discount combination
     // in one synthetic month while keeping the original release-gate learner
     // above as the persisted multi-service baseline.
     await database.query(`
-      UPDATE service_prices
-      SET billing_mode='bundle_component', bundle_key='boarding-package'
-      WHERE service_key IN ('tuition', 'aftercare');
-      UPDATE service_prices
-      SET billing_mode='bundle', bundle_key='boarding-package',
-          amount=1600, included_service_keys='["tuition","aftercare"]'::jsonb
-      WHERE service_key='boarding';
       INSERT INTO users
         (id, student_number, email, first_name, last_name, role, grade_id)
       VALUES
@@ -622,7 +619,7 @@ async function runSuite() {
     assert.deepEqual(syntheticInvoices.map((invoice) => [
       Number(invoice.student_id), Number(invoice.amount_due),
     ]), [
-      [10, 2350], [11, 3000], [12, 2250], [13, 2250], [14, 2925],
+      [10, 2350], [11, 3000], [12, 3950], [13, 2250], [14, 2925],
     ]);
     const syntheticLines = (await database.query(`
       SELECT i.student_id, l.service_key, l.line_type, l.amount, l.is_included,
@@ -637,9 +634,9 @@ async function runSuite() {
       line.service_key, line.line_type, Number(line.amount), line.is_included,
     ]), [
       ['boarding', 'charge', 1600, false],
-      ['tuition', 'charge', 0, true],
+      ['transport', 'charge', 0, true],
       ['aftercare', 'charge', 0, true],
-      ['transport', 'charge', 650, false],
+      ['tuition', 'charge', 2350, false],
     ]);
     assert.equal(syntheticLines.filter((line) =>
       Number(line.student_id) === 13 && line.line_type === 'discount').length, 1);
@@ -761,9 +758,9 @@ async function runSuite() {
     const originalScenarioPayables = initialPayables.filter((row) =>
       row.is_payable && originalScenarioInvoiceIds.has(Number(row.invoice_id)));
     assert.deepEqual(originalScenarioPayables.map((row) => row.category), [
-      'boarding', 'tuition', 'boarding', 'transport', 'aftercare', 'one_off',
+      'boarding', 'boarding', 'tuition', 'one_off',
     ]);
-    assert.equal(originalScenarioPayables.length, 6);
+    assert.equal(originalScenarioPayables.length, 4);
     const tuition = originalScenarioPayables.find((row) => row.category === 'tuition');
     const oneOff = originalScenarioPayables.find((row) => row.category === 'one_off');
     const mixedAmount = Number(tuition.amount_outstanding) + Number(oneOff.amount_outstanding);
@@ -798,8 +795,11 @@ async function runSuite() {
       { 'x-test-role': 'admin' },
     );
     assert.equal(options.status, 200);
+    const selectedObligationKeys = new Set(selection.map((row) =>
+      `${row.invoice_id}:${row.invoice_line_item_id}`));
     assert.deepEqual(
-      options.body.options.filter((row) => row.category === 'tuition' || row.category === 'one_off')
+      options.body.options.filter((row) =>
+        selectedObligationKeys.has(`${row.invoice_id}:${row.invoice_line_item_id}`))
         .map((row) => [row.invoice_id, row.invoice_line_item_id, row.category]),
       selection.map((row) => [row.invoice_id, row.invoice_line_item_id, row.category]),
     );
@@ -827,7 +827,8 @@ async function runSuite() {
     );
     assert.equal(adminAfterApproval.status, 200);
     assert.deepEqual(
-      adminAfterApproval.body.options.filter((row) => row.category === 'tuition' || row.category === 'one_off'),
+      adminAfterApproval.body.options.filter((row) =>
+        selectedObligationKeys.has(`${row.invoice_id}:${row.invoice_line_item_id}`)),
       [],
     );
     const allocations = await database.query(`
@@ -855,7 +856,7 @@ async function runSuite() {
     assert.equal(afterApproval.find((row) => row.obligation_id === tuition.obligation_id).status, 'PAID');
     assert.equal(afterApproval.find((row) => row.obligation_id === oneOff.obligation_id).status, 'PAID');
     assert.equal(afterApproval.filter((row) =>
-      row.is_payable && originalScenarioInvoiceIds.has(Number(row.invoice_id))).length, 4);
+      row.is_payable && originalScenarioInvoiceIds.has(Number(row.invoice_id))).length, 2);
     const ledgerResponse = await request(
       server, 'GET', '/api/reports/student-payment-history/FIN-GATE-001',
       undefined, { 'x-test-role': 'admin' },
@@ -912,26 +913,27 @@ async function runSuite() {
 
     // Two different Parent accounts may submit the same exact obligation, but
     // only one competing proof can commit after the invoice lock is held.
-    const aftercare = restored.find((row) => row.category === 'aftercare');
+    const competingBoarding = restored.find((row) =>
+      row.category === 'boarding' && Number(row.invoice_id) === Number(legacyInvoice.id));
     const competingProofs = await Promise.all([
       financeCommands.createPaymentProof({
-        parentId: 2, learnerId: 3, amount: aftercare.amount_outstanding,
+        parentId: 2, learnerId: 3, amount: competingBoarding.amount_outstanding,
         paymentMethod: 'eft', reference: 'COMPETING-A',
         obligations: [{
-          invoice_id: aftercare.invoice_id,
-          invoice_line_item_id: aftercare.invoice_line_item_id,
-          category: 'aftercare', amount: aftercare.amount_outstanding,
+          invoice_id: competingBoarding.invoice_id,
+          invoice_line_item_id: competingBoarding.invoice_line_item_id,
+          category: 'boarding', amount: competingBoarding.amount_outstanding,
         }],
         actor: { id: 2, name: 'Test Parent', role: 'parent' },
         idempotencyKey: 'competing-proof-a-001',
       }),
       financeCommands.createPaymentProof({
-        parentId: 4, learnerId: 3, amount: aftercare.amount_outstanding,
+        parentId: 4, learnerId: 3, amount: competingBoarding.amount_outstanding,
         paymentMethod: 'eft', reference: 'COMPETING-B',
         obligations: [{
-          invoice_id: aftercare.invoice_id,
-          invoice_line_item_id: aftercare.invoice_line_item_id,
-          category: 'aftercare', amount: aftercare.amount_outstanding,
+          invoice_id: competingBoarding.invoice_id,
+          invoice_line_item_id: competingBoarding.invoice_line_item_id,
+          category: 'boarding', amount: competingBoarding.amount_outstanding,
         }],
         actor: { id: 4, name: 'Second Parent', role: 'parent' },
         idempotencyKey: 'competing-proof-b-001',
@@ -945,13 +947,15 @@ async function runSuite() {
     assert.equal(competition.filter((result) => result.status === 'fulfilled').length, 1);
     assert.equal(competition.filter((result) => result.status === 'rejected').length, 1);
 
-    const transport = restored.find((row) => row.category === 'transport');
+    const monthlyBoarding = restored.find((row) =>
+      row.category === 'boarding' && Number(row.invoice_id) === Number(monthlyInvoice.id));
     const manualOne = await financeCommands.recordPayment({
       studentId: 3, amount: 100, paymentDate: '2029-01-15',
       paymentMethod: 'manual_entry', reference: 'MANUAL-GATE-001',
       obligations: [{
-        invoice_id: transport.invoice_id, invoice_line_item_id: transport.invoice_line_item_id,
-        category: 'transport', amount: 100,
+        invoice_id: monthlyBoarding.invoice_id,
+        invoice_line_item_id: monthlyBoarding.invoice_line_item_id,
+        category: 'boarding', amount: 100,
       }],
       idempotencyKey: 'manual-gate-idempotency-001',
       actor: { id: 1, name: 'Test Admin', role: 'admin' },
@@ -960,8 +964,9 @@ async function runSuite() {
       studentId: 3, amount: 100, paymentDate: '2029-01-15',
       paymentMethod: 'manual_entry', reference: 'MANUAL-GATE-001',
       obligations: [{
-        invoice_id: transport.invoice_id, invoice_line_item_id: transport.invoice_line_item_id,
-        category: 'transport', amount: 100,
+        invoice_id: monthlyBoarding.invoice_id,
+        invoice_line_item_id: monthlyBoarding.invoice_line_item_id,
+        category: 'boarding', amount: 100,
       }],
       idempotencyKey: 'manual-gate-idempotency-001',
       actor: { id: 1, name: 'Test Admin', role: 'admin' },
@@ -996,9 +1001,9 @@ async function runSuite() {
       paymentMethod: 'bank_transfer', reference: 'BANK-GATE-001',
       action: 'bank_import_payment',
       obligations: [{
-        invoice_id: transport.invoice_id,
-        invoice_line_item_id: transport.invoice_line_item_id,
-        category: 'transport', amount: 50,
+        invoice_id: monthlyBoarding.invoice_id,
+        invoice_line_item_id: monthlyBoarding.invoice_line_item_id,
+        category: 'boarding', amount: 50,
       }],
       idempotencyKey: 'bank-import-gate-001',
       actor: { id: 1, name: 'Test Admin', role: 'admin' },
@@ -1008,9 +1013,9 @@ async function runSuite() {
       paymentMethod: 'bank_transfer', reference: 'BANK-GATE-001',
       action: 'bank_import_payment',
       obligations: [{
-        invoice_id: transport.invoice_id,
-        invoice_line_item_id: transport.invoice_line_item_id,
-        category: 'transport', amount: 50,
+        invoice_id: monthlyBoarding.invoice_id,
+        invoice_line_item_id: monthlyBoarding.invoice_line_item_id,
+        category: 'boarding', amount: 50,
       }],
       idempotencyKey: 'bank-import-gate-001',
       actor: { id: 1, name: 'Test Admin', role: 'admin' },
@@ -1028,15 +1033,15 @@ async function runSuite() {
     const appliedCredit = await financeCommands.applyCredit({
       sourceTransactionId: creditSource, amount: 25,
       obligations: [{
-        invoice_id: transport.invoice_id,
-        invoice_line_item_id: transport.invoice_line_item_id,
-        category: 'transport', amount: 25,
+        invoice_id: monthlyBoarding.invoice_id,
+        invoice_line_item_id: monthlyBoarding.invoice_line_item_id,
+        category: 'boarding', amount: 25,
       }],
       idempotencyKey: 'apply-credit-gate-001',
       actor: { id: 1, name: 'Test Admin', role: 'admin' },
     });
     assert.ok(appliedCredit.allocation.allocations.some(
-      (row) => row.invoiceId === transport.invoice_id && Number(row.amount) === 25,
+      (row) => row.invoiceId === monthlyBoarding.invoice_id && Number(row.amount) === 25,
     ));
 
     const concurrent = await Promise.all([
@@ -1044,8 +1049,9 @@ async function runSuite() {
         studentId: 3, amount: 50, paymentDate: '2029-01-15',
         paymentMethod: 'manual_entry', reference: 'CONCURRENT-GATE-001',
         obligations: [{
-          invoice_id: transport.invoice_id, invoice_line_item_id: transport.invoice_line_item_id,
-          category: 'transport', amount: 50,
+          invoice_id: monthlyBoarding.invoice_id,
+          invoice_line_item_id: monthlyBoarding.invoice_line_item_id,
+          category: 'boarding', amount: 50,
         }],
         idempotencyKey: 'concurrent-gate-key-001',
         actor: { id: 1, name: 'Test Admin', role: 'admin' },
@@ -1054,8 +1060,9 @@ async function runSuite() {
         studentId: 3, amount: 50, paymentDate: '2029-01-15',
         paymentMethod: 'manual_entry', reference: 'CONCURRENT-GATE-001',
         obligations: [{
-          invoice_id: transport.invoice_id, invoice_line_item_id: transport.invoice_line_item_id,
-          category: 'transport', amount: 50,
+          invoice_id: monthlyBoarding.invoice_id,
+          invoice_line_item_id: monthlyBoarding.invoice_line_item_id,
+          category: 'boarding', amount: 50,
         }],
         idempotencyKey: 'concurrent-gate-key-001',
         actor: { id: 1, name: 'Test Admin', role: 'admin' },
