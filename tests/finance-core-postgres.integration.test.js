@@ -152,7 +152,9 @@ const baseSchema = `
     id SERIAL PRIMARY KEY, service_key VARCHAR(80) NOT NULL UNIQUE, label VARCHAR(255) NOT NULL,
     description TEXT, amount NUMERIC(12,2) NOT NULL, display_order INTEGER NOT NULL DEFAULT 0,
     billing_mode VARCHAR(40) NOT NULL DEFAULT 'standalone', bundle_key VARCHAR(80),
-    included_service_keys JSONB NOT NULL DEFAULT '[]'::jsonb
+    included_service_keys JSONB NOT NULL DEFAULT '[]'::jsonb,
+    CONSTRAINT service_prices_billing_mode_check
+      CHECK (billing_mode IN ('standalone', 'bundle_component', 'informational'))
   );
   CREATE TABLE student_fee_assignments (
     id SERIAL PRIMARY KEY, student_id INTEGER NOT NULL REFERENCES users(id),
@@ -195,8 +197,7 @@ const seedPrices = `
      included_service_keys, bundle_key)
   VALUES
     ('tuition', 'Tuition', 'Monthly tuition', 2350, 1, 'standalone', '[]', NULL),
-    ('boarding', 'Boarding', 'Monthly boarding', 1600, 2, 'bundle',
-     '["transport","aftercare"]', 'harmony_boarding_package'),
+    ('boarding', 'Boarding', 'Monthly boarding', 1600, 2, 'standalone', '[]', NULL),
     ('transport', 'Transport', 'Monthly transport', 650, 3, 'standalone', '[]', NULL),
     ('aftercare', 'Aftercare', 'Monthly aftercare', 550, 4, 'standalone', '[]', NULL);
 `;
@@ -235,6 +236,19 @@ async function applyFinanceCoreMigration(pool, schema) {
 async function applyFinanceOperationsReadinessMigration(pool, schema) {
   const migration = fs.readFileSync(
     path.join(__dirname, '..', 'migrations', 'finance_operations_readiness_v3.sql'), 'utf8',
+  );
+  const client = await pool.connect();
+  try {
+    await client.query(`SET search_path TO ${quoteIdentifier(schema)}`);
+    await client.query(migration);
+  } finally {
+    client.release();
+  }
+}
+
+async function applyFinanceBillingPolicyReadinessMigration(pool, schema) {
+  const migration = fs.readFileSync(
+    path.join(__dirname, '..', 'migrations', 'finance_billing_policy_readiness_v4.sql'), 'utf8',
   );
   const client = await pool.connect();
   try {
@@ -344,18 +358,73 @@ async function runSuite() {
       strictAuditClient.release();
     }
 
+    const prematureV4Client = await database.pool.connect();
+    try {
+      const legacyConstraint = (await prematureV4Client.query(`
+        SELECT pg_get_constraintdef(oid) AS definition
+        FROM pg_constraint
+        WHERE conrelid='service_prices'::regclass
+          AND conname='service_prices_billing_mode_check'
+      `)).rows[0].definition;
+      const v4Migration = fs.readFileSync(
+        path.join(__dirname, '..', 'migrations', 'finance_billing_policy_readiness_v4.sql'),
+        'utf8',
+      );
+      await assert.rejects(
+        prematureV4Client.query(v4Migration),
+        /requires the finance_schema_versions table/,
+      );
+      await prematureV4Client.query('ROLLBACK');
+      const constraintAfterRollback = (await prematureV4Client.query(`
+        SELECT pg_get_constraintdef(oid) AS definition
+        FROM pg_constraint
+        WHERE conrelid='service_prices'::regclass
+          AND conname='service_prices_billing_mode_check'
+      `)).rows[0].definition;
+      assert.equal(constraintAfterRollback, legacyConstraint);
+      assert.doesNotMatch(constraintAfterRollback, /bundle'/);
+    } finally {
+      prematureV4Client.release();
+    }
+
     await applyFinanceCoreMigration(pool, schema);
     await applyFinanceOperationsReadinessMigration(pool, schema);
+    await applyFinanceBillingPolicyReadinessMigration(pool, schema);
+    await applyFinanceBillingPolicyReadinessMigration(pool, schema);
     const readinessVersion = (await pool.query(`
       SELECT version FROM ${quoteIdentifier(schema)}.finance_schema_versions
       WHERE schema_key = 'finance_operations_readiness'
     `)).rows[0];
-    assert.equal(readinessVersion.version, 3);
+    assert.equal(readinessVersion.version, 4);
     const architectureVersion = (await pool.query(`
       SELECT version FROM ${quoteIdentifier(schema)}.finance_schema_versions
       WHERE schema_key = 'finance_core_architecture'
     `)).rows[0];
-    assert.equal(architectureVersion.version, 3);
+    assert.equal(architectureVersion.version, 4);
+
+    for (const billingMode of [
+      'standalone', 'bundle', 'bundle_component', 'informational',
+    ]) {
+      await database.query(
+        `UPDATE service_prices SET billing_mode=$1 WHERE service_key='tuition'`,
+        [billingMode],
+      );
+    }
+    await assert.rejects(
+      database.query(
+        `UPDATE service_prices SET billing_mode='unsupported' WHERE service_key='tuition'`,
+      ),
+      /service_prices_billing_mode_check|check constraint/i,
+    );
+    await database.query(`
+      UPDATE service_prices
+      SET billing_mode='standalone', bundle_key=NULL, included_service_keys='[]'::jsonb
+      WHERE service_key='tuition';
+      UPDATE service_prices
+      SET billing_mode='bundle', bundle_key='harmony_boarding_package',
+          amount=1600, included_service_keys='["transport","aftercare"]'::jsonb
+      WHERE service_key='boarding'
+    `);
 
     for (const scriptName of ['audit-finance-core.js', 'preflight-finance-core.js']) {
       const operatorPostMigration = runFinanceOperatorScript(scriptName, operatorUrl);
@@ -584,6 +653,7 @@ async function runSuite() {
         (10, 'tuition', '2029-02-01', 'synthetic-a-tuition'),
         (11, 'tuition', '2029-02-01', 'synthetic-b-tuition'),
         (11, 'transport', '2029-02-01', 'synthetic-b-transport'),
+        (11, 'aftercare', '2029-02-01', 'synthetic-b-aftercare'),
         (12, 'boarding', '2029-02-01', 'synthetic-c-boarding'),
         (12, 'tuition', '2029-02-01', 'synthetic-c-tuition'),
         (12, 'aftercare', '2029-02-01', 'synthetic-c-aftercare'),
@@ -619,7 +689,7 @@ async function runSuite() {
     assert.deepEqual(syntheticInvoices.map((invoice) => [
       Number(invoice.student_id), Number(invoice.amount_due),
     ]), [
-      [10, 2350], [11, 3000], [12, 3950], [13, 2250], [14, 2925],
+      [10, 2350], [11, 3550], [12, 3950], [13, 2250], [14, 2925],
     ]);
     const syntheticLines = (await database.query(`
       SELECT i.student_id, l.service_key, l.line_type, l.amount, l.is_included,
@@ -629,6 +699,14 @@ async function runSuite() {
       WHERE i.id = ANY($1::integer[])
       ORDER BY i.student_id, l.id
     `, [syntheticInvoices.map((invoice) => invoice.id)])).rows;
+    const bLines = syntheticLines.filter((line) => Number(line.student_id) === 11);
+    assert.deepEqual(bLines.map((line) => [
+      line.service_key, line.line_type, Number(line.amount), line.is_included,
+    ]), [
+      ['tuition', 'charge', 2350, false],
+      ['transport', 'charge', 650, false],
+      ['aftercare', 'charge', 550, false],
+    ]);
     const cLines = syntheticLines.filter((line) => Number(line.student_id) === 12);
     assert.deepEqual(cLines.map((line) => [
       line.service_key, line.line_type, Number(line.amount), line.is_included,

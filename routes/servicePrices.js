@@ -4,12 +4,12 @@ const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 
 const requireAdmin = [authenticate, authorize('admin', 'super_admin')];
-const BILLING_MODES = new Set(['standalone', 'bundle_component', 'informational']);
+const BILLING_MODES = new Set(['standalone', 'bundle', 'bundle_component', 'informational']);
 const KNOWN_SERVICE_KEYS = new Set(['tuition', 'boarding', 'transport', 'aftercare']);
 
 function validateBillingMetadata({ billing_mode: billingMode, included_service_keys: includedKeys }) {
   if (billingMode !== undefined && !BILLING_MODES.has(billingMode)) {
-    return 'billing_mode must be standalone, bundle_component, or informational';
+    return 'billing_mode must be standalone, bundle, bundle_component, or informational';
   }
   if (includedKeys !== undefined && (
     !Array.isArray(includedKeys) ||
@@ -125,3 +125,4 @@ router.put('/:key', requireAdmin, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.validateBillingMetadata = validateBillingMetadata;

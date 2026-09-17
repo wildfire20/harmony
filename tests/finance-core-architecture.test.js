@@ -70,6 +70,25 @@ test('finance readiness v3 broadens overlap enforcement without rewriting v2', (
   assert.match(source, /CREATE OR REPLACE FUNCTION prevent_service_enrollment_overlap/);
 });
 
+test('finance billing policy readiness v4 safely permits the approved bundle mode', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'migrations', 'finance_billing_policy_readiness_v4.sql'),
+    'utf8',
+  );
+  assert.match(source, /BEGIN;[\s\S]*pg_advisory_xact_lock/);
+  assert.match(source, /DROP CONSTRAINT IF EXISTS service_prices_billing_mode_check/);
+  assert.match(source, /ADD CONSTRAINT service_prices_billing_mode_check/);
+  for (const mode of ['standalone', 'bundle', 'bundle_component', 'informational']) {
+    assert.match(source, new RegExp(`'${mode}'`));
+  }
+  assert.match(source, /VALUES \('finance_operations_readiness', 4\)/);
+  assert.match(source, /VALUES \('finance_core_architecture', 4\)/);
+  assert.match(source, /to_regclass[\s\S]*service_prices/);
+  assert.match(source, /to_regclass[\s\S]*finance_schema_versions/);
+  assert.match(source, /COMMIT;\s*$/);
+  assert.doesNotMatch(source, /\b(?:UPDATE|DELETE)\s+(?:service_prices|service_enrollments|invoices|payment_transactions)\b/i);
+});
+
 test('effective enrollment period bounds include an enrollment crossing the month', async () => {
   assert.deepEqual(periodBounds('2027-02'), {
     start: '2027-02-01',

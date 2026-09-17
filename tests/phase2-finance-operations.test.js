@@ -399,6 +399,24 @@ test('StudentManagement exposes dated finance services and keeps old flags/disco
   assert.match(api, /Idempotency-Key/);
 });
 
+test('service price validation accepts all supported billing modes and rejects unknown modes', () => {
+  const servicePrices = require('../routes/servicePrices');
+  const validate = servicePrices.validateBillingMetadata;
+  for (const billing_mode of [
+    'standalone', 'bundle', 'bundle_component', 'informational',
+  ]) {
+    assert.equal(validate({ billing_mode }), null);
+  }
+  assert.equal(
+    validate({ billing_mode: 'unsupported' }),
+    'billing_mode must be standalone, bundle, bundle_component, or informational',
+  );
+  assert.match(
+    validate({ included_service_keys: ['unknown-service'] }),
+    /known service keys/,
+  );
+});
+
 test('Phase 3D finance UI safety contracts prevent implicit finance mutations', () => {
   const studentSource = fs.readFileSync(project('client/src/components/admin/StudentManagement.js'), 'utf8');
   const dashboardSource = fs.readFileSync(project('client/src/components/payments/PaymentDashboard.js'), 'utf8');
