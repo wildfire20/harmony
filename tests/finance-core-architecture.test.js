@@ -85,6 +85,22 @@ test('finance billing policy readiness v4 safely permits the approved bundle mod
   assert.match(source, /VALUES \('finance_core_architecture', 4\)/);
   assert.match(source, /to_regclass[\s\S]*service_prices/);
   assert.match(source, /to_regclass[\s\S]*finance_schema_versions/);
+  assert.match(
+    source,
+    /schema_key = 'finance_core_architecture'[\s\S]*version >= 3/,
+  );
+  assert.match(
+    source,
+    /schema_key = 'finance_operations_readiness'[\s\S]*version >= 3/,
+  );
+  assert.ok(
+    source.indexOf("schema_key = 'finance_core_architecture'")
+      < source.indexOf('ALTER TABLE service_prices'),
+  );
+  assert.ok(
+    source.indexOf("schema_key = 'finance_operations_readiness'")
+      < source.indexOf('ALTER TABLE service_prices'),
+  );
   assert.match(source, /COMMIT;\s*$/);
   assert.doesNotMatch(source, /\b(?:UPDATE|DELETE)\s+(?:service_prices|service_enrollments|invoices|payment_transactions)\b/i);
 });

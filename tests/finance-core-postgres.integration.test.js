@@ -358,6 +358,8 @@ async function runSuite() {
       strictAuditClient.release();
     }
 
+    await applyFinanceCoreMigration(pool, schema);
+
     const prematureV4Client = await database.pool.connect();
     try {
       const legacyConstraint = (await prematureV4Client.query(`
@@ -372,7 +374,7 @@ async function runSuite() {
       );
       await assert.rejects(
         prematureV4Client.query(v4Migration),
-        /requires the finance_schema_versions table/,
+        /requires finance_core_architecture version >= 3/,
       );
       await prematureV4Client.query('ROLLBACK');
       const constraintAfterRollback = (await prematureV4Client.query(`
@@ -383,11 +385,22 @@ async function runSuite() {
       `)).rows[0].definition;
       assert.equal(constraintAfterRollback, legacyConstraint);
       assert.doesNotMatch(constraintAfterRollback, /bundle'/);
+      const versionsAfterRollback = (await prematureV4Client.query(`
+        SELECT schema_key, version
+        FROM finance_schema_versions
+        WHERE schema_key IN (
+          'finance_core_architecture',
+          'finance_operations_readiness'
+        )
+        ORDER BY schema_key
+      `)).rows;
+      assert.deepEqual(versionsAfterRollback, [
+        { schema_key: 'finance_core_architecture', version: 2 },
+      ]);
     } finally {
       prematureV4Client.release();
     }
 
-    await applyFinanceCoreMigration(pool, schema);
     await applyFinanceOperationsReadinessMigration(pool, schema);
     await applyFinanceBillingPolicyReadinessMigration(pool, schema);
     await applyFinanceBillingPolicyReadinessMigration(pool, schema);

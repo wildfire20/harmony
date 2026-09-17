@@ -21,6 +21,26 @@ BEGIN
       'Finance billing policy readiness v4 requires the finance_schema_versions table'
       USING ERRCODE = '42P01';
   END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM finance_schema_versions
+    WHERE schema_key = 'finance_core_architecture'
+      AND version >= 3
+  ) THEN
+    RAISE EXCEPTION
+      'Finance billing policy readiness v4 requires finance_core_architecture version >= 3';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM finance_schema_versions
+    WHERE schema_key = 'finance_operations_readiness'
+      AND version >= 3
+  ) THEN
+    RAISE EXCEPTION
+      'Finance billing policy readiness v4 requires finance_operations_readiness version >= 3';
+  END IF;
 END $$;
 
 ALTER TABLE service_prices
