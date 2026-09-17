@@ -624,8 +624,10 @@ test('Phase 4A readiness blocks incomplete Boarding packages and staff-sibling c
   ];
   const assignments = [
     { id: 10, student_id: 41, discount_type: 'staff',
+      calculation_method: 'percentage', percentage: 50, applicable_service_key: 'tuition',
       starts_on: '2026-10-01', ends_on: null },
     { id: 11, student_id: 41, discount_type: 'sibling',
+      calculation_method: 'fixed', amount: 100, applicable_service_key: 'tuition',
       starts_on: '2026-10-01', ends_on: null },
   ];
   const executor = {
@@ -643,6 +645,84 @@ test('Phase 4A readiness blocks incomplete Boarding packages and staff-sibling c
     .filter((failure) => failure.code === 'incomplete_boarding_package').length, 2);
   assert.ok(readiness.hardFailures
     .some((failure) => failure.code === 'conflicting_discount_assignments'));
+});
+
+test('Phase 4A readiness validates policy discount terms and legacy precedence', async () => {
+  const { getMonthlyBillingReadiness } = require('../services/monthlyBillingReadiness');
+  const prices = [
+    { service_key: 'tuition', amount: 2350, billing_mode: 'standalone',
+      bundle_key: null, included_service_keys: [] },
+    { service_key: 'boarding', amount: 1600, billing_mode: 'bundle',
+      bundle_key: 'harmony_boarding_package', included_service_keys: ['transport', 'aftercare'] },
+    { service_key: 'transport', amount: 650, billing_mode: 'standalone',
+      bundle_key: null, included_service_keys: [] },
+    { service_key: 'aftercare', amount: 550, billing_mode: 'standalone',
+      bundle_key: null, included_service_keys: [] },
+  ];
+  const enrollments = [{ id: 1, student_id: 51, service_key: 'tuition',
+    effective_start: '2026-10-01', effective_end: null, state: 'active' }];
+  const staff = { id: 1, student_id: 51, discount_type: 'staff',
+    calculation_method: 'percentage', percentage: 50, applicable_service_key: 'tuition' };
+  const sibling = { id: 2, student_id: 51, discount_type: 'sibling',
+    calculation_method: 'fixed', amount: 100, applicable_service_key: 'tuition' };
+  const run = async (flags, assignments) => {
+    let assignmentSql;
+    const result = await getMonthlyBillingReadiness('2026-10', { async query(sql) {
+      if (/FROM users/.test(sql)) return { rows: [{
+        id: 51, student_number: 'POLICY-51', ...flags,
+      }] };
+      if (/FROM service_prices/.test(sql)) return { rows: prices };
+      if (/FROM learner_discount_assignments/.test(sql)) {
+        assignmentSql = sql;
+        return { rows: assignments };
+      }
+      if (/FROM service_enrollments/.test(sql)) return { rows: enrollments };
+      return { rows: [] };
+    } });
+    assert.match(assignmentSql,
+      /calculation_method,\s*amount,\s*percentage,\s*applicable_service_key/);
+    return result;
+  };
+  const codes = (result, code) => result.hardFailures
+    .filter((failure) => failure.code === code);
+
+  for (const invalid of [
+    { ...staff, calculation_method: 'fixed', amount: 1175 },
+    { ...staff, percentage: 49 },
+    { ...staff, percentage: null },
+    { ...staff, applicable_service_key: 'boarding' },
+    { ...sibling, calculation_method: 'percentage', percentage: 100 },
+    { ...sibling, amount: 99 },
+    { ...sibling, amount: null },
+    { ...sibling, applicable_service_key: 'boarding' },
+  ]) {
+    const result = await run({}, [invalid]);
+    assert.equal(codes(result, 'invalid_policy_discount_assignment').length, 1);
+  }
+
+  const custom = await run({}, [{ ...staff, id: 3, discount_type: 'custom',
+    calculation_method: 'fixed', amount: 25, percentage: null,
+    applicable_service_key: 'boarding' }]);
+  assert.equal(codes(custom, 'invalid_policy_discount_assignment').length, 0);
+
+  const bothLegacyWithStaff = await run({
+    has_teacher_discount: true, has_sibling_discount: true,
+  }, [staff]);
+  assert.equal(codes(bothLegacyWithStaff, 'unresolved_legacy_discount_indicator').length, 0);
+
+  const missingStaff = await run({
+    has_teacher_discount: true, has_sibling_discount: true,
+  }, [sibling]);
+  assert.deepEqual(codes(missingStaff, 'unresolved_legacy_discount_indicator')
+    .map((failure) => failure.discount_type), ['staff']);
+
+  const ordinarySibling = await run({
+    has_teacher_discount: false, has_sibling_discount: true,
+  }, [sibling]);
+  assert.equal(codes(ordinarySibling, 'unresolved_legacy_discount_indicator').length, 0);
+
+  const conflict = await run({}, [staff, sibling]);
+  assert.equal(codes(conflict, 'conflicting_discount_assignments').length, 1);
 });
 
 test('Phase 4A UI discount start date is blank/reset and validated before API', () => {

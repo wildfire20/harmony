@@ -86,7 +86,8 @@ async function getMonthlyBillingReadiness(period, executor = db) {
     ORDER BY student_id, service_key, effective_start, id
   `, [bounds.end, bounds.start]);
   const assignments = await read(executor, `
-    SELECT id, student_id, discount_type, starts_on::text AS starts_on,
+    SELECT id, student_id, discount_type, calculation_method, amount, percentage,
+           applicable_service_key, starts_on::text AS starts_on,
            ends_on::text AS ends_on
     FROM learner_discount_assignments
     WHERE is_active = true
@@ -293,19 +294,44 @@ async function getMonthlyBillingReadiness(period, executor = db) {
     if (!assignmentByStudent.has(id)) assignmentByStudent.set(id, []);
     assignmentByStudent.get(id).push(assignment);
   });
+  const validPolicyAssignment = (assignment) => {
+    const type = String(assignment.discount_type || '').toLowerCase();
+    const method = String(assignment.calculation_method || '').toLowerCase();
+    const serviceKey = String(assignment.applicable_service_key || '').toLowerCase();
+    if (type === 'staff') {
+      return method === 'percentage' && assignment.percentage != null &&
+        Number(assignment.percentage) === 50 && serviceKey === 'tuition';
+    }
+    if (type === 'sibling') {
+      return method === 'fixed' && assignment.amount != null &&
+        Number(assignment.amount) === 100 && serviceKey === 'tuition';
+    }
+    return true;
+  };
+  (assignments || []).forEach((assignment) => {
+    const type = String(assignment.discount_type || '').toLowerCase();
+    if (!['staff', 'sibling'].includes(type) || validPolicyAssignment(assignment)) return;
+    hardFailures.push(blocker('invalid_policy_discount_assignment',
+      `Learner ${assignment.student_id} has an invalid ${type} discount assignment for the Harmony billing policy.`, {
+        student_id: Number(assignment.student_id),
+        discount_type: type,
+        discount_assignment_id: Number(assignment.id),
+      }));
+  });
   (students || []).forEach((student) => {
-    const legacyTypes = [];
-    if (student.has_sibling_discount) legacyTypes.push('sibling');
-    if (student.has_teacher_discount) legacyTypes.push('staff');
-    legacyTypes.forEach((discountType) => {
-      const explicit = (assignmentByStudent.get(Number(student.id)) || [])
-        .some((assignment) => assignment.discount_type === discountType);
-      if (!explicit) {
-        hardFailures.push(blocker('unresolved_legacy_discount_indicator',
-          `Learner ${student.student_number || student.id} has a legacy ${discountType} discount indicator without an explicit assignment.`, {
-            student_id: Number(student.id), discount_type: discountType,
-          }));
-      }
+    const learnerAssignments = assignmentByStudent.get(Number(student.id)) || [];
+    const validStaff = learnerAssignments.some((assignment) =>
+      assignment.discount_type === 'staff' && validPolicyAssignment(assignment));
+    const validSibling = learnerAssignments.some((assignment) =>
+      assignment.discount_type === 'sibling' && validPolicyAssignment(assignment));
+    const unresolved = [];
+    if (student.has_teacher_discount && !validStaff) unresolved.push('staff');
+    if (student.has_sibling_discount && !validStaff && !validSibling) unresolved.push('sibling');
+    unresolved.forEach((discountType) => {
+      hardFailures.push(blocker('unresolved_legacy_discount_indicator',
+        `Learner ${student.student_number || student.id} has a legacy ${discountType} discount indicator without a valid explicit policy assignment.`, {
+          student_id: Number(student.id), discount_type: discountType,
+        }));
     });
   });
   (assignments || []).forEach((assignment) => {
