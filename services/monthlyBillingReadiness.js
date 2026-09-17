@@ -7,6 +7,10 @@
  */
 const db = require('../config/database');
 const { periodBounds } = require('./serviceEnrollmentRepository');
+const {
+  CANONICAL_BILLING_START_PERIOD,
+  isBeforeCanonicalBillingStart,
+} = require('./canonicalBillingPeriod');
 
 const SERVICE_KEYS = ['tuition', 'boarding', 'transport', 'aftercare'];
 const BILLING_MODES = new Set(['standalone', 'bundle', 'bundle_component', 'informational']);
@@ -52,6 +56,30 @@ async function getMonthlyBillingReadiness(period, executor = db) {
   const bounds = periodBounds(requestedPeriod);
   const hardFailures = [];
   const warnings = [];
+
+  if (isBeforeCanonicalBillingStart(requestedPeriod)) {
+    const failure = blocker(
+      'before_canonical_billing_start',
+      `Canonical monthly billing starts in ${CANONICAL_BILLING_START_PERIOD}; ${requestedPeriod} cannot be generated.`,
+      {
+        requested_period: requestedPeriod,
+        canonical_start_period: CANONICAL_BILLING_START_PERIOD,
+      },
+    );
+    return {
+      period: requestedPeriod,
+      ready: false,
+      hardFailures: [failure],
+      blockers: [failure],
+      warnings,
+      summary: {
+        activeLearners: 0,
+        enrolledLearners: 0,
+        servicePrices: 0,
+        unresolvedLegacyDiscountIndicators: 0,
+      },
+    };
+  }
 
   const students = await read(executor, `
     SELECT id, student_number, first_name, last_name,

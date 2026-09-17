@@ -6,6 +6,7 @@ const {
   FinanceCommandError,
   verifyLedger,
   withTransaction,
+  generateMonthlyInvoices,
   verifyExistingCanonicalMonthlyInvoice,
 } = require('../services/financeCommandService');
 
@@ -60,6 +61,28 @@ test('repeatable-read isolation is established before canonical monthly work', a
     `SELECT set_config('harmony.finance_command', 'canonical', true)`,
   );
   assert.ok(commandSource.includes("}, options.executor, 'REPEATABLE READ');"));
+});
+
+test('canonical monthly generation rejects pre-October 2026 before financial writes', async () => {
+  for (const [year, month] of [[2026, 9], [2025, 12]]) {
+    const calls = [];
+    await assert.rejects(
+      generateMonthlyInvoices({
+        year,
+        month,
+        executor: {
+          async query(sql) {
+            calls.push(sql);
+            return { rows: [] };
+          },
+        },
+      }),
+      (error) => error instanceof FinanceCommandError &&
+        error.status === 409 &&
+        /starts in 2026-10/.test(error.safeMessage),
+    );
+    assert.deepEqual(calls, []);
+  }
 });
 
 test('final ledger verification rejects stale invoice status', async () => {

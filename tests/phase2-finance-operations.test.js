@@ -334,6 +334,62 @@ test('monthly readiness reports hard blockers and monthly generation visibly blo
   assert.match(invoicesSource, /getMonthlyBillingReadiness/);
 });
 
+test('canonical readiness starts in October 2026 without bypassing configuration checks', async () => {
+  const { getMonthlyBillingReadiness } = require('../services/monthlyBillingReadiness');
+  const configuredPrices = [
+    { service_key: 'tuition', amount: 2350, billing_mode: 'standalone',
+      bundle_key: null, included_service_keys: [] },
+    { service_key: 'boarding', amount: 1600, billing_mode: 'bundle',
+      bundle_key: 'harmony_boarding_package', included_service_keys: ['transport', 'aftercare'] },
+    { service_key: 'transport', amount: 650, billing_mode: 'standalone',
+      bundle_key: null, included_service_keys: [] },
+    { service_key: 'aftercare', amount: 550, billing_mode: 'standalone',
+      bundle_key: null, included_service_keys: [] },
+  ];
+  const run = async (period, configured = true) => {
+    const calls = [];
+    const result = await getMonthlyBillingReadiness(period, { async query(sql) {
+      calls.push(sql);
+      if (/FROM users/.test(sql)) return { rows: configured
+        ? [{ id: 61, student_number: 'BOUNDARY-61' }]
+        : [] };
+      if (/FROM service_prices/.test(sql)) return { rows: configuredPrices };
+      if (/FROM learner_discount_assignments/.test(sql)) return { rows: [] };
+      if (/FROM service_enrollments/.test(sql)) return { rows: configured
+        ? [{ id: 1, student_id: 61, service_key: 'tuition',
+          effective_start: `${period}-01`, effective_end: null, state: 'active' }]
+        : [] };
+      return { rows: [] };
+    } });
+    return { result, calls };
+  };
+
+  for (const period of ['2026-09', '2025-12']) {
+    const { result, calls } = await run(period);
+    assert.equal(result.ready, false);
+    assert.equal(result.hardFailures[0].code, 'before_canonical_billing_start');
+    assert.deepEqual(calls, []);
+  }
+
+  const incompleteOctober = await run('2026-10', false);
+  assert.equal(incompleteOctober.result.ready, false);
+  assert.ok(incompleteOctober.result.hardFailures
+    .some((failure) => failure.code === 'no_active_learners'));
+  assert.equal(incompleteOctober.result.hardFailures
+    .some((failure) => failure.code === 'before_canonical_billing_start'), false);
+
+  assert.equal((await run('2026-10')).result.ready, true);
+  assert.equal((await run('2027-03')).result.ready, true);
+});
+
+test('canonical start boundary leaves historical invoice read contracts unchanged', () => {
+  const ledgerSource = fs.readFileSync(project('services/financeLedger.js'), 'utf8');
+  const invoiceRoutes = fs.readFileSync(project('routes/invoices.js'), 'utf8');
+  assert.match(ledgerSource, /Historical invoices are never rebuilt from today's prices or flags/);
+  assert.match(invoiceRoutes, /router\.get\('\/ledger\/:studentId'/);
+  assert.doesNotMatch(ledgerSource, /CANONICAL_BILLING_START_PERIOD/);
+});
+
 test('monthly generation returns a visible server-side readiness block before the command', async () => {
   let commandCalled = false;
   mock('../config/database', {

@@ -24,6 +24,10 @@ const {
 } = require('./serviceEnrollmentService');
 const { getMonthlyBillingReadiness } = require('./monthlyBillingReadiness');
 const {
+  CANONICAL_BILLING_START_PERIOD,
+  isBeforeCanonicalBillingStart,
+} = require('./canonicalBillingPeriod');
+const {
   acquireInvoiceObligationLocks,
   invoiceObligationLockKeys,
   normaliseCategory,
@@ -1484,6 +1488,13 @@ async function generateMonthlyInvoices(options = {}) {
     throw new FinanceCommandError('Invalid billing period', 400, 'A valid billing month and year are required.');
   }
   const period = `${year}-${String(month).padStart(2, '0')}`;
+  if (isBeforeCanonicalBillingStart(period)) {
+    throw new FinanceCommandError(
+      `Canonical monthly billing cannot generate ${period}`,
+      409,
+      `Canonical monthly billing starts in ${CANONICAL_BILLING_START_PERIOD}.`,
+    );
+  }
   const periodStart = `${period}-01`;
   const dueDate = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
   const operationKey = idempotencyDetails(options.idempotencyKey) ||
