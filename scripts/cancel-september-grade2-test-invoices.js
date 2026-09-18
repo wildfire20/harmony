@@ -267,7 +267,6 @@ async function execute({
       RETURNING id
     `, [EXPECTED_INVOICE_IDS]);
     if (updated.rowCount !== 118) throw new Error('Not every verified invoice was cancelled');
-    if (injectedFailure) throw new Error('Injected cancellation failure');
 
     const learnerIds = [...new Set(rows.map((row) => Number(row.student_id)))].sort((a, b) => a - b);
     const actorName = `${actor.rows[0].first_name || ''} ${actor.rows[0].last_name || ''}`.trim();
@@ -276,15 +275,16 @@ async function execute({
         (user_id,user_name,user_role,action,entity_type,entity_id,details)
       VALUES ($1,$2,$3,'september_test_invoices_cancelled','invoice',NULL,
         jsonb_build_object(
-          'operation_key',$4,'reason',$5,'invoice_ids',$6::jsonb,
-          'learner_ids',$7::jsonb,'invoice_count',118,'learner_count',$8,
-          'preflight_sha256',$9,'cancelled_at',CURRENT_TIMESTAMP
+          'operation_key',$4::text,'reason',$5::text,'invoice_ids',$6::jsonb,
+          'learner_ids',$7::jsonb,'invoice_count',118,'learner_count',$8::integer,
+          'preflight_sha256',$9::text,'cancelled_at',CURRENT_TIMESTAMP
         ))
     `, [
       actorId, actorName, actor.rows[0].role, OPERATION_KEY, REASON,
       JSON.stringify(EXPECTED_INVOICE_IDS), JSON.stringify(learnerIds),
       learnerIds.length, expectedPreflightSha256,
     ]);
+    if (injectedFailure) throw new Error('Injected cancellation failure');
 
     const afterRows = await readCandidates(client, true);
     assertExactIdentity(afterRows);
@@ -328,4 +328,5 @@ module.exports = {
   sha256,
   EXPECTED_INVOICE_IDS,
   EXPECTED_PREFLIGHT_SHA256,
+  readCandidates,
 };
