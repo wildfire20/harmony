@@ -36,7 +36,7 @@ const ParentInvoices = ({ child }) => {
   const [tab, setTab] = useState('invoices');
   const [invoices, setInvoices] = useState([]);
   const [serviceComponents, setServiceComponents] = useState([]);
-  const [totals, setTotals] = useState({ totalDue: 0, totalPaid: 0, outstanding: 0, credit: 0 });
+  const [totals, setTotals] = useState({ totalDue: 0, totalPaid: 0, outstanding: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [banking, setBanking] = useState(null);
@@ -96,7 +96,7 @@ const ParentInvoices = ({ child }) => {
       {tab === 'invoices' && (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
              <div className="bg-[#19324a] rounded-2xl p-4 text-white text-center">
                <p className="text-[#c9dddf] text-xs font-medium">Total Billed</p>
               <p className="text-lg font-bold mt-0.5">{R(totals.totalDue)}</p>
@@ -109,16 +109,7 @@ const ParentInvoices = ({ child }) => {
               <p className="text-white/80 text-xs font-medium">Outstanding invoices</p>
               <p className="text-lg font-bold mt-0.5">{R(totals.outstanding)}</p>
             </div>
-            <div className={`${Number(totals.credit || totals.unallocated || 0) > 0 ? 'bg-amber-500' : 'bg-gray-400'} rounded-2xl p-4 text-white text-center`}>
-              <p className="text-white/80 text-xs font-medium">Unallocated payments</p>
-              <p className="text-lg font-bold mt-0.5">{R(totals.credit || totals.unallocated || 0)}</p>
-            </div>
           </div>
-          {Number(totals.credit || totals.unallocated || 0) > 0 && (
-            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-4 text-sm">
-              These funds are recorded but have not yet been applied to an invoice. Outstanding invoices and unallocated payments are shown separately until Admin completes reconciliation.
-            </div>
-          )}
 
           {/* Enrolled services */}
           {serviceComponents.length > 0 && (

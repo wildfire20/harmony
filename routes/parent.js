@@ -305,6 +305,20 @@ router.get('/announcements', requireParent, async (req, res) => {
 });
 
 // ─── GET /api/parent/invoices ─────────────────────────────────────────────────
+function parentSafeInvoiceLedger(ledger = {}) {
+  const totals = ledger.totals || {};
+  return {
+    invoices: ledger.invoices || [],
+    transactions: (ledger.transactions || []).filter((transaction) => transaction.invoice_id != null),
+    serviceComponents: ledger.service_components || [],
+    totals: {
+      totalDue: Number(totals.totalDue || 0),
+      totalPaid: Number(totals.totalPaid || 0),
+      outstanding: Number(totals.outstanding || 0),
+    },
+  };
+}
+
 router.get('/invoices', requireParent, async (req, res) => {
   try {
     const child = await resolveChild(req.user.id, req.query.child_id);
@@ -313,7 +327,7 @@ router.get('/invoices', requireParent, async (req, res) => {
       invoices: [],
       transactions: [],
       serviceComponents: [],
-      totals: { totalDue: 0, totalPaid: 0, outstanding: 0, overpaid: 0, unallocated: 0, credit: 0, netOutstanding: 0 },
+      totals: { totalDue: 0, totalPaid: 0, outstanding: 0 },
       child: null,
       children,
     });
@@ -322,10 +336,7 @@ router.get('/invoices', requireParent, async (req, res) => {
     // particular, do not apply an enrollment-date filter here: carried-forward
     // arrears are real ledger entries and must reconcile with Admin.
     res.json({
-      invoices: ledger.invoices,
-      transactions: ledger.transactions,
-      serviceComponents: ledger.service_components,
-      totals: ledger.totals,
+      ...parentSafeInvoiceLedger(ledger),
       child,
       children,
     });
@@ -1457,3 +1468,4 @@ router.post('/admin/direct-link', requireAdmin, async (req, res) => {
 module.exports = router;
 module.exports.validatePushSubscription = validatePushSubscription;
 module.exports.safePushEndpoint = safePushEndpoint;
+module.exports.parentSafeInvoiceLedger = parentSafeInvoiceLedger;
