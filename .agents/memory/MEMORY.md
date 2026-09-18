@@ -15,3 +15,4 @@
 - [Canonical finance core](canonical-finance-core.md) — future billing uses effective enrollments, immutable snapshots/events, normalized proof identities, and one guarded command layer.
 - [Finance date-only boundaries](finance-date-only-boundaries.md) — PostgreSQL financial DATE fields must cross read boundaries as canonical text, never timezone-converted Date objects.
 - [Finance release phases](finance-release-phases.md) — phase strictness and disposable release fixtures must stay aligned with the effective billing policy.
+- [Terminal invoice cancellation](terminal-invoice-cancellation.md) — Cancelled invoices remain immutable Admin evidence but are excluded from active Parent and payment projections.

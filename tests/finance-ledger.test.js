@@ -221,7 +221,7 @@ test('manual edit/delete routes reverse exact allocations instead of period-wide
   assert.doesNotMatch(editDelete, /DELETE FROM payment_transactions/);
 });
 
-function reversalExecutor({ carriedForward = false, conflictOnInsert = false } = {}) {
+function reversalExecutor({ carriedForward = false, cancelled = false, conflictOnInsert = false } = {}) {
   const state = {
     paid: carriedForward ? 50 : 50,
     due: carriedForward ? 100 : 100,
@@ -256,7 +256,7 @@ function reversalExecutor({ carriedForward = false, conflictOnInsert = false } =
         return {
           rows: [{
             id: 1, student_id: 7, amount_due: state.due, amount_paid: state.paid,
-            status: carriedForward ? 'Carried Forward' : 'Partial',
+            status: cancelled ? 'Cancelled' : carriedForward ? 'Carried Forward' : 'Partial',
             due_date: '2025-12-31',
           }],
         };
@@ -315,6 +315,16 @@ test('reversal is idempotent and duplicate unique conflicts return the existing 
   const conflict = await reversePayment(conflictExecutor, { transactionId: 10, recordedBy: 99 });
   assert.equal(conflict.reversalId, 91);
   assert.equal(conflict.alreadyReversed, true);
+});
+
+test('reversal cannot reactivate or mutate a Cancelled invoice', async () => {
+  const executor = reversalExecutor({ cancelled: true });
+  await assert.rejects(
+    reversePayment(executor, { transactionId: 10, recordedBy: 99 }),
+    /Cancelled invoice cannot be reversed or edited/,
+  );
+  assert.equal(executor.state.paid, 50);
+  assert.equal(executor.state.reversalId, null);
 });
 
 test('concurrent reversal requests serialize on the original payment lock', async () => {

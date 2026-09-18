@@ -247,7 +247,8 @@ async function validateExactObligations(executor, studentId, obligations) {
       );
     }
     const invoice = byId.get(obligation.invoice_id);
-    if (!invoice || Number(invoice.amount_paid) >= Number(invoice.amount_due)) {
+    if (!invoice || invoice.status === 'Cancelled' ||
+        Number(invoice.amount_paid) >= Number(invoice.amount_due)) {
       throw new FinanceCommandError(
         `Invoice ${obligation.invoice_id} is no longer outstanding`,
         409,
@@ -330,7 +331,7 @@ async function verifyLedger(executor, invoiceIds = []) {
     if (due < 0 || paid < 0) {
       throw new FinanceCommandError('Ledger verification failed: negative invoice balance', 409);
     }
-    if (invoice.status === 'Carried Forward') return;
+    if (invoice.status === 'Carried Forward' || invoice.status === 'Cancelled') return;
     const expected = paid > due ? 'Overpaid' : due === 0 || paid >= due ? 'Paid' :
       paid > 0 ? 'Partial' : 'Unpaid';
     if (invoice.status !== expected) {
@@ -527,6 +528,7 @@ async function executePayment(executor, options) {
       SELECT id
       FROM invoices
       WHERE student_id=$1 AND amount_paid < amount_due
+        AND status <> 'Cancelled'
       ORDER BY due_date, id
       FOR SHARE
     `, [studentId]);
@@ -1184,6 +1186,13 @@ async function editArrears(options = {}) {
       FOR UPDATE
     `, [invoiceId])).rows[0];
     if (!current) throw new FinanceCommandError('Invoice not found', 404);
+    if (current.status === 'Cancelled') {
+      throw new FinanceCommandError(
+        'Cancelled invoices cannot be edited',
+        409,
+        'This invoice is cancelled and cannot be changed.',
+      );
+    }
     if (!String(current.description || '').toLowerCase().includes('arrears') &&
         current.status !== 'Carried Forward') {
       throw new FinanceCommandError(
@@ -1241,7 +1250,7 @@ async function recalculateInvoiceStatuses(options = {}) {
           ELSE 'Unpaid'
         END,
         updated_at = NOW()
-      WHERE status <> 'Carried Forward'
+      WHERE status NOT IN ('Carried Forward', 'Cancelled')
         AND status IS DISTINCT FROM (
         CASE
           WHEN amount_paid > amount_due THEN 'Overpaid'
@@ -1290,6 +1299,13 @@ async function carryForward(options = {}) {
     `, [studentId, sourceIds])).rows;
     if (sources.length !== sourceIds.length) {
       throw new FinanceCommandError('One or more carry-forward invoices was not found', 409);
+    }
+    if (sources.some((source) => source.status === 'Cancelled')) {
+      throw new FinanceCommandError(
+        'Cancelled invoices cannot be carried forward',
+        409,
+        'A cancelled invoice cannot be included in arrears.',
+      );
     }
     const outstanding = money(sources.reduce((sum, row) =>
       sum + Math.max(0, Number(row.amount_due) - Number(row.amount_paid)), 0));
@@ -1355,7 +1371,7 @@ async function carryForwardBatch(options = {}) {
         FROM invoices
         WHERE student_id=$1
           AND EXTRACT(YEAR FROM due_date)=$2
-          AND status NOT IN ('Paid','Overpaid','Carried Forward')
+          AND status NOT IN ('Paid','Overpaid','Carried Forward','Cancelled')
           AND amount_paid < amount_due
         ORDER BY id
         FOR SHARE
@@ -1377,7 +1393,7 @@ async function carryForwardBatch(options = {}) {
         SELECT id
         FROM invoices
         WHERE id=ANY($1::integer[]) AND student_id=$2
-          AND status NOT IN ('Paid','Overpaid','Carried Forward')
+          AND status NOT IN ('Paid','Overpaid','Carried Forward','Cancelled')
           AND amount_paid < amount_due
         ORDER BY id
         FOR UPDATE

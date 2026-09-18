@@ -233,6 +233,19 @@ async function applyFinanceCoreMigration(pool, schema) {
   }
 }
 
+async function applyFinanceInvoiceCancellationMigration(pool, schema) {
+  const migration = fs.readFileSync(
+    path.join(__dirname, '..', 'migrations', 'finance_invoice_cancellation.sql'), 'utf8',
+  );
+  const client = await pool.connect();
+  try {
+    await client.query(`SET search_path TO ${quoteIdentifier(schema)}`);
+    await client.query(migration);
+  } finally {
+    client.release();
+  }
+}
+
 async function applyFinanceOperationsReadinessMigration(pool, schema) {
   const migration = fs.readFileSync(
     path.join(__dirname, '..', 'migrations', 'finance_operations_readiness_v3.sql'), 'utf8',
@@ -359,6 +372,8 @@ async function runSuite() {
     }
 
     await applyFinanceCoreMigration(pool, schema);
+    await applyFinanceInvoiceCancellationMigration(pool, schema);
+    await applyFinanceInvoiceCancellationMigration(pool, schema);
 
     const prematureV4Client = await database.pool.connect();
     try {
@@ -525,6 +540,55 @@ async function runSuite() {
         (3, 'sibling', 'fixed', 100, 'tuition',
          'Approved sibling gate discount', '2029-01-01');
     `);
+
+    const cancellationTriggerInvoice = (await database.query(`
+      INSERT INTO invoices
+        (student_id, student_number, amount_due, amount_paid, due_date, status,
+         reference_number, finance_origin, invoice_kind, invoice_source)
+      VALUES
+        (3, 'FIN-GATE-001', 77, 0, '2026-09-24', 'Unpaid',
+         'CANCELLATION-TRIGGER-GATE', 'legacy', 'one_off', 'integration_test')
+      RETURNING id
+    `)).rows[0];
+    await assert.rejects(
+      database.query(`UPDATE invoices SET status='Cancelled' WHERE id=$1`, [cancellationTriggerInvoice.id]),
+      /explicit canonical finance command transaction/,
+    );
+    const cancellationClient = await database.pool.connect();
+    try {
+      await cancellationClient.query('BEGIN');
+      await cancellationClient.query(`SELECT set_config('harmony.finance_command','canonical',true)`);
+      await cancellationClient.query(
+        `UPDATE invoices SET status='Cancelled' WHERE id=$1`,
+        [cancellationTriggerInvoice.id],
+      );
+      await cancellationClient.query('COMMIT');
+      const cancelled = (await cancellationClient.query(
+        `SELECT status, amount_due::text, amount_paid::text FROM invoices WHERE id=$1`,
+        [cancellationTriggerInvoice.id],
+      )).rows[0];
+      assert.deepEqual(cancelled, {
+        status: 'Cancelled',
+        amount_due: '77.00',
+        amount_paid: '0.00',
+      });
+
+      await cancellationClient.query('BEGIN');
+      await cancellationClient.query(`SELECT set_config('harmony.finance_command','canonical',true)`);
+      await cancellationClient.query(
+        `UPDATE invoices SET status='Unpaid' WHERE id=$1`,
+        [cancellationTriggerInvoice.id],
+      );
+      await cancellationClient.query('ROLLBACK');
+      const afterRollback = (await cancellationClient.query(
+        `SELECT status FROM invoices WHERE id=$1`,
+        [cancellationTriggerInvoice.id],
+      )).rows[0];
+      assert.equal(afterRollback.status, 'Cancelled');
+    } finally {
+      cancellationClient.release();
+    }
+    await database.query('DELETE FROM invoices WHERE id=$1', [cancellationTriggerInvoice.id]);
     await database.query(`
       INSERT INTO service_enrollments
         (student_id, service_key, effective_start, effective_end, state, idempotency_key)

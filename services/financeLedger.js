@@ -17,7 +17,7 @@ const { appendPeriodFilters, parseInvoiceFilterQuery } = require('../utils/invoi
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const nonNegative = (value) => Math.max(0, money(value));
-const INVOICE_STATUSES = ['Unpaid', 'Partial', 'Paid', 'Overpaid', 'Carried Forward'];
+const INVOICE_STATUSES = ['Unpaid', 'Partial', 'Paid', 'Overpaid', 'Carried Forward', 'Cancelled'];
 
 function dateOnlyParts(value) {
   if (value == null || value === '') return null;
@@ -35,7 +35,7 @@ function dateOnlyParts(value) {
 }
 
 function invoiceStatus(amountDue, amountPaid, originalStatus) {
-  if (originalStatus === 'Carried Forward') return originalStatus;
+  if (originalStatus === 'Carried Forward' || originalStatus === 'Cancelled') return originalStatus;
   const due = money(amountDue);
   const paid = money(amountPaid);
   if (paid > due) return 'Overpaid';
@@ -86,6 +86,7 @@ function normaliseInvoiceLines(rows) {
 function invoiceStatusExpression(alias = 'i') {
   return `(CASE
     WHEN ${alias}.status = 'Carried Forward' THEN 'Carried Forward'
+    WHEN ${alias}.status = 'Cancelled' THEN 'Cancelled'
     WHEN COALESCE(${alias}.amount_paid, 0) > COALESCE(${alias}.amount_due, 0) THEN 'Overpaid'
     WHEN COALESCE(${alias}.amount_due, 0) = 0 THEN 'Paid'
     WHEN COALESCE(${alias}.amount_paid, 0) >= COALESCE(${alias}.amount_due, 0) THEN 'Paid'
@@ -627,6 +628,7 @@ async function getStudentLedger(studentId, executor = db) {
     const status = invoiceStatus(amountDue, amountPaid, row.status);
     const carryForwardHistory = carryForwardSourceIds.has(Number(row.id)) ||
       status === 'Carried Forward';
+    const cancelled = status === 'Cancelled';
     const categoryBalances = invoiceCategoryBalances(
       lines,
       amountDue,
@@ -641,7 +643,7 @@ async function getStudentLedger(studentId, executor = db) {
     return {
       ...row,
       status,
-      counted_in_totals: !carryForwardHistory,
+      counted_in_totals: !carryForwardHistory && !cancelled,
       amount_due: amountDue,
       amount_paid: amountPaid,
       outstanding_balance: outstanding,
@@ -691,7 +693,7 @@ async function getStudentLedger(studentId, executor = db) {
     };
   });
 
-  const countedInvoices = invoices.filter((invoice) => invoice.status !== 'Carried Forward');
+  const countedInvoices = invoices.filter((invoice) => invoice.counted_in_totals);
   transactions.forEach((transaction) => {
     if (transaction.invoice_id == null) transaction.review_required = true;
   });
@@ -774,7 +776,7 @@ async function getFinanceSummary(filters = {}, executor = db) {
   // results cannot accidentally reintroduce carry-forward double counting.
   const rows = invoiceResult.rows
     .map((row) => ({ ...row, status: invoiceStatus(row.amount_due, row.amount_paid, row.status) }))
-    .filter((row) => row.status !== 'Carried Forward');
+    .filter((row) => row.status !== 'Carried Forward' && row.status !== 'Cancelled');
   const summary = {
     totalInvoices: rows.length,
     paidCount: rows.filter((row) => row.status === 'Paid').length,
@@ -895,6 +897,7 @@ async function allocatePayment(executor, {
            due_date
     FROM invoices
     WHERE student_id = $1 AND amount_paid < amount_due
+      AND status <> 'Cancelled'
       AND ($2::integer IS NULL OR id = $2)
       AND ($3::integer[] IS NULL OR id = ANY($3::integer[]))
     ORDER BY due_date ASC, id ASC
@@ -1141,6 +1144,9 @@ async function reversePayment(executor, { transactionId, recordedBy, description
     `, [payment.invoice_id]);
     if (!invoiceResult.rows.length) throw new Error('Payment invoice not found');
     const invoice = invoiceResult.rows[0];
+    if (invoice.status === 'Cancelled') {
+      throw new Error('Payments linked to a Cancelled invoice cannot be reversed or edited');
+    }
     if (invoice.status === 'Carried Forward') {
       // Carry-forward preserves the source invoice as audit history. Its
       // replacement carries the remaining balance, so undoing an old
@@ -1152,7 +1158,8 @@ async function reversePayment(executor, { transactionId, recordedBy, description
         successorResult = await executor.query(`
           SELECT id, amount_due, amount_paid, status
           FROM invoices
-          WHERE id = $1 AND student_id = $2 AND status <> 'Carried Forward'
+          WHERE id = $1 AND student_id = $2
+            AND status NOT IN ('Carried Forward', 'Cancelled')
           FOR UPDATE
         `, [invoice.carried_forward_to_invoice_id, invoice.student_id]);
       } else {
@@ -1165,7 +1172,7 @@ async function reversePayment(executor, { transactionId, recordedBy, description
           FROM invoices
           WHERE student_id = $1
             AND id <> $2
-            AND status <> 'Carried Forward'
+            AND status NOT IN ('Carried Forward', 'Cancelled')
             AND description = $3
             AND due_date >= $4
           ORDER BY due_date ASC, id ASC

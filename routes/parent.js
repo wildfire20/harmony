@@ -308,7 +308,7 @@ router.get('/announcements', requireParent, async (req, res) => {
 function parentSafeInvoiceLedger(ledger = {}) {
   const totals = ledger.totals || {};
   return {
-    invoices: ledger.invoices || [],
+    invoices: (ledger.invoices || []).filter((invoice) => invoice.status !== 'Cancelled'),
     transactions: (ledger.transactions || []).filter((transaction) => transaction.invoice_id != null),
     serviceComponents: ledger.service_components || [],
     totals: {

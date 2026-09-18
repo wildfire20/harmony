@@ -197,6 +197,7 @@ async function getPayableObligations(studentId, executor = db, options = {}) {
            i.invoice_kind, i.invoice_source, i.finance_origin
     FROM invoices i
     WHERE i.student_id = $1
+      AND i.status <> 'Cancelled'
     ORDER BY i.due_date ASC NULLS LAST, i.id ASC
   `, [studentId]);
   if (!invoiceResult.rows.length) return [];

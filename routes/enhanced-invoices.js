@@ -96,6 +96,7 @@ function exportServiceCharges(charges) {
 }
 
 function paymentStatusForInvoice(invoice, asOf = new Date()) {
+  if (invoice.status === 'Cancelled') return 'Cancelled';
   const due = Number(invoice.net_due ?? invoice.amount_due) || 0;
   const paid = Number(invoice.allocated_effective_payments ?? invoice.amount_paid) || 0;
   if (paid > due) return 'Overpaid';
@@ -907,7 +908,7 @@ router.get('/student-payment-history/:studentNumber', [
                     'July', 'August', 'September', 'October', 'November', 'December'];
     authoritativeLedger.invoices.forEach(inv => {
       if (!inv.counted_in_totals && !inv.carry_forward_history &&
-          inv.status !== 'Carried Forward') return;
+          !['Carried Forward', 'Cancelled'].includes(inv.status)) return;
       if (!inv.due_date) return;
       const [year, monthNum] = dateOnly(inv.due_date).split('-').map(Number);
       const monthIndex = monthNum - 1;
@@ -925,7 +926,9 @@ router.get('/student-payment-history/:studentNumber', [
           ? Number(payable.amount_allocated) || 0
           : (oneOffLines.length === 1 && !recurringLines.length
             ? inv.allocated_effective_payments : 0);
-        const oneOffOutstanding = payable?.amount_outstanding != null
+        const oneOffOutstanding = inv.status === 'Cancelled'
+          ? 0
+          : payable?.amount_outstanding != null
           ? Number(payable.amount_outstanding) || 0
           : (oneOffLines.length === 1 && !recurringLines.length
             ? inv.outstanding_balance : Number(line.amount) || 0);
@@ -948,7 +951,7 @@ router.get('/student-payment-history/:studentNumber', [
         monthNumber: monthNum,
         amountDue: inv.net_due,
         amountPaid: inv.allocated_effective_payments,
-        outstanding: inv.outstanding_balance,
+        outstanding: inv.status === 'Cancelled' ? 0 : inv.outstanding_balance,
         credit: inv.credit,
         grossCharges: inv.gross_charges,
          serviceCharges: inv.charge_totals || {},
@@ -1614,7 +1617,7 @@ router.get('/student-payments/:studentId', [
              GREATEST(amount_due - amount_paid, 0) AS outstanding_balance, status
       FROM invoices
       WHERE student_id = $1
-        AND status <> 'Carried Forward'
+        AND status NOT IN ('Carried Forward', 'Cancelled')
         AND amount_paid < amount_due
       ORDER BY due_date ASC, id ASC
     `, [studentId]);
