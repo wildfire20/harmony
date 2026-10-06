@@ -356,7 +356,7 @@ router.post('/discount-assignments', [
           (!Number.isFinite(numericPercentage) || numericPercentage < 0 || numericPercentage > 100))) {
       return res.status(400).json({ success: false, message: 'Invalid discount value' });
     }
-    const client = await db.connect();
+    const client = await db.pool.connect();
     let result;
     try {
       await client.query('BEGIN');
@@ -408,7 +408,7 @@ router.post('/discount-assignments/:id/deactivate', [
   authorize('admin', 'super_admin'),
 ], async (req, res) => {
   try {
-    const client = await db.connect();
+    const client = await db.pool.connect();
     let result;
     try {
       await client.query('BEGIN');
