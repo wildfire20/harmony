@@ -85,6 +85,15 @@ function generateTempPassword() {
   return generateKidFriendlyPassword();
 }
 
+function normalizeOptionalParentEmail(email) {
+  if (email == null) return null;
+  if (typeof email !== 'string') {
+    throw Object.assign(new Error('Email address must be text'), { status: 400 });
+  }
+  // Missing email must remain NULL; empty strings collide with users_email_key.
+  return email.trim() || null;
+}
+
 async function getChildren(parentId, executor = db) {
   const result = await executor.query(`
     SELECT u.id, u.first_name, u.last_name, u.student_number,
@@ -817,6 +826,7 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
 
   let client;
   try {
+    const normalizedEmail = normalizeOptionalParentEmail(email);
     client = await db.pool.connect();
     try {
       await client.query('BEGIN');
@@ -854,7 +864,7 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
        INSERT INTO users (first_name, last_name, phone_number, email, password, role, is_active, must_change_password)
        VALUES ($1, $2, $3, $4, $5, 'parent', true, true)
         RETURNING id, first_name, last_name, phone_number, role, created_at
-      `, [first_name, last_name, normalizedPhone, email || null, hashed]);
+      `, [first_name, last_name, normalizedPhone, normalizedEmail, hashed]);
 
       parentId = userResult.rows[0].id;
     }
@@ -888,8 +898,8 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
     client.release();
     if (!existing.rows.length) {
       activationLink = parentPortalUrl('/parent/activate', activationToken);
-      if (email) {
-        try { await sendParentAuthEmail(email, activationToken, 'activation', first_name); }
+      if (normalizedEmail) {
+        try { await sendParentAuthEmail(normalizedEmail, activationToken, 'activation', first_name); }
         catch (emailError) { console.error('Parent activation email failed after commit:', emailError.message); }
       }
     }
@@ -910,6 +920,9 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
     }
   } catch (err) {
     if (err.status) return res.status(err.status).json({ message: err.message });
+    if (err.code === '23505' && err.constraint === 'users_email_key') {
+      return res.status(409).json({ message: 'This email address is already used by another account.' });
+    }
     console.error('Create parent error:', err);
     res.status(500).json({ message: 'Server error' });
   }
@@ -947,7 +960,7 @@ router.put('/admin/:parentId', requireAdmin, async (req, res) => {
     const params = [];
     if (first_name  !== undefined) { params.push(first_name);                    sets.push(`first_name=$${params.length}`); }
     if (last_name   !== undefined) { params.push(last_name);                     sets.push(`last_name=$${params.length}`); }
-    if (email       !== undefined) { params.push(email);                         sets.push(`email=$${params.length}`); }
+    if (email       !== undefined) { params.push(normalizeOptionalParentEmail(email)); sets.push(`email=$${params.length}`); }
     if (is_active   !== undefined) { params.push(is_active);                     sets.push(`is_active=$${params.length}`); }
     if (phone_number !== undefined) { params.push(normalizePhone(phone_number)); sets.push(`phone_number=$${params.length}`); }
     if (password) {
@@ -987,6 +1000,10 @@ router.put('/admin/:parentId', requireAdmin, async (req, res) => {
     if (client) {
       try { await client.query('ROLLBACK'); } catch (_) {}
       client.release();
+    }
+    if (err.status) return res.status(err.status).json({ message: err.message });
+    if (err.code === '23505' && err.constraint === 'users_email_key') {
+      return res.status(409).json({ message: 'This email address is already used by another account.' });
     }
     console.error('Update parent error:', err);
     res.status(500).json({ message: 'Server error' });

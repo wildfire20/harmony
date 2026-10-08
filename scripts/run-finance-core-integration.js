@@ -19,6 +19,7 @@ if (!String(process.env.FINANCE_TEST_DATABASE_URL || '').trim()) {
       path.join(__dirname, '..', 'tests', 'finance-core-postgres.integration.test.js'),
       path.join(__dirname, '..', 'tests', 'finance-invoice-cancellation-postgres.integration.test.js'),
       path.join(__dirname, '..', 'tests', 'admin-discount-assignments-postgres.integration.test.js'),
+      path.join(__dirname, '..', 'tests', 'parent-admin-contact-postgres.integration.test.js'),
     ],
     { stdio: 'inherit', env: process.env },
   );
