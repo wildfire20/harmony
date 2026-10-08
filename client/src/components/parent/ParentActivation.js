@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, CheckCircle, Eye, EyeOff, Mail, Phone } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import ParentPasswordRequirements, { passwordIsValid } from './ParentPasswordRequirements';
 import './ParentPortal.css';
 import { useAppConfig } from '../../contexts/AppConfigContext';
@@ -36,6 +36,10 @@ const saveParentSession = (data) => {
 
 const ParentActivation = () => {
   const navigate = useNavigate();
+  const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  const tokenMode = params.has('token');
+  const activationToken = params.get('token') || '';
   const { parentSelfActivationEnabled, configLoading } = useAppConfig();
   const [stage, setStage] = useState(1);
   const [form, setForm] = useState({ phone_number: '', email: '', email_confirmation: '' });
@@ -48,6 +52,41 @@ const ParentActivation = () => {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [verification, setVerification] = useState(null);
+  const [linkIdentity, setLinkIdentity] = useState(null);
+  const [linkChecking, setLinkChecking] = useState(tokenMode);
+
+  useEffect(() => {
+    if (!tokenMode) return undefined;
+    let current = true;
+    setLinkChecking(true);
+    setLinkIdentity(null);
+    setStage(1);
+    setPassword('');
+    setConfirmation('');
+    setError('');
+    const validate = async () => {
+      try {
+        if (!activationToken) throw new Error('Invalid or expired activation link. Please ask your school for a new link.');
+        const response = await fetch(`/api/parent/activation/validate?token=${encodeURIComponent(activationToken)}`, {
+          credentials: 'include',
+          cache: 'no-store',
+          referrerPolicy: 'no-referrer',
+        });
+        const data = await responseMessage(response, 'We could not validate your activation link.');
+        if (!data.valid || !data.identity) throw new Error('Invalid or expired activation link. Please ask your school for a new link.');
+        if (current) {
+          setLinkIdentity(data.identity);
+          setStage(3);
+        }
+      } catch (validationError) {
+        if (current) setError(validationError.message);
+      } finally {
+        if (current) setLinkChecking(false);
+      }
+    };
+    validate();
+    return () => { current = false; };
+  }, [tokenMode, activationToken]);
 
   useEffect(() => {
     if (!cooldown) return undefined;
@@ -55,7 +94,7 @@ const ParentActivation = () => {
     return () => window.clearInterval(timer);
   }, [cooldown]);
 
-  if (configLoading || !parentSelfActivationEnabled) {
+  if (!tokenMode && (configLoading || !parentSelfActivationEnabled)) {
     return (
       <div className="parent-activation min-h-[100dvh] bg-[#17324d] px-4 py-6 sm:py-10">
         <div className="mx-auto flex min-h-[calc(100dvh-3rem)] w-full max-w-lg flex-col justify-center text-center">
@@ -157,16 +196,22 @@ const ParentActivation = () => {
 
   const completeActivation = async event => {
     event.preventDefault();
+    if (busy || (tokenMode && (!linkIdentity || linkChecking))) return;
     setError('');
     if (!passwordIsValid(password)) return setError('Password must be at least 8 characters.');
     if (password !== confirmation) return setError('Passwords do not match.');
     setBusy(true);
     try {
-      const response = await fetch(COMPLETE_PATH, {
+      const response = await fetch(tokenMode ? '/api/parent/activate' : COMPLETE_PATH, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        referrerPolicy: 'no-referrer',
+        body: JSON.stringify(tokenMode ? {
+          token: activationToken,
+          password,
+          password_confirmation: confirmation,
+        } : {
           phone_number: form.phone_number.trim(),
           email: form.email.trim(),
           password,
@@ -187,7 +232,8 @@ const ParentActivation = () => {
     }
   };
 
-  const stageTitle = stage === 1 ? 'Confirm your details' : stage === 2 ? 'Check your email' : 'Create your password';
+  const stageTitle = tokenMode ? (linkIdentity ? 'Create your password' : 'School-provided activation link')
+    : stage === 1 ? 'Confirm your details' : stage === 2 ? 'Check your email' : 'Create your password';
 
   return (
     <div className="parent-activation min-h-[100dvh] bg-[#17324d] px-4 py-6 sm:py-10">
@@ -197,11 +243,11 @@ const ParentActivation = () => {
             <img src="/images/harmony-logo.png" alt="Harmony Learning Institute" className="max-h-full max-w-full object-contain" />
           </div>
           <h1 className="text-2xl font-bold sm:text-3xl">Activate your Parent Portal</h1>
-          <p className="mt-2 text-sm text-[#c9dddf]">A quick, secure self-activation</p>
+          <p className="mt-2 text-sm text-[#c9dddf]">{tokenMode ? 'Secure activation with your school-provided link' : 'A quick, secure self-activation'}</p>
         </header>
 
         <div className="rounded-3xl bg-white p-5 shadow-[0_20px_55px_rgba(16,40,62,.25)] sm:p-8">
-          <div className="mb-7 flex items-center justify-between gap-2" aria-label={`Activation step ${stage} of 3`}>
+          {!tokenMode && <div className="mb-7 flex items-center justify-between gap-2" aria-label={`Activation step ${stage} of 3`}>
             {[1, 2, 3].map(number => (
               <React.Fragment key={number}>
                 <div className={`flex items-center gap-2 text-xs font-semibold ${stage >= number ? 'text-[#176b73]' : 'text-[#84929e]'}`}>
@@ -213,12 +259,20 @@ const ParentActivation = () => {
                 {number < 3 && <div className={`h-px flex-1 ${stage > number ? 'bg-[#2c7475]' : 'bg-[#dce6ea]'}`} />}
               </React.Fragment>
             ))}
-          </div>
+          </div>}
+
+          {tokenMode && (
+            <div className="mb-5 rounded-xl bg-[#f1f8f7] p-3 text-sm leading-6 text-[#526879]" role="status">
+              {linkChecking ? 'Checking your secure activation link…' : linkIdentity
+                ? <>Activate access for <strong>{linkIdentity.name}</strong><br />Registered mobile: {linkIdentity.phone}<br />No email address or email code is needed.</>
+                : 'This link cannot be used. Please ask your school office for a new activation link.'}
+            </div>
+          )}
 
           <div className="mb-5">
             <h2 className="text-xl font-bold text-[#19324a]">{stageTitle}</h2>
             <p className="mt-1 text-sm leading-6 text-[#617487]">
-              {stage === 1 && 'Use the mobile number registered with your school and an email address you can access.'}
+              {!tokenMode && stage === 1 && 'Use the mobile number registered with your school and an email address you can access.'}
               {stage === 2 && <>We emailed a six-digit code to <strong className="text-[#334b5d]">{form.email}</strong>.</>}
               {stage === 3 && 'Choose a password you will use when signing in.'}
             </p>
@@ -227,7 +281,7 @@ const ParentActivation = () => {
           {message && <div className="mb-4 rounded-xl border border-[#c9e4d7] bg-[#effaf3] p-3 text-sm text-[#17633d]" role="status" aria-live="polite">{message}</div>}
           {error && <div className="mb-4 rounded-xl border border-[#f0c8c0] bg-[#fff5f2] p-3 text-sm text-[#a94336]" role="alert">{error}</div>}
 
-          {stage === 1 && (
+          {!tokenMode && stage === 1 && (
             <form onSubmit={requestCode} className="space-y-4" noValidate>
               <div>
                 <label htmlFor="activation-mobile" className="mb-1.5 block text-sm font-semibold text-[#334b5d]">Registered mobile number</label>
@@ -253,7 +307,7 @@ const ParentActivation = () => {
             </form>
           )}
 
-          {stage === 2 && (
+          {!tokenMode && stage === 2 && (
             <form onSubmit={verifyCode} className="space-y-4" noValidate>
               <div>
                 <label htmlFor="activation-otp" className="mb-1.5 block text-sm font-semibold text-[#334b5d]">Six-digit email verification code</label>

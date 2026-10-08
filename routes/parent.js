@@ -1316,11 +1316,12 @@ router.post('/activation/complete', requireParentSelfActivation, activationCompl
 
 // Token-based activation and recovery never expose a database identifier.
 router.get('/activation/validate', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
   try {
     const token = String(req.query.token || '');
     const found = await db.query(`SELECT u.first_name,u.last_name,u.phone_number FROM parent_auth_tokens t
       JOIN users u ON u.id=t.user_id WHERE t.token_hash=$1 AND t.token_type='activation'
-      AND t.used_at IS NULL AND t.revoked_at IS NULL AND t.expires_at>NOW() AND u.role='parent'`, [hashToken(token)]);
+      AND t.used_at IS NULL AND t.revoked_at IS NULL AND t.expires_at>NOW() AND u.role='parent' AND u.is_active=true`, [hashToken(token)]);
     if (!found.rows.length) return res.status(400).json({ valid: false, message: 'Invalid or expired activation link' });
     const user = found.rows[0];
     const phone = String(user.phone_number || '');
@@ -1336,7 +1337,7 @@ router.post('/activate', async (req, res) => {
     const token = String(req.body?.token || '');
     const found = await db.query(`SELECT t.id,t.user_id FROM parent_auth_tokens t JOIN users u ON u.id=t.user_id
       WHERE t.token_hash=$1 AND t.token_type='activation' AND t.used_at IS NULL AND t.revoked_at IS NULL
-      AND t.expires_at>NOW() AND u.role='parent'`, [hashToken(token)]);
+      AND t.expires_at>NOW() AND u.role='parent' AND u.is_active=true`, [hashToken(token)]);
     if (!found.rows.length) return res.status(400).json({ message: 'Invalid or expired activation link' });
     if (!req.body.password || String(req.body.password).length < 8) {
       return res.status(400).json({ message: 'Password must be at least 8 characters' });
