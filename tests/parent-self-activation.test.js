@@ -38,6 +38,7 @@ const state = {
   nextChallenge: 1,
   nextSession: 1,
   failMail: false,
+  mailResult: { success: true },
   failInvalidation: false,
   failAudit: false,
   failSession: false,
@@ -72,6 +73,7 @@ function reset(next = parent()) {
   state.nextChallenge = 1;
   state.nextSession = 1;
   state.failMail = false;
+  state.mailResult = { success: true };
   state.failInvalidation = false;
   state.failAudit = false;
   state.failSession = false;
@@ -283,7 +285,7 @@ mock('../services/gmailService', {
   sendEmail: async (...args) => {
     if (state.failMail) throw new Error('mail provider failed');
     state.mail.push(args);
-    return { success: true };
+    return state.mailResult;
   },
   escapeHtml: value => String(value).replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -505,6 +507,62 @@ test('a Gmail failure is unusable even when its cleanup invalidation fails', asy
     method: 'POST', body: JSON.stringify({ challenge_id: state.challenges[0].id, otp: '000000' }),
   });
   assert.equal(verify.response.status, 400);
+  assert.equal(state.parents[0].parent_account_status, 'pending');
+});
+
+test('returned email failures never confirm delivery or return a successful OTP request', async () => {
+  for (const mailResult of [
+    { success: false, error: 'EMAIL_AUTH_FAILED' },
+    { success: false, error: 'EMAIL_CONFIGURATION_MISSING' },
+    { success: false, error: 'EMAIL_PERMISSION_DENIED' },
+    { success: false, error: 'EMAIL_RATE_LIMITED' },
+    { success: false, error: 'EMAIL_API_TIMEOUT' },
+    { success: true, skipped: true },
+    { success: 'true' },
+    null,
+    undefined,
+  ]) {
+    reset();
+    state.mailResult = mailResult;
+    const parentsBefore = clone(state.parents);
+    const linksBefore = clone(state.links);
+    const tokensBefore = clone(state.tokens);
+    const result = await json('/api/parent/activation/request', {
+      method: 'POST', body: JSON.stringify(activationInput('0731234567')),
+    });
+
+    assert.equal(result.response.status, 503);
+    assert.deepEqual(result.body, {
+      message: 'We could not send a verification code. Please try again later.',
+    });
+    assert.equal(state.challenges.length, 1);
+    assert.equal(state.challenges[0].delivery_confirmed_at, null);
+    assert.ok(state.challenges[0].invalidated_at);
+    assert.equal(state.queries.some(query => /SET delivery_confirmed_at=NOW\(\)/.test(query.sql)), false);
+    assert.deepEqual(state.parents, parentsBefore);
+    assert.deepEqual(state.links, linksBefore);
+    assert.deepEqual(state.tokens, tokensBefore);
+    assert.equal(state.sessions.length, 0);
+    assert.equal(state.audits.length, 0);
+  }
+});
+
+test('a returned email failure stays unusable with the correct OTP if cleanup fails', async () => {
+  state.mailResult = { success: false, error: 'EMAIL_AUTH_FAILED' };
+  state.failInvalidation = true;
+  const result = await json('/api/parent/activation/request', {
+    method: 'POST', body: JSON.stringify(activationInput('0731234567')),
+  });
+  assert.equal(result.response.status, 503);
+  assert.equal(state.challenges[0].delivery_confirmed_at, null);
+  assert.equal(state.challenges[0].invalidated_at, null);
+  const otp = state.mail.at(-1)[2].match(/code is <strong>(\d{6})<\/strong>/)[1];
+  const verify = await json('/api/parent/activation/verify', {
+    method: 'POST', body: JSON.stringify({ challenge_id: state.challenges[0].id, otp }),
+  });
+  assert.equal(verify.response.status, 400);
+  assert.equal(verify.body.completion_token, undefined);
+  assert.equal(state.challenges[0].verified_at, null);
   assert.equal(state.parents[0].parent_account_status, 'pending');
 });
 

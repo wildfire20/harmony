@@ -483,6 +483,14 @@ function checkEnvironment(environment = process.env, source = null) {
     configured: names.every((name) => String(environment[name] || '').trim().length > 0),
     missing: names.filter((name) => !String(environment[name] || '').trim()),
   });
+  const selectedProvider = String(environment.EMAIL_PROVIDER || 'gmail').trim().toLowerCase();
+  const emailProviderValid = ['gmail', 'resend'].includes(selectedProvider);
+  const emailTransport = {
+    provider: emailProviderValid ? selectedProvider : 'unsupported',
+    ...configured(selectedProvider === 'resend'
+      ? ['RESEND_API_KEY', 'RESEND_FROM_EMAIL'] : gmailVars),
+  };
+  emailTransport.configured = emailProviderValid && emailTransport.configured;
   const contractSource = source || fs.readFileSync(path.join(__dirname, '..', 'services', 'parentAuth.js'), 'utf8');
   const rememberedSession = {
     secureInProduction: /NODE_ENV\s*===\s*['"]production['"]/.test(contractSource),
@@ -495,6 +503,7 @@ function checkEnvironment(environment = process.env, source = null) {
   return {
     frontendUrl: { required: true, present: Boolean(frontend), valid: frontendValid },
     gmailOAuth: configured(gmailVars),
+    emailTransport,
     awsS3: configured(s3Vars),
     rememberedSession: {
       ...rememberedSession,
@@ -663,7 +672,8 @@ function formatAuditReport(report) {
   lines.push('', 'Configuration:');
   const env = report.environment || {};
   lines.push(`- FRONTEND_URL: ${env.frontendUrl?.valid ? 'VALID' : 'MISSING/INVALID'}`);
-  lines.push(`- Gmail OAuth (${env.gmailOAuth?.required?.join(', ')}): ${env.gmailOAuth?.configured ? 'CONFIGURED' : 'INCOMPLETE'}`);
+  const emailTransport = env.emailTransport || { provider: 'gmail', ...env.gmailOAuth };
+  lines.push(`- Email transport ${emailTransport.provider} (${emailTransport.required?.join(', ')}): ${emailTransport.configured ? 'CONFIGURED' : 'INCOMPLETE'}`);
   lines.push(`- AWS S3 (${env.awsS3?.required?.join(', ')}): ${env.awsS3?.configured ? 'CONFIGURED' : 'INCOMPLETE'}`);
   lines.push(`- Remembered-session cookie contract: ${env.rememberedSession?.valid ? 'VALID' : 'INCOMPLETE'}`);
   const finance = report.finance || {};

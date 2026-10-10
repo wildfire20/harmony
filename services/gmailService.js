@@ -1,5 +1,9 @@
 const { google } = require('googleapis');
 const { STATUS_LABELS } = require('../utils/admissions');
+const { getResendConfig, sendResendEmail, verifyResendTransport } = require('./resendService');
+
+const getEmailProvider = (environment = process.env) =>
+  String(environment.EMAIL_PROVIDER || 'gmail').trim().toLowerCase();
 
 const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 const REQUIRED_SENDER_ADDRESS = 'autom8streamlining@gmail.com';
@@ -95,6 +99,18 @@ const createGmailApiClient = (environment = process.env) => {
 };
 
 const logEmailTransportStatus = () => {
+  const provider = getEmailProvider();
+  if (provider === 'resend') {
+    const config = getResendConfig();
+    console.log(config.configured && config.senderValid
+      ? 'Admissions email transport: Resend configured'
+      : 'Admissions email transport: unavailable — missing or invalid Resend configuration');
+    return;
+  }
+  if (provider !== 'gmail') {
+    console.warn('Admissions email transport: unavailable — invalid EMAIL_PROVIDER');
+    return;
+  }
   const config = getGmailApiConfig();
   if (config.configured && config.senderValid) {
     console.log('Admissions email transport: Gmail API OAuth configured');
@@ -160,6 +176,23 @@ const createRawMessage = ({ to, subject, htmlBody, fromAddress, fromName = SENDE
 };
 
 async function sendEmail(to, subject, htmlBody, options = {}) {
+  const provider = getEmailProvider();
+  if (provider === 'resend') {
+    const result = await sendResendEmail({
+      to,
+      subject,
+      html: String(htmlBody || ''),
+      text: htmlToPlainText(htmlBody),
+      fromName: options.fromName || SENDER_NAME,
+      replyTo: options.replyTo || REPLY_TO,
+    });
+    if (!result.success) console.error(`Admissions email failed: ${result.error}`);
+    return result;
+  }
+  if (provider !== 'gmail') {
+    console.error(`Admissions email failed: ${EMAIL_ERROR_CATEGORIES.CONFIGURATION}`);
+    return { success: false, error: EMAIL_ERROR_CATEGORIES.CONFIGURATION };
+  }
   const config = getGmailApiConfig();
   if (!config.configured) {
     console.error(`Admissions email failed: ${EMAIL_ERROR_CATEGORIES.CONFIGURATION}`);
@@ -194,6 +227,9 @@ async function sendEmail(to, subject, htmlBody, options = {}) {
 }
 
 async function verifyEmailTransport() {
+  const provider = getEmailProvider();
+  if (provider === 'resend') return verifyResendTransport();
+  if (provider !== 'gmail') return { success: false, error: EMAIL_ERROR_CATEGORIES.CONFIGURATION };
   const config = getGmailApiConfig();
   if (!config.configured) {
     return { success: false, error: EMAIL_ERROR_CATEGORIES.CONFIGURATION };
@@ -326,6 +362,7 @@ module.exports = {
   createGmailOAuthClient,
   createRawMessage,
   getGmailApiConfig,
+  getEmailProvider,
   htmlToPlainText,
   logEmailTransportStatus,
   normalizeEmailResult,

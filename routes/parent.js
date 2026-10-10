@@ -1146,7 +1146,10 @@ router.post('/activation/request', requireParentSelfActivation, activationReques
     });
 
     try {
-      await sendParentActivationOtp(email, otp, parent.first_name);
+      const delivery = await sendParentActivationOtp(email, otp, parent.first_name);
+      if (delivery?.success !== true || delivery.skipped === true) {
+        throw new Error('Email transport did not confirm sending');
+      }
       const confirmed = await db.query(
         `UPDATE parent_activation_challenges SET delivery_confirmed_at=NOW()
          WHERE id=$1 AND delivery_confirmed_at IS NULL AND consumed_at IS NULL
@@ -1154,14 +1157,14 @@ router.post('/activation/request', requireParentSelfActivation, activationReques
         [challenge.id],
       );
       if (!confirmed.rows.length) throw new Error('challenge delivery confirmation failed');
-    } catch (sendError) {
+    } catch {
       await db.query(
         `UPDATE parent_activation_challenges SET invalidated_at=NOW()
          WHERE id=$1 AND consumed_at IS NULL AND invalidated_at IS NULL`,
         [challenge.id],
       ).catch(() => {});
       // Never include provider details or the OTP in a public response.
-      console.error('Parent activation email delivery failed:', sendError.message);
+      console.error('Parent activation email delivery failed');
       return res.status(503).json({ message: 'We could not send a verification code. Please try again later.' });
     }
     return res.status(200).json({
