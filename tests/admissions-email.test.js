@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const gmailEnvironmentKeys = [
+  'EMAIL_PROVIDER',
   'GOOGLE_GMAIL_CLIENT_ID',
   'GOOGLE_GMAIL_CLIENT_SECRET',
   'GOOGLE_GMAIL_REFRESH_TOKEN',
@@ -16,6 +17,7 @@ const originalGmailEnvironment = Object.fromEntries(
 );
 
 const configureGmailEnvironment = () => {
+  process.env.EMAIL_PROVIDER = 'gmail';
   process.env.GOOGLE_GMAIL_CLIENT_ID = 'test-client-id';
   process.env.GOOGLE_GMAIL_CLIENT_SECRET = 'test-client-secret';
   process.env.GOOGLE_GMAIL_REFRESH_TOKEN = 'test-refresh-token';

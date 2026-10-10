@@ -311,6 +311,18 @@ test('configuration audit reports presence only, never values', () => {
   assert.doesNotMatch(output, /first_name|last_name|phone_number|password|session_id/i);
 });
 
+test('configuration audit reports the selected Resend transport without exposing its key or sender', () => {
+  const result = checkEnvironment({ EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 're_private_key',
+    RESEND_FROM_EMAIL: 'portal@school.example' });
+  assert.equal(result.emailTransport.provider, 'resend');
+  assert.equal(result.emailTransport.configured, true);
+  assert.equal(result.gmailOAuth.configured, false);
+  const output = formatAuditReport({ environment: result });
+  assert.match(output, /Email transport resend \(RESEND_API_KEY, RESEND_FROM_EMAIL\): CONFIGURED/);
+  assert.doesNotMatch(output, /re_private_key|portal@school\.example/);
+  assert.equal(checkEnvironment({ EMAIL_PROVIDER: 'other' }).emailTransport.configured, false);
+});
+
 test('audit uses one read-only client, rolls back, and reports safe findings', async () => {
   const { pool, client } = fakeDatabase();
   const report = await runAudit({
