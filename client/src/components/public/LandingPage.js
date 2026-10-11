@@ -69,8 +69,8 @@ export const Header = () => {
     <>
       <div className="fixed top-0 left-0 right-0 z-50 bg-red-700 text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-9 flex items-center justify-center text-center">
-           <a href="/#apply" className="text-xs sm:text-sm font-semibold tracking-wide hover:text-red-100 focus:outline-none focus:ring-2 focus:ring-white rounded">
-            No Fee Increase in 2027 <span className="hidden sm:inline">— 2027 admissions are now open</span>
+           <a href="/#apply" className="text-sm sm:text-lg font-extrabold tracking-wide hover:text-red-100 focus:outline-none focus:ring-2 focus:ring-white rounded">
+            <strong>NO FEE INCREASE IN 2027</strong> <span className="hidden sm:inline text-sm font-semibold">— 2027 admissions are now open</span>
           </a>
         </div>
       </div>
@@ -542,10 +542,12 @@ const AdmissionsGuide = () => {
             <div className="mt-4 divide-y divide-slate-200 rounded-2xl border border-slate-200 bg-slate-50">
               {faqs.map(([question, answer]) => (
                 <details key={question} className="group p-5">
-                  <summary className="cursor-pointer list-none pr-6 font-extrabold text-blue-950 marker:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
-                    <span className="relative block">{question}<span className="absolute right-0 top-0 text-red-700 transition-transform group-open:rotate-45" aria-hidden="true">+</span></span>
+                  <summary className="cursor-pointer list-none font-extrabold text-blue-950 marker:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
+                    <span className="relative block pr-8">{question}<span className="absolute right-0 top-0 text-red-700 transition-transform group-open:rotate-45" aria-hidden="true">+</span></span>
                   </summary>
-                  <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-600">{answer}</p>
+                  {Array.isArray(answer) ? <ul className="mt-3 max-w-2xl list-disc space-y-2 pl-5 text-sm leading-relaxed text-slate-600">
+                    {answer.map(item => <li key={item}>{item}</li>)}
+                  </ul> : <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-600">{answer}</p>}
                 </details>
               ))}
             </div>

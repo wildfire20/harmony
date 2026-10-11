@@ -26,6 +26,7 @@ import HarmonyLogo from '../common/HarmonyLogo';
 import { ThemeToggle, useTheme, ThemedLayout } from '../common/ThemeProvider';
 import { StatusIndicator, DepartmentBadge } from '../common/BrandingElements';
 import { useResponsive, useTouchDevice } from '../../hooks/useResponsive';
+import useAdminEnquiryAlerts from '../../hooks/useAdminEnquiryAlerts';
 
 const Layout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -34,6 +35,7 @@ const Layout = () => {
   const navigate = useNavigate();
   const { isMobile, isTablet } = useResponsive();
   const isTouch = useTouchDevice();
+  const { count: unreadEnquiries } = useAdminEnquiryAlerts();
 
   const { data: enrollmentStatsData } = useQuery(
     ['enrollment-stats'],
@@ -73,7 +75,7 @@ const Layout = () => {
     ...(isAdmin ? [
       { name: 'Admin Panel', href: '/admin', icon: Settings, color: 'harmony-navy', badge: pendingEnrollments },
       { name: 'Admissions Notifications', href: '/enrollments?notifications=1', icon: Bell, color: 'harmony-secondary', badge: unreadAdmissionsNotifications },
-      { name: 'Enquiries', href: '/enquiries', icon: MessageSquare, color: 'harmony-secondary' },
+      { name: 'Enquiries', href: '/enquiries', icon: MessageSquare, color: 'harmony-secondary', badge: unreadEnquiries },
       { name: 'Users', href: '/users', icon: Users, color: 'harmony-secondary' },
       { name: 'Analytics', href: '/analytics', icon: BarChart3, color: 'harmony-gold' },
       { name: 'Payments', href: '/payments', icon: CreditCard, color: 'harmony-gold' }
@@ -100,7 +102,7 @@ const Layout = () => {
       }`} />
       <span className="font-medium flex-1">{item.name}</span>
       {item.badge > 0 && (
-        <span className="ml-2 flex-shrink-0 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-orange-500 text-white text-xs font-bold shadow-sm">
+        <span aria-label={`${item.badge} ${item.name === 'Enquiries' ? 'enquiries with unread messages' : 'notifications'}`} className="ml-2 flex-shrink-0 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-orange-500 text-white text-xs font-bold shadow-sm">
           {item.badge > 99 ? '99+' : item.badge}
         </span>
       )}

@@ -17,6 +17,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { adminAPI, announcementsAPI, enrollmentsAPI, paymentProofsAPI } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { useTheme } from '../common/ThemeProvider';
+import EnquiryAlert from '../admin/EnquiryAlert';
 
 const AdminDashboard = () => {
   const { user } = useAuth();
@@ -71,6 +72,8 @@ const AdminDashboard = () => {
 
   return (
     <div className="space-y-6">
+
+      <EnquiryAlert />
 
       {/* Pending Enrollments Alert */}
       {pendingEnrollments > 0 && (

@@ -30,6 +30,11 @@ const FeeCard = ({ eyebrow, amount, detail }) => (
   </article>
 );
 
+const DiscountOffer = ({ text, benefit }) => {
+  const start = text.indexOf(benefit);
+  return <li>{text.slice(0, start)}<mark className="rounded bg-yellow-200 px-1 font-extrabold text-blue-950">{benefit}</mark>{text.slice(start + benefit.length)}</li>;
+};
+
 const FeesPage = () => {
   const { learnerCategories, monthly, discounts, admissionRequirements, banking } = FEE_STRUCTURE_2027;
 
@@ -85,8 +90,8 @@ const FeesPage = () => {
                 <p className="text-xs font-extrabold tracking-[0.14em] uppercase text-red-300">Boarding</p>
                 <h2 className="mt-3 text-2xl font-black">Inclusive monthly boarding fees</h2>
                 <dl className="mt-5 space-y-3 text-blue-100">
-                  <div className="flex justify-between gap-4"><dt>Baby Class–Grade R</dt><dd className="font-extrabold text-white">{formatRand(learnerCategories['grade-r'].monthlyBoarding)}</dd></div>
-                  <div className="flex justify-between gap-4"><dt>Grades 1–7</dt><dd className="font-extrabold text-white">{formatRand(learnerCategories['grades-1-7'].monthlyBoarding)}</dd></div>
+                  <div className="flex justify-between gap-4"><dt>Preschool</dt><dd className="font-extrabold text-white">{formatRand(learnerCategories['grade-r'].monthlyBoarding)} / month</dd></div>
+                  <div className="flex justify-between gap-4"><dt>Grades 1–7</dt><dd className="font-extrabold text-white">{formatRand(learnerCategories['grades-1-7'].monthlyBoarding)} / month</dd></div>
                 </dl>
                 <p className="mt-5 text-sm font-bold text-red-200">{FEE_STRUCTURE_2027.boardingSummary}</p>
               </div>
@@ -102,25 +107,25 @@ const FeesPage = () => {
               <p className="text-xs font-extrabold tracking-[0.16em] uppercase text-red-700">Registration</p>
               <h2 className="mt-2 text-3xl font-black text-blue-950">Application and re-registration fees</h2>
               <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                <FeeCard eyebrow="New — Baby Class–Grade R" amount={formatRand(learnerCategories['grade-r'].newRegistration)} detail="Registration fee for a new applicant." />
+                <FeeCard eyebrow="New — Preschool" amount={formatRand(learnerCategories['grade-r'].newRegistration)} detail="Registration fee for a new applicant." />
                 <FeeCard eyebrow="New — Grades 1–7" amount={formatRand(learnerCategories['grades-1-7'].newRegistration)} detail="Registration fee for a new applicant." />
                 <FeeCard eyebrow="Returning — Grades 1–7" amount={formatRand(learnerCategories['grades-1-7'].reRegistration)} detail="Re-registration fee for returning learners in Grades 1–7." />
               </div>
-              <p className="mt-4 text-sm text-slate-600">No Baby Class–Grade R re-registration amount has been published. Please confirm with Harmony.</p>
+              <p className="mt-4 text-sm font-semibold text-slate-700">There is no re-registration fee for Preschool.</p>
             </div>
 
             <div className="mt-12 grid gap-6 lg:grid-cols-2">
               <div className="rounded-2xl border border-red-100 bg-red-50 p-6 sm:p-8">
                 <p className="text-xs font-extrabold tracking-[0.14em] uppercase text-red-700">Payment discounts</p>
                 <h2 className="mt-3 text-2xl font-black text-blue-950">Plan for January–December</h2>
-                <CheckList items={[
-                  `Half-year upfront: ${discounts.halfYear}.`,
-                  `Full-year upfront: ${discounts.fullYear}.`,
-                ]} />
+                <ul className="mt-4 list-disc space-y-4 pl-5 text-sm leading-relaxed text-slate-700">
+                  <DiscountOffer text={discounts.fullYear} benefit="one month free" />
+                  <DiscountOffer text={discounts.halfYear} benefit="half a month’s discount" />
+                </ul>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
                 <p className="text-xs font-extrabold tracking-[0.14em] uppercase text-red-700">Sibling discount</p>
-                <h2 className="mt-3 text-2xl font-black text-blue-950">{formatRand(discounts.siblingAmount)} per learner</h2>
+                <h2 className="mt-3 text-2xl font-black text-blue-950">Save R300 every month with two children</h2>
                 <p className="mt-4 leading-relaxed text-slate-700">{discounts.sibling}</p>
                 <p className="mt-5 text-sm font-bold text-blue-950">This discount is not automatically included in the estimator.</p>
               </div>

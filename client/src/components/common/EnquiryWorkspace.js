@@ -7,7 +7,7 @@ export const ENQUIRY_STATUSES = { new: 'New', on_hold: 'On hold', done: 'Done' }
 const date = value => new Date(value).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' });
 const badge = status => <span className={`enquiry-badge enquiry-badge-${status}`}>{ENQUIRY_STATUSES[status]}</span>;
 
-export default function EnquiryWorkspace({ request, admin = false }) {
+export default function EnquiryWorkspace({ request, admin = false, onRead }) {
   const [rows, setRows] = useState([]);
   const [filter, setFilter] = useState('all');
   const [page, setPage] = useState(1);
@@ -38,9 +38,9 @@ export default function EnquiryWorkspace({ request, admin = false }) {
     return () => { mounted.current = false; };
   }, []);
 
-  const loadList = useCallback(async () => {
+  const loadList = useCallback(async (background = false) => {
     const sequence = ++listSequence.current;
-    setLoading(true);
+    if (!background) setLoading(true);
     try {
       const query = new URLSearchParams({ status: filter, page: String(page) });
       if (admin && search) query.set('q', search);
@@ -55,6 +55,25 @@ export default function EnquiryWorkspace({ request, admin = false }) {
     }
   }, [request, filter, page, search, admin]);
   useEffect(() => { loadList(); }, [loadList]);
+  useEffect(() => {
+    if (!admin || busy) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') loadList(true);
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [admin, busy, loadList]);
+
+  // Mark only the message position actually rendered, never a newer parent reply.
+  useEffect(() => {
+    if (!admin || detailLoading || !detail || detail.enquiry.id !== selectedId) return;
+    const lastMessage = detail.messages[detail.messages.length - 1];
+    if (!lastMessage) return;
+    let active = true;
+    request(`/${selectedId}/read`, { method: 'POST', body: JSON.stringify({ last_message_id: lastMessage.id }) })
+      .then(() => { onRead?.(); if (active) loadList(true); })
+      .catch(() => { if (active) setError('Conversation loaded, but its unread alert could not be cleared. Select Refresh.'); });
+    return () => { active = false; };
+  }, [admin, detail, detailLoading, selectedId, request, onRead, loadList]);
 
   const loadThread = async (id, clearReply = false) => {
     const sequence = ++detailSequence.current;
@@ -125,7 +144,7 @@ export default function EnquiryWorkspace({ request, admin = false }) {
       <header className="enquiry-heading">
         <div><p className="enquiry-eyebrow">{admin ? 'Parent support' : 'School office'}</p>
           <h1>{admin ? 'Enquiries' : 'Enquiry'}</h1>
-          <p>{admin ? 'Read parent questions, reply and track progress.' : 'Ask a question about the Parent Portal or your child’s account.'}</p>
+          <p>{admin ? 'Read parent questions, reply and track progress. The inbox checks for new messages every 30 seconds.' : 'Ask a question about the Parent Portal or your child’s account.'}</p>
         </div>
         <div className="enquiry-actions">
           <button className="enquiry-btn enquiry-secondary" onClick={refresh} disabled={busy || loading || detailLoading}><RefreshCw size={17} />Refresh</button>
@@ -163,6 +182,7 @@ export default function EnquiryWorkspace({ request, admin = false }) {
           {loading ? <p role="status" className="enquiry-empty">Loading enquiries…</p> : rows.length === 0 ? <div className="enquiry-empty"><MessageSquare size={28} /><p>{admin ? 'No enquiries match this view.' : 'No enquiries in this view. Select New enquiry to ask for help.'}</p></div> :
             <ul className="enquiry-list">{rows.map(row => <li key={row.id}><button className={`enquiry-row ${row.id === selectedId ? 'enquiry-row-selected' : ''}`} disabled={busy} onClick={() => { setError(''); setSuccess(''); loadThread(row.id, true); }} aria-current={row.id === selectedId ? 'true' : undefined}>
               <div className="enquiry-row-top"><small>{row.reference}</small>{badge(row.status)}</div>
+              {admin && row.unread && <span className="enquiry-unread">Unread message</span>}
               <strong>{row.subject}</strong>{admin && <span>{row.contact_name}{row.source === 'login_help' ? ' · Login help' : ''}</span>}
               <small>Updated {date(row.updated_at)}</small>
             </button></li>)}</ul>}

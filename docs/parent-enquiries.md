@@ -32,6 +32,10 @@ No email address or login is required. The school office must contact the parent
 
 ## For the admin
 
+The **Enquiries** menu shows how many open enquiries contain messages you have not read. A **View enquiries** alert also appears on **Dashboard** and **Admin Panel**. These checks refresh every 30 seconds while the page is open, and when you return to the tab.
+
+Opening a conversation marks the displayed messages as read for your own Admin account. A later parent reply creates another alert. Reading it does not mark it as **Done**, and another administrator keeps their own unread count. **Done** enquiries are excluded from alerts. The inbox labels unread conversations **Unread message**. Select **Refresh** to update an open conversation.
+
 1. Sign in to the Staff Portal.
 2. Select **Enquiries** in the navigation menu or on **Admin Panel**.
 3. Use **Status** to show **All**, **New**, **On hold** or **Done**. Use **Search enquiries** to find a name, mobile number, subject or enquiry reference.
@@ -46,7 +50,7 @@ Admin replies and status changes are recorded in audit history. Enquiries and co
 
 ## Release instructions
 
-The migration creates two new tables. It does not change users, learner links, Finance records or existing email settings. It runs only when explicitly requested. It can be run again safely.
+The migration creates the enquiry tables and a separate table for Admin read positions. Existing installations must run the same command again after deploying this alert update. It does not change users, learner links, Finance records or existing email settings. It runs only when explicitly requested. It can be run again safely.
 
 1. Run the full release gate against an explicit **disposable** PostgreSQL database:
 
@@ -71,6 +75,7 @@ The migration creates two new tables. It does not change users, learner links, F
    Continue only after **Parent enquiries migration applied successfully.** If it fails, stop and inspect the service logs. Until the migration succeeds, enquiry requests return a clear unavailable message and cannot claim to have been saved.
 
 5. Open the live Parent Portal, submit an enquiry, read and reply to it from **Enquiries** in the Staff Portal, and test **On hold**, **Done** and reopening.
+   Check the Admin menu count and **View enquiries** alert before opening it. After opening it, the unread count should decrease. Send another parent reply and wait up to 30 seconds: the alert should return. Repeat using a second administrator to confirm that their read position is separate.
 6. Test **Get Help** while signed out, confirm that it appears as **Login help** for the admin, and mark the test enquiry **Done** after checking it.
 
 Existing activation, payments, invoices, attendance, notices and document workflows keep their existing routes and permissions. Enquiry support is separate from those workflows.

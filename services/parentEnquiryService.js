@@ -9,6 +9,13 @@ const hash = value => crypto.createHash('sha256').update(JSON.stringify(value)).
 const reference = id => `ENQ-${String(id).padStart(6, '0')}`;
 const admin = actor => ['admin', 'super_admin'].includes(actor?.role);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Count conversations, not individual messages; closing an enquiry clears its alert.
+const ADMIN_UNREAD = `e.status <> 'done' AND EXISTS (
+  SELECT 1 FROM parent_enquiry_messages m
+  WHERE m.enquiry_id=e.id AND m.kind='message' AND m.author_role IN ('parent','guest')
+    AND m.id > COALESCE((SELECT r.last_read_message_id FROM parent_enquiry_admin_reads r
+      WHERE r.enquiry_id=e.id AND r.admin_id=$1),0)
+)`;
 
 function text(value, label, max) {
   if (typeof value !== 'string' || !value.trim() || value.trim().length > max ||
@@ -37,6 +44,7 @@ function projection(row, isAdmin = false) {
     source: row.source, contact_name: row.contact_name, contact_phone: row.contact_phone,
     parent_id: row.parent_id,
   });
+  if (isAdmin && Object.hasOwn(row, 'unread')) result.unread = row.unread;
   return result;
 }
 async function transaction(operation) {
@@ -117,7 +125,7 @@ async function listEnquiries(actor, query = {}) {
   const isAdmin = admin(actor);
   const page = query.page === undefined ? 1 : integer(query.page, 'page', 10000);
   const limit = 25;
-  const values = isAdmin ? [] : [actor.id];
+  const values = [actor.id];
   const clauses = isAdmin ? ['TRUE'] : ['parent_id=$1'];
   if (query.status && query.status !== 'all') {
     if (typeof query.status !== 'string' || !Object.hasOwn(LABELS, query.status)) throw fail(400, 'Invalid enquiry status.');
@@ -131,10 +139,31 @@ async function listEnquiries(actor, query = {}) {
       OR contact_phone ILIKE $${values.length} OR ('ENQ-' || lpad(id::text,6,'0')) ILIKE $${values.length})`);
   }
   const where = clauses.join(' AND ');
-  const rows = await db.query(`SELECT * FROM parent_enquiries WHERE ${where}
+  const rows = await db.query(`SELECT e.*${isAdmin ? `, (${ADMIN_UNREAD}) AS unread` : ''} FROM parent_enquiries e WHERE ${where}
     ORDER BY updated_at DESC,id DESC LIMIT ${limit + 1} OFFSET ${(page - 1) * limit}`, values);
   return { enquiries: rows.rows.slice(0, limit).map(row => projection(row, isAdmin)),
     page, has_more: rows.rows.length > limit };
+}
+async function getAdminUnreadCount(actor) {
+  if (!admin(actor)) throw fail(403, 'Only Admin can view enquiry alerts.');
+  const result = await db.query(`SELECT count(*)::integer AS count FROM parent_enquiries e WHERE ${ADMIN_UNREAD}`, [actor.id]);
+  return { count: result.rows[0].count };
+}
+async function markEnquiryRead(id, actor, body) {
+  if (!admin(actor)) throw fail(403, 'Only Admin can mark enquiries as read.');
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).some(key => key !== 'last_message_id')) throw fail(400, 'Invalid read details.');
+  const messageId = integer(body.last_message_id, 'message');
+  return transaction(async client => {
+    const row = await owned(client, id, actor, true);
+    const message = await client.query('SELECT id FROM parent_enquiry_messages WHERE enquiry_id=$1 AND id=$2', [row.id, messageId]);
+    if (!message.rows.length) throw fail(400, 'The read position must belong to this enquiry.');
+    await client.query(`INSERT INTO parent_enquiry_admin_reads (enquiry_id,admin_id,last_read_message_id)
+      VALUES ($1,$2,$3) ON CONFLICT (enquiry_id,admin_id) DO UPDATE
+      SET last_read_message_id=GREATEST(parent_enquiry_admin_reads.last_read_message_id,EXCLUDED.last_read_message_id),read_at=NOW()`,
+    [row.id, actor.id, messageId]);
+    return { read: true };
+  });
 }
 async function getEnquiry(id, actor) {
   return transaction(async client => {
@@ -183,6 +212,7 @@ const SCHEMA = {
   parent_enquiries: ['id', 'parent_id', 'source', 'contact_name', 'contact_phone', 'subject', 'status',
     'request_key', 'request_hash', 'version', 'created_at', 'updated_at'],
   parent_enquiry_messages: ['id', 'enquiry_id', 'author_id', 'author_role', 'kind', 'body', 'request_key', 'request_hash', 'created_at'],
+  parent_enquiry_admin_reads: ['enquiry_id', 'admin_id', 'last_read_message_id', 'read_at'],
 };
 async function checkEnquirySchema(executor) {
   const { rows } = await executor.query(`SELECT table_name,column_name FROM information_schema.columns
@@ -192,4 +222,4 @@ async function checkEnquirySchema(executor) {
     .map(column => `${table}.${column}`));
   if (missing.length) throw new Error(`Enquiry schema is incomplete: ${missing.join(', ')}`);
 }
-module.exports = { createEnquiry, listEnquiries, getEnquiry, changeEnquiry, checkEnquirySchema };
+module.exports = { createEnquiry, listEnquiries, getEnquiry, changeEnquiry, getAdminUnreadCount, markEnquiryRead, checkEnquirySchema };

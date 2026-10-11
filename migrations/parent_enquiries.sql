@@ -34,3 +34,12 @@ CREATE TABLE IF NOT EXISTS parent_enquiry_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_parent_enquiry_messages_thread
   ON parent_enquiry_messages (enquiry_id, id);
+
+-- Read positions are private to each administrator. Existing conversations stay intact.
+CREATE TABLE IF NOT EXISTS parent_enquiry_admin_reads (
+  enquiry_id INTEGER NOT NULL REFERENCES parent_enquiries(id) ON DELETE CASCADE,
+  admin_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  last_read_message_id INTEGER NOT NULL REFERENCES parent_enquiry_messages(id) ON DELETE CASCADE,
+  read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (enquiry_id, admin_id)
+);
