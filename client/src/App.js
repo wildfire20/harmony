@@ -43,6 +43,8 @@ import ParentForgotPassword from './components/parent/ParentForgotPassword';
 import ParentForceChangePassword from './components/parent/ParentForceChangePassword';
 import ParentActivation from './components/parent/ParentActivation';
 import ParentResetPassword from './components/parent/ParentResetPassword';
+import ParentHelp from './components/parent/ParentHelp';
+import ParentEnquiriesAdmin from './components/admin/ParentEnquiriesAdmin';
 import StaffScanStation from './components/attendance/StaffScanStation';
 import AdmissionsPortal from './components/admissions/AdmissionsPortal';
 
@@ -193,6 +195,12 @@ const AppContent = () => {
             <PaymentsHub />
           </ProtectedRoute>
         } />
+
+        <Route path="enquiries" element={
+          <ProtectedRoute roles={['admin', 'super_admin']}>
+            <ParentEnquiriesAdmin />
+          </ProtectedRoute>
+        } />
         
         <Route path="enrollments" element={
           <ProtectedRoute roles={['admin', 'super_admin']}>
@@ -215,6 +223,7 @@ const AppContent = () => {
       <Route path="/parent/activate" element={<ParentActivation />} />
       <Route path="/parent/reset-password" element={<ParentResetPassword />} />
       <Route path="/parent/login"           element={<ParentLogin />} />
+      <Route path="/parent/help"            element={<ParentHelp />} />
       <Route path="/parent/forgot-password" element={<ParentForgotPassword />} />
       <Route path="/parent/change-password" element={<ParentForceChangePassword />} />
       <Route path="/parent/*"               element={<ParentPortal />} />

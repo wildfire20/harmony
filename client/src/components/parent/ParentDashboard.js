@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { parentApi } from './ParentPortal';
 import {
   CheckCircle, XCircle, Clock, Bell,
-  TrendingUp, AlertCircle, CreditCard, CalendarDays
+  TrendingUp, AlertCircle, CreditCard, CalendarDays, MessageSquare
 } from 'lucide-react';
 
 const StatCard = ({ label, value, sub, color, icon: Icon }) => (
@@ -66,6 +67,11 @@ const ParentDashboard = ({ child, user }) => {
       </div>
 
       {/* Attendance this week */}
+      <Link to="/parent/enquiries" className="flex min-h-[56px] items-center gap-3 rounded-2xl border border-[#dce7eb] bg-white px-4 py-3 text-[#176b73]">
+        <MessageSquare className="h-5 w-5 shrink-0" />
+        <span><strong className="block text-sm">Enquiry</strong><span className="text-xs text-[#617487]">Need help? Ask the school office and read replies here.</span></span>
+      </Link>
+
       <section className="rounded-3xl border border-[#dce7eb] bg-white p-4 shadow-[0_12px_35px_rgba(31,65,83,.07)]">
         <h2 className="mb-3 text-sm font-bold uppercase tracking-[0.12em] text-[#617487]">This week at a glance</h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

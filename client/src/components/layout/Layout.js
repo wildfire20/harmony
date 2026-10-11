@@ -73,6 +73,7 @@ const Layout = () => {
     ...(isAdmin ? [
       { name: 'Admin Panel', href: '/admin', icon: Settings, color: 'harmony-navy', badge: pendingEnrollments },
       { name: 'Admissions Notifications', href: '/enrollments?notifications=1', icon: Bell, color: 'harmony-secondary', badge: unreadAdmissionsNotifications },
+      { name: 'Enquiries', href: '/enquiries', icon: MessageSquare, color: 'harmony-secondary' },
       { name: 'Users', href: '/users', icon: Users, color: 'harmony-secondary' },
       { name: 'Analytics', href: '/analytics', icon: BarChart3, color: 'harmony-gold' },
       { name: 'Payments', href: '/payments', icon: CreditCard, color: 'harmony-gold' }
