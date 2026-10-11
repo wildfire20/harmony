@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../common/ThemeProvider';
-import { Settings, BarChart3, ClipboardList, GraduationCap, Users, DollarSign, ScanLine, UserCheck, Key, ArrowUpCircle } from 'lucide-react';
+import { Settings, BarChart3, ClipboardList, GraduationCap, Users, DollarSign, ScanLine, UserCheck, Key, ArrowUpCircle, MessageSquare } from 'lucide-react';
 import SystemSettings from './SystemSettings';
 import EnrollmentManagement from './EnrollmentManagement';
 
@@ -25,6 +25,14 @@ const AdminPanel = () => {
   ];
 
   const overviewCards = [
+    {
+      title: 'Enquiries',
+      description: 'Read parent questions, reply and track progress.',
+      gradient: 'from-teal-600 to-teal-700',
+      shadow: 'shadow-teal-500/25',
+      icon: MessageSquare,
+      href: '/enquiries',
+    },
     {
       title: 'Users',
       description: 'Manage students, teachers, parents, passwords and grade promotions.',

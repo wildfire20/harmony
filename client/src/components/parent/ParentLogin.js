@@ -178,6 +178,10 @@ const ParentLogin = () => {
             </form>
 
             <div className="mt-6 pt-5 border-t border-gray-100 space-y-2">
+              <p className="text-center text-sm text-gray-500">
+                Cannot sign in?{' '}
+                <Link to="/parent/help" className="parent-login-link inline-flex min-h-[44px] items-center font-semibold text-[#176b73] hover:underline">Get Help</Link>
+              </p>
               {parentSelfActivationEnabled && <p className="text-center text-xs text-gray-400">
                 First time using the Parent Portal?{' '}
                  <button type="button" onClick={() => navigate('/parent/activate')} className="parent-login-link text-[#176b73] hover:underline font-medium">

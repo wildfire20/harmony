@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
   Home, CalendarDays, Bell, CreditCard, FolderOpen,
-  LogOut, Menu, X, ChevronDown, ChevronRight, Users, BellRing, Settings2
+  LogOut, Menu, X, ChevronDown, ChevronRight, Users, BellRing, Settings2, MessageSquare
 } from 'lucide-react';
 import ParentDashboard from './ParentDashboard';
 import ParentAttendance from './ParentAttendance';
@@ -12,6 +12,7 @@ import ParentDocuments from './ParentDocuments';
 import ParentAccount from './ParentAccount';
 import ParentNotifications from './ParentNotifications';
 import ParentCalendar from './ParentCalendar';
+import ParentEnquiries from './ParentEnquiries';
 import { getSafeParentDestination, parentLoginPath } from './parentNavigation';
 import './ParentPortal.css';
 
@@ -22,6 +23,7 @@ const NAV = [
   { path: '/parent/announcements',  label: 'Notices',     icon: Bell, section: 'announcements' },
   { path: '/parent/documents',      label: 'Documents',   icon: FolderOpen, section: 'documents' },
   { path: '/parent/invoices',       label: 'Fees',        icon: CreditCard, section: 'fees' },
+  { path: '/parent/enquiries',      label: 'Enquiry',     icon: MessageSquare },
   { path: '/parent/account',        label: 'Account',      icon: Settings2 },
 ];
 const SECTION_BY_PATH = Object.fromEntries(NAV.filter(item => item.section).map(item => [item.path, item.section]));
@@ -564,6 +566,7 @@ const ParentPortal = () => {
               <Route path="notifications"  element={<ParentNotifications />} />
               <Route path="documents"       element={<ParentDocuments     child={selectedChild} />} />
               <Route path="invoices"        element={<ParentInvoices      child={selectedChild} />} />
+              <Route path="enquiries"       element={<ParentEnquiries />} />
               <Route path="account"         element={<ParentAccount user={user} children={children} selectedChild={selectedChild} onSelectChild={handleSelectChild} onLogout={handleLogout} />} />
               <Route path="payment-proof"   element={<Navigate to="/parent/invoices" replace />} />
             </Routes>
