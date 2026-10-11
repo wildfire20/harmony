@@ -9,7 +9,7 @@ export const FEE_STRUCTURE_2027 = {
       monthlyTuition: 1900,
       monthlyBoarding: 3650,
       newRegistration: 650,
-      reRegistration: null,
+      reRegistration: 0,
     },
     preschool: {
       label: 'Toddlers / Preschool (3–6)',
@@ -18,7 +18,7 @@ export const FEE_STRUCTURE_2027 = {
       monthlyTuition: 1850,
       monthlyBoarding: 3650,
       newRegistration: 650,
-      reRegistration: null,
+      reRegistration: 0,
     },
     'grade-r': {
       label: 'Grade R',
@@ -27,7 +27,7 @@ export const FEE_STRUCTURE_2027 = {
       monthlyTuition: 1850,
       monthlyBoarding: 3650,
       newRegistration: 650,
-      reRegistration: null,
+      reRegistration: 0,
     },
     'grades-1-7': {
       label: 'Grades 1–7',
@@ -58,32 +58,32 @@ export const FEE_STRUCTURE_2027 = {
       multiplier: 1,
     },
     'half-year': {
-      label: '6 months upfront — 50% off month 6',
+      label: '6 months upfront — half a month’s discount',
       estimateLabel: '6 months upfront',
       multiplier: 5.5,
     },
     'full-year': {
-      label: '12 months upfront — month 12 free',
+      label: 'Annual upfront — pay for 11 months',
       estimateLabel: '12 months upfront',
       multiplier: 11,
     },
   },
   discounts: {
-    halfYear: '50% discount on the 6th month’s fee',
-    fullYear: '100% discount on the 12th month’s fee',
+    halfYear: 'Pay six months’ school fees once off in January and get half a month’s discount.',
+    fullYear: 'Pay 11 months’ school fees once off in January and get one month free.',
     siblingAmount: 150,
-    sibling: 'Sibling discount available: R150 per learner. Please confirm with Harmony how this discount is applied.',
+    sibling: 'With two children enrolled at Harmony, you save R300 every month.',
   },
   saturdayClasses: 'Free for currently enrolled Harmony learners.',
   admissionRequirements: {
     allLearners: [
-      'Copy of learner birth certificate',
-      'Copies of Parent/Guardian ID',
+      'Copy of the child’s birth certificate',
+      'Copies of the parent’s or guardian’s ID',
       'Road to Health / Clinic Card',
     ],
     grades1to7Additional: [
-      'Latest school progress report',
-      'Transfer from previous school',
+      'Latest school progress report from the previous school',
+      'Transfer letter from the previous school',
     ],
   },
   banking: {
@@ -91,7 +91,7 @@ export const FEE_STRUCTURE_2027 = {
     accountHolder: 'Harmony Learning Institute',
     accountNumber: '63035320265',
     branchCode: '250655',
-    reference: 'Please confirm with Harmony',
+    reference: 'Always use your child’s reference number when making a payment.',
   },
 };
 
@@ -100,13 +100,16 @@ export const ADMISSIONS_FAQS_2027 = [
   ['How much is Baby Class?', 'Baby Class is R1,900 per month.'],
   ['How much are Toddlers and Grade R?', 'Toddlers / Preschool and Grade R are R1,850 per month.'],
   ['How much are Grades 1–7?', 'Grades 1–7 are R2,350 per month.'],
-  ['How much is boarding?', 'Boarding is R3,650 per month for Baby Class through Grade R and R3,950 per month for Grades 1–7.'],
+  ['How much is boarding?', 'Boarding is R3,650 per month for Preschool and R3,950 per month for Grades 1–7.'],
   ['Does boarding include tuition?', 'Yes. Boarding includes school fees, boarding fees and aftercare.'],
   ['How much is transport?', 'Transport is R650 per month.'],
   ['Where is transport currently available?', 'Transport is currently available only in Onverwacht and Kotas.'],
   ['Are Saturday classes charged separately?', 'No. Saturday classes are free for currently enrolled Harmony learners.'],
-  ['Are sibling discounts available?', 'Yes. Harmony offers a R150 discount per learner for families with more than one learner enrolled. Contact the school to confirm how it is applied.'],
-  ['What documents are required?', 'All applicants need a learner birth certificate copy, Parent/Guardian ID copies and a Road to Health / Clinic Card. Grades 1–7 also need the latest school progress report and a transfer from the previous school.'],
+  ['Are sibling discounts available?', `Yes. ${FEE_STRUCTURE_2027.discounts.sibling}`],
+  ['What documents are required?', [
+    ...FEE_STRUCTURE_2027.admissionRequirements.allLearners,
+    ...FEE_STRUCTURE_2027.admissionRequirements.grades1to7Additional.map(item => `${item} (Grades 1–7)`),
+  ]],
 ];
 
 export const formatRand = (amount) => (

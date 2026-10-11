@@ -5,6 +5,7 @@ import { useTheme } from '../common/ThemeProvider';
 import { Settings, BarChart3, ClipboardList, GraduationCap, Users, DollarSign, ScanLine, UserCheck, Key, ArrowUpCircle, MessageSquare } from 'lucide-react';
 import SystemSettings from './SystemSettings';
 import EnrollmentManagement from './EnrollmentManagement';
+import EnquiryAlert from './EnquiryAlert';
 
 const AdminPanel = () => {
   const { user } = useAuth();
@@ -91,6 +92,8 @@ const AdminPanel = () => {
         return <SystemSettings />;
       default:
         return (
+          <>
+          <div className="mb-5"><EnquiryAlert /></div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {overviewCards.map(({ title, description, gradient, shadow, icon: Icon, href, action }) => (
               <div
@@ -113,6 +116,7 @@ const AdminPanel = () => {
               </div>
             ))}
           </div>
+          </>
         );
     }
   };

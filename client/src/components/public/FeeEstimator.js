@@ -85,7 +85,7 @@ const FeeEstimator = () => {
               <p className="text-blue-100">{selections.applicant === 'new' ? 'New learner registration' : 'Returning learner re-registration'}</p>
               <p className="font-extrabold tabular-nums">{estimate.onceOffConfirmed ? formatRand(estimate.onceOff) : 'Confirm with Harmony'}</p>
             </div>
-            {!estimate.onceOffConfirmed && <p className="mt-2 text-xs text-blue-200">No Baby Class–Grade R re-registration amount has been published.</p>}
+            {selections.applicant !== 'new' && estimate.onceOff === 0 && <p className="mt-2 text-xs text-blue-200">There is no re-registration fee for Preschool.</p>}
           </div>
 
           <div className="mt-5 rounded-xl border border-red-300/30 bg-red-300/10 p-4">

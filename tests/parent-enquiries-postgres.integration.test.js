@@ -140,6 +140,17 @@ test('Parent enquiries preserve privacy, persist replies and enforce Admin workf
       assert.equal(adminThread.enquiry.parent_id, 10);
     });
 
+    await t.test('the alert migration upgrades an existing enquiry installation without changing conversations', async () => {
+      const before = { enquiries: await rows('parent_enquiries'), messages: await rows('parent_enquiry_messages') };
+      await db.query('DROP TABLE parent_enquiry_admin_reads');
+      assert.equal((await request()).status, 200);
+      assert.equal((await request('/admin/unread-count', { actor: 1 })).status, 503);
+      await require('../scripts/run-parent-enquiries-migration').run(db);
+      assert.deepEqual(await rows('parent_enquiries'), before.enquiries);
+      assert.deepEqual(await rows('parent_enquiry_messages'), before.messages);
+      assert.deepEqual((await request('/admin/unread-count', { actor: 1 })).data, { count: 1 });
+    });
+
     await t.test('public login help does not link, activate or disclose an existing account', async () => {
       const body = { contact_name: 'Synthetic Requester', contact_phone: '073 123 4567',
         subject: 'I cannot sign in', message: 'Please call me about my account.', request_key: key() };
@@ -222,6 +233,61 @@ test('Parent enquiries preserve privacy, persist replies and enforce Admin workf
       await db.query('DROP TRIGGER reject_enquiry_audit ON audit_logs; DROP FUNCTION reject_enquiry_audit()');
     });
 
+    await t.test('unread alerts track new questions, follow-ups and separate administrators without hiding unseen replies', async () => {
+      const count = async actor => (await request('/admin/unread-count', { actor })).data.count;
+      const mark = (id, messageId, actor = 1) => post(`/admin/${id}/read`, { last_message_id: messageId }, actor);
+      const baseline = await count(1);
+      const otherBaseline = await count(2);
+      const created = await post('', { subject: 'Alert regression', message: 'First question', request_key: key() }, 11);
+      assert.equal(created.status, 201);
+      const id = created.data.enquiry.id;
+      const first = (await detail(id, 1)).messages[0].id;
+      assert.equal(await count(1), baseline + 1);
+      assert.equal(await count(2), otherBaseline + 1);
+      assert.equal((await request('/admin', { actor: 1 })).data.enquiries.find(row => row.id === id).unread, true);
+      // GET requests do not change any administrator's read position.
+      assert.equal(await count(1), baseline + 1);
+      assert.equal((await mark(id, first)).status, 200);
+      assert.equal(await count(1), baseline);
+      assert.equal(await count(2), otherBaseline + 1);
+      assert.equal((await request('/admin', { actor: 1 })).data.enquiries.find(row => row.id === id).unread, false);
+
+      assert.equal((await post(`/${id}/replies`, { message: 'A later parent reply', request_key: key() }, 11)).status, 200);
+      const second = (await detail(id, 1)).messages.at(-1).id;
+      assert.equal((await mark(id, first)).status, 200);
+      assert.equal(await count(1), baseline + 1);
+      assert.equal((await mark(id, second)).status, 200);
+      assert.equal(await count(1), baseline);
+      assert.equal((await post(`/admin/${id}/replies`, { message: 'School office reply', request_key: key() }, 1)).status, 200);
+      assert.equal(await count(1), baseline); // Admin messages do not create alerts.
+
+      assert.equal((await post(`/${id}/replies`, { message: 'More information', request_key: key() }, 11)).status, 200);
+      const latest = (await detail(id, 1)).messages.at(-1).id;
+      await Promise.all([mark(id, latest), mark(id, first)]);
+      assert.equal((await db.query('SELECT last_read_message_id FROM parent_enquiry_admin_reads WHERE enquiry_id=$1 AND admin_id=1', [id])).rows[0].last_read_message_id, latest);
+      assert.equal(await count(1), baseline);
+      assert.equal(await count(2), otherBaseline + 1);
+      const version = (await detail(id, 1)).enquiry.version;
+      assert.equal((await status(id, 'on_hold', version)).status, 200);
+      assert.equal(await count(2), otherBaseline + 1);
+      assert.equal((await status(id, 'done', version + 1)).status, 200);
+      assert.equal(await count(2), otherBaseline);
+      assert.equal((await status(id, 'new', version + 2)).status, 200);
+      assert.equal(await count(2), otherBaseline + 1);
+
+      const foreignMessage = (await detail(portalId, 1)).messages[0].id;
+      assert.equal((await mark(id, foreignMessage)).status, 400);
+      assert.equal((await mark(id, 2147483647)).status, 400);
+      assert.equal((await post(`/admin/${id}/read`, { last_message_id: first, admin_id: 2 }, 1)).status, 400);
+      for (const actor of [0, 3, 10, 11, 12, 13, 501]) {
+        assert.ok([401, 403].includes((await request('/admin/unread-count', { actor })).status));
+        assert.ok([401, 403].includes((await mark(id, first, actor)).status));
+      }
+      const parentProjection = (await request('', { actor: 11 })).data.enquiries.find(row => row.id === id);
+      assert.equal(Object.hasOwn(parentProjection, 'unread'), false);
+      assert.equal(Object.hasOwn((await detail(id, 11)).enquiry, 'unread'), false);
+    });
+
     await t.test('public submissions are rate-limited without any public account lookup', async () => {
       let last;
       for (let index = 0; index < 10; index++) last = await post('/help', {
@@ -232,10 +298,12 @@ test('Parent enquiries preserve privacy, persist replies and enforce Admin workf
     });
 
     await t.test('rerunning the migration preserves messages, accounts and financial records; no emails sent', async () => {
-      const before = { enquiries: await rows('parent_enquiries'), messages: await rows('parent_enquiry_messages') };
+      const before = { enquiries: await rows('parent_enquiries'), messages: await rows('parent_enquiry_messages'),
+        reads: (await db.query('SELECT * FROM parent_enquiry_admin_reads ORDER BY enquiry_id,admin_id')).rows };
       await require('../scripts/run-parent-enquiries-migration').run(db);
       assert.deepEqual(await rows('parent_enquiries'), before.enquiries);
       assert.deepEqual(await rows('parent_enquiry_messages'), before.messages);
+      assert.deepEqual((await db.query('SELECT * FROM parent_enquiry_admin_reads ORDER BY enquiry_id,admin_id')).rows, before.reads);
       assert.deepEqual(await rows('users'), protectedSnapshot.users);
       assert.deepEqual(await rows('payments'), protectedSnapshot.payments);
       assert.deepEqual(mail, []);

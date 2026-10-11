@@ -15,7 +15,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
-const render = async (request, admin = false) => { await act(async () => root.render(<EnquiryWorkspace request={request} admin={admin} />)); };
+const render = async (request, admin = false, onRead) => { await act(async () => root.render(<EnquiryWorkspace request={request} admin={admin} onRead={onRead} />)); };
 const click = async label => {
   const button = Array.from(container.querySelectorAll('button')).find(item => item.textContent.trim() === label);
   expect(button).toBeDefined();
@@ -33,6 +33,57 @@ const submit = async selector => { await act(async () => container.querySelector
 const readRequest = jest.fn();
 beforeEach(() => readRequest.mockImplementation(path => Promise.resolve(path.startsWith('?') ? { enquiries: [enquiry()], has_more: false } : thread())));
 const openFirst = async () => { await act(async () => container.querySelector('.enquiry-row').click()); };
+
+test('Admin marks only rendered messages as read and refreshes alerts after success', async () => {
+  let unread = true;
+  const onRead = jest.fn();
+  const request = jest.fn((path, options) => {
+    if (path.endsWith('/read')) {
+      expect(container.querySelector('.enquiry-message p').textContent).toBe('Where can I see attendance?');
+      expect(JSON.parse(options.body)).toEqual({ last_message_id: 1 });
+      unread = false; return Promise.resolve({ read: true });
+    }
+    return Promise.resolve(path.startsWith('?') ? { enquiries: [enquiry({ unread })], has_more: false } : thread());
+  });
+  await render(request, true, onRead);
+  expect(container.textContent).toContain('Unread message');
+  await openFirst();
+  expect(onRead).toHaveBeenCalledTimes(1);
+  expect(container.textContent).not.toContain('Unread message');
+});
+
+test('a failed read acknowledgement keeps the unread marker and the conversation available', async () => {
+  const onRead = jest.fn();
+  const request = jest.fn((path, options) => options ? Promise.reject(new Error('Connection lost')) :
+    Promise.resolve(path.startsWith('?') ? { enquiries: [enquiry({ unread: true })], has_more: false } : thread()));
+  await render(request, true, onRead); await openFirst();
+  expect(container.textContent).toContain('Unread message');
+  expect(container.textContent).toContain('unread alert could not be cleared');
+  expect(container.querySelector('#enquiry-reply')).not.toBeNull();
+  expect(onRead).not.toHaveBeenCalled();
+});
+
+test('an arriving parent reply stays unread when an older conversation is acknowledged', async () => {
+  let resolveRead;
+  const request = jest.fn((path, options) => options ? new Promise(resolve => { resolveRead = resolve; }) :
+    Promise.resolve(path.startsWith('?') ? { enquiries: [enquiry({ unread: true })], has_more: false } : thread()));
+  await render(request, true); await openFirst();
+  await act(async () => resolveRead({ read: true }));
+  expect(container.textContent).toContain('Unread message');
+  expect(JSON.parse(request.mock.calls.find(([path]) => path.endsWith('/read'))[1].body)).toEqual({ last_message_id: 1 });
+});
+
+test('Admin inbox polls for new questions without marking unopened conversations as read', async () => {
+  jest.useFakeTimers();
+  try {
+    let polls = 0;
+    const request = jest.fn(() => Promise.resolve({ enquiries: ++polls > 1 ? [enquiry({ unread: true })] : [], has_more: false }));
+    await render(request, true);
+    await act(async () => { jest.advanceTimersByTime(30000); });
+    expect(container.textContent).toContain('Unread message');
+    expect(request.mock.calls.every(([path]) => path.startsWith('?'))).toBe(true);
+  } finally { jest.useRealTimers(); }
+});
 
 test('failed sends keep the draft and retry key; confirmation appears only after saving', async () => {
   let attempts = 0;

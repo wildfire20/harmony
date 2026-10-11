@@ -33,7 +33,9 @@ router.post('/help', publicLimiter, handle(async (req, res) => {
     message: 'Your enquiry has been sent. The school office will contact you using the mobile number provided.' });
 }));
 router.get('/admin', ...admin, handle(async (req, res) => res.json(await service.listEnquiries(req.user, req.query))));
+router.get('/admin/unread-count', ...admin, handle(async (req, res) => res.json(await service.getAdminUnreadCount(req.user))));
 router.get('/admin/:id', ...admin, handle(async (req, res) => res.json(await service.getEnquiry(req.params.id, req.user))));
+router.post('/admin/:id/read', ...admin, handle(async (req, res) => res.json(await service.markEnquiryRead(req.params.id, req.user, req.body))));
 router.post('/admin/:id/replies', ...admin, writeLimiter, handle(async (req, res) => {
   res.json({ ...await service.changeEnquiry(req.params.id, req.user, req.body), message: 'Reply sent.' });
 }));

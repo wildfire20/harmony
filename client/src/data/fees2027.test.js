@@ -60,10 +60,10 @@ describe('2027 public fee estimator', () => {
     expect(estimate({ learnerCategory, applicant }).onceOff).toBe(onceOff);
   });
 
-  test.each(['baby', 'preschool', 'grade-r'])('does not invent %s re-registration', (learnerCategory) => {
+  test.each(['baby', 'preschool', 'grade-r'])('charges no re-registration fee for returning %s learners', (learnerCategory) => {
     const result = estimate({ learnerCategory, applicant: 'returning' });
-    expect(result.onceOff).toBeNull();
-    expect(result.onceOffConfirmed).toBe(false);
+    expect(result.onceOff).toBe(0);
+    expect(result.onceOffConfirmed).toBe(true);
   });
 
   test('does not auto-calculate the sibling discount', () => {
@@ -71,6 +71,6 @@ describe('2027 public fee estimator', () => {
     expect(result.monthlyTotal).toBe(1850);
     expect(result).not.toHaveProperty('siblingDiscount');
     expect(FEE_STRUCTURE_2027.discounts.siblingAmount).toBe(150);
-    expect(FEE_STRUCTURE_2027.discounts.sibling).toContain('Please confirm with Harmony');
+    expect(FEE_STRUCTURE_2027.discounts.sibling).toContain('R300 every month');
   });
 });
