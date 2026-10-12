@@ -1,0 +1,574 @@
+{
+  "schoolYear": 2027,
+  "sections": [
+    {
+      "title": "Learner",
+      "description": "Check your child’s details. Choose the grade requested for 2027.",
+      "fields": [
+        {
+          "key": "grade_applied_for",
+          "label": "Grade requested for 2027",
+          "type": "grade",
+          "required": true
+        },
+        {
+          "key": "highest_grade_passed",
+          "label": "Highest grade passed",
+          "type": "text"
+        },
+        {
+          "key": "year_grade_passed",
+          "label": "Year grade passed",
+          "type": "text"
+        },
+        {
+          "key": "surname",
+          "label": "Learner surname",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "initials",
+          "label": "Initials",
+          "type": "text"
+        },
+        {
+          "key": "first_name",
+          "label": "Learner first name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "other_names",
+          "label": "Other names",
+          "type": "text"
+        },
+        {
+          "key": "nickname",
+          "label": "Nickname",
+          "type": "text"
+        },
+        {
+          "key": "date_of_birth",
+          "label": "Date of birth",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "gender",
+          "label": "Gender",
+          "type": "select",
+          "choices": [
+            "Female",
+            "Male",
+            "Prefer not to say"
+          ]
+        },
+        {
+          "key": "race",
+          "label": "Race",
+          "type": "text"
+        },
+        {
+          "key": "id_passport",
+          "label": "Learner ID / passport number",
+          "type": "text"
+        },
+        {
+          "key": "country_of_residence",
+          "label": "Country of residence",
+          "type": "text"
+        },
+        {
+          "key": "citizenship",
+          "label": "Citizenship",
+          "type": "text"
+        },
+        {
+          "key": "province",
+          "label": "Province (if South African)",
+          "type": "text"
+        },
+        {
+          "key": "physical_address",
+          "label": "Physical address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "city_suburb",
+          "label": "City / suburb",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "postal_code",
+          "label": "Postal code",
+          "type": "text"
+        },
+        {
+          "key": "home_telephone",
+          "label": "Home telephone",
+          "type": "text"
+        },
+        {
+          "key": "emergency_telephone",
+          "label": "Emergency telephone",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "learner_mobile",
+          "label": "Learner mobile number (if any)",
+          "type": "text"
+        },
+        {
+          "key": "home_language",
+          "label": "Home language",
+          "type": "text"
+        },
+        {
+          "key": "learner_email",
+          "label": "Learner email (optional)",
+          "type": "email"
+        },
+        {
+          "key": "preferred_language",
+          "label": "Preferred language of instruction",
+          "type": "text"
+        },
+        {
+          "key": "deceased_parent",
+          "label": "Deceased parent (if applicable)",
+          "type": "select",
+          "choices": [
+            "Not applicable",
+            "Mother",
+            "Father",
+            "Both"
+          ]
+        },
+        {
+          "key": "religion",
+          "label": "Religion (optional)",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "title": "School & services",
+      "description": "These are requests for next year. Admin will confirm arrangements. Current fees do not change when you submit.",
+      "fields": [
+        {
+          "key": "boarder",
+          "label": "Boarder requested for 2027",
+          "type": "select",
+          "choices": [
+            "Yes",
+            "No"
+          ],
+          "required": true
+        },
+        {
+          "key": "transport_mode",
+          "label": "Transport mode",
+          "type": "text"
+        },
+        {
+          "key": "school_transport",
+          "label": "School transport requested for 2027",
+          "type": "select",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "key": "aftercare",
+          "label": "Aftercare requested for 2027",
+          "type": "select",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "key": "preprimary_education",
+          "label": "Pre-primary education (Grade 1 only)",
+          "type": "select",
+          "choices": [
+            "Not applicable",
+            "None",
+            "Non-formal",
+            "Formal"
+          ]
+        },
+        {
+          "key": "previous_school",
+          "label": "Previous school name (if applicable)",
+          "type": "text"
+        },
+        {
+          "key": "previous_school_address",
+          "label": "Previous school address",
+          "type": "textarea"
+        },
+        {
+          "key": "previous_school_province",
+          "label": "Previous school province",
+          "type": "text"
+        },
+        {
+          "key": "previous_school_code",
+          "label": "Previous school code",
+          "type": "text"
+        },
+        {
+          "key": "previous_school_country",
+          "label": "Previous school country",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "title": "Health & documents",
+      "description": "Add relevant health details. Documents already held by the school do not need to be handed in again unless Admin asks.",
+      "fields": [
+        {
+          "key": "medical_aid_number",
+          "label": "Medical aid number",
+          "type": "text"
+        },
+        {
+          "key": "medical_aid_name",
+          "label": "Medical aid name",
+          "type": "text"
+        },
+        {
+          "key": "medical_aid_member",
+          "label": "Medical aid main member",
+          "type": "text"
+        },
+        {
+          "key": "doctor_name",
+          "label": "Doctor name",
+          "type": "text"
+        },
+        {
+          "key": "doctor_address",
+          "label": "Doctor address",
+          "type": "textarea"
+        },
+        {
+          "key": "doctor_telephone",
+          "label": "Doctor telephone",
+          "type": "text"
+        },
+        {
+          "key": "medical_condition",
+          "label": "Medical conditions / allergies",
+          "type": "textarea"
+        },
+        {
+          "key": "special_counselling",
+          "label": "Special counselling needs",
+          "type": "textarea"
+        },
+        {
+          "key": "handedness",
+          "label": "Handedness",
+          "type": "select",
+          "choices": [
+            "Right",
+            "Left",
+            "Ambidextrous"
+          ]
+        },
+        {
+          "key": "social_grant",
+          "label": "Registered for / receiving a social grant",
+          "type": "select",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "key": "document_immunisation",
+          "label": "Immunisation records",
+          "type": "select",
+          "choices": [
+            "Already at school",
+            "Will hand in",
+            "Not applicable"
+          ]
+        },
+        {
+          "key": "document_birth_certificate",
+          "label": "Birth certificate copy",
+          "type": "select",
+          "choices": [
+            "Already at school",
+            "Will hand in",
+            "Not applicable"
+          ]
+        },
+        {
+          "key": "document_progress_report",
+          "label": "Previous school progress report",
+          "type": "select",
+          "choices": [
+            "Already at school",
+            "Will hand in",
+            "Not applicable"
+          ]
+        },
+        {
+          "key": "document_transfer_letter",
+          "label": "Transfer letter",
+          "type": "select",
+          "choices": [
+            "Already at school",
+            "Will hand in",
+            "Not applicable"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Family",
+      "description": "Complete the family details that apply. Leave other fields blank.",
+      "fields": [
+        {
+          "key": "sibling_count",
+          "label": "Number of siblings",
+          "type": "text"
+        },
+        {
+          "key": "family_position",
+          "label": "Learner’s position in the family",
+          "type": "text"
+        },
+        {
+          "key": "sibling_1_name",
+          "label": "Sibling 1 name",
+          "type": "text"
+        },
+        {
+          "key": "sibling_1_grade",
+          "label": "Sibling 1 grade",
+          "type": "text"
+        },
+        {
+          "key": "sibling_2_name",
+          "label": "Sibling 2 name",
+          "type": "text"
+        },
+        {
+          "key": "sibling_2_grade",
+          "label": "Sibling 2 grade",
+          "type": "text"
+        },
+        {
+          "key": "sibling_3_name",
+          "label": "Sibling 3 name",
+          "type": "text"
+        },
+        {
+          "key": "sibling_3_grade",
+          "label": "Sibling 3 grade",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "title": "Parent / guardian",
+      "description": "Confirm who is completing this form and how the school can contact you. Email is optional.",
+      "fields": [
+        {
+          "key": "parent_title",
+          "label": "Title",
+          "type": "text"
+        },
+        {
+          "key": "parent_initials",
+          "label": "Parent / guardian initials",
+          "type": "text"
+        },
+        {
+          "key": "parent_surname",
+          "label": "Parent / guardian surname",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "parent_first_name",
+          "label": "Parent / guardian first name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "relationship",
+          "label": "Relationship to learner",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "parent_gender",
+          "label": "Parent / guardian gender",
+          "type": "text"
+        },
+        {
+          "key": "parent_language",
+          "label": "Parent / guardian language",
+          "type": "text"
+        },
+        {
+          "key": "parent_race",
+          "label": "Parent / guardian race",
+          "type": "text"
+        },
+        {
+          "key": "parent_id_passport",
+          "label": "Parent / guardian ID / passport number",
+          "type": "text"
+        },
+        {
+          "key": "account_payer",
+          "label": "Account payer",
+          "type": "select",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "key": "parent_address",
+          "label": "Residential street address",
+          "type": "textarea"
+        },
+        {
+          "key": "parent_city",
+          "label": "Residential city / suburb",
+          "type": "text"
+        },
+        {
+          "key": "parent_postal_code",
+          "label": "Residential postal code",
+          "type": "text"
+        },
+        {
+          "key": "occupation",
+          "label": "Occupation",
+          "type": "text"
+        },
+        {
+          "key": "employer",
+          "label": "Employer",
+          "type": "text"
+        },
+        {
+          "key": "marital_status",
+          "label": "Marital status",
+          "type": "text"
+        },
+        {
+          "key": "lives_with_child",
+          "label": "Lives with learner",
+          "type": "select",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "key": "spouse_surname",
+          "label": "Spouse surname",
+          "type": "text"
+        },
+        {
+          "key": "spouse_first_name",
+          "label": "Spouse first name",
+          "type": "text"
+        },
+        {
+          "key": "spouse_occupation",
+          "label": "Spouse occupation",
+          "type": "text"
+        },
+        {
+          "key": "spouse_id_passport",
+          "label": "Spouse ID / passport number",
+          "type": "text"
+        },
+        {
+          "key": "correspondence_title",
+          "label": "Correspondence title",
+          "type": "text"
+        },
+        {
+          "key": "correspondence_surname",
+          "label": "Correspondence surname",
+          "type": "text"
+        },
+        {
+          "key": "correspondence_address",
+          "label": "Postal address",
+          "type": "textarea"
+        },
+        {
+          "key": "correspondence_city",
+          "label": "Postal city / suburb",
+          "type": "text"
+        },
+        {
+          "key": "correspondence_postal_code",
+          "label": "Postal code",
+          "type": "text"
+        },
+        {
+          "key": "parent_home_telephone",
+          "label": "Home telephone",
+          "type": "text"
+        },
+        {
+          "key": "parent_work_telephone",
+          "label": "Work telephone",
+          "type": "text"
+        },
+        {
+          "key": "fax",
+          "label": "Fax (if any)",
+          "type": "text"
+        },
+        {
+          "key": "parent_mobile",
+          "label": "Parent / guardian mobile number",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "spouse_work_telephone",
+          "label": "Spouse work telephone",
+          "type": "text"
+        },
+        {
+          "key": "spouse_mobile",
+          "label": "Spouse mobile number",
+          "type": "text"
+        },
+        {
+          "key": "parent_email",
+          "label": "Parent / guardian email (optional)",
+          "type": "email"
+        },
+        {
+          "key": "spouse_email",
+          "label": "Spouse email (optional)",
+          "type": "email"
+        }
+      ]
+    }
+  ],
+  "declaration": "I declare that the information I have provided is correct to the best of my knowledge. I am the parent or guardian authorised to submit this re-registration. I understand that the school will review this form before approving re-registration for 2027."
+}

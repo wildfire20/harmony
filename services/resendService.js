@@ -38,6 +38,7 @@ async function request(config, pathname, options = {}) {
       Authorization: `Bearer ${config.apiKey}`,
       'Content-Type': 'application/json',
       'User-Agent': 'harmony-learning-institute/1.0',
+      ...(options.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {}),
     },
     signal: AbortSignal.timeout(TIMEOUT_MS),
     // Keep credentials on the fixed Resend HTTPS origin.
@@ -65,6 +66,8 @@ async function sendResendEmail(message, environment = process.env) {
   try {
     const result = await request(config, '/emails', {
       method: 'POST',
+      ...(typeof message.idempotencyKey === 'string' && /^[A-Za-z0-9_-]{1,256}$/.test(message.idempotencyKey)
+        ? { idempotencyKey: message.idempotencyKey } : {}),
       body: JSON.stringify({
         from: `${String(message.fromName).replace(/[\r\n<>]+/g, ' ').trim()} <${config.fromEmail}>`,
         to: [message.to],

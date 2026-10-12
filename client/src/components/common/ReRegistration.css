@@ -1,0 +1,62 @@
+.rr-shell { --rr-ink:#19324a; --rr-muted:#617487; --rr-line:#dce7eb; --rr-card:#fff; --rr-soft:#edf5f6; color:var(--rr-ink); max-width:1120px; margin:0 auto; }
+.rr-shell * { box-sizing:border-box; }
+.rr-shell h1 { font-size:clamp(1.65rem,4vw,2.3rem); line-height:1.2; font-weight:750; letter-spacing:-.035em; margin:8px 0 12px; }
+.rr-shell h2 { font-size:1.2rem; font-weight:700; margin:0 0 8px; }
+.rr-shell h3 { font-size:1rem; font-weight:700; margin:0 0 10px; }
+.rr-shell p { line-height:1.6; font-size:.9rem; }
+.rr-eyebrow { color:#ad4766; font-size:.7rem!important; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }
+.rr-muted { color:var(--rr-muted); }
+.rr-heading { display:flex; justify-content:space-between; align-items:start; gap:16px; margin-bottom:24px; }
+.rr-card { background:var(--rr-card); border:1px solid var(--rr-line); border-radius:20px; padding:24px; margin:16px 0; min-width:0; }
+.rr-notice { border-radius:16px; background:var(--rr-soft); border:1px solid var(--rr-line); padding:18px 20px; font-size:.9rem; line-height:1.6; overflow-wrap:anywhere; }
+.rr-notice strong { display:block; font-size:1rem; margin-bottom:4px; }
+.rr-success { background:#e7f6ef; color:#14563d; border-color:#b5dec9; }
+.rr-error { background:#fff1f1; color:#9f2727; border-color:#efc3c3; margin:16px 0; }
+.rr-status { display:inline-flex; font-size:.75rem; border-radius:40px; padding:6px 12px; background:#eef1f5; color:#4a5b6c; font-weight:750; white-space:nowrap; }
+.rr-status-submitted { background:#e1eff9; color:#1c577d; }
+.rr-status-changes_needed { background:#fff0c7; color:#7c5318; }
+.rr-status-approved { background:#d7f2e5; color:#176446; }
+.rr-status-draft { background:#f1e7f7; color:#755096; }
+.rr-steps { display:flex; gap:8px; flex-wrap:wrap; margin:24px 0 14px; }
+.rr-steps button { background:var(--rr-card); border:1px solid var(--rr-line); border-radius:11px; padding:10px 12px; min-height:44px; font-size:.8rem; color:var(--rr-muted); text-align:left; }
+.rr-steps button[aria-current="step"] { background:#19324a; color:#fff; border-color:#19324a; }
+.rr-steps span { display:inline-flex; width:22px; height:22px; align-items:center; justify-content:center; border:1px solid currentColor; border-radius:100%; font-size:.7rem; margin-right:7px; }
+.rr-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; margin-top:24px; }
+.rr-field { min-width:0; }
+.rr-field-wide { grid-column:1/-1; }
+.rr-additional { border-top:1px solid var(--rr-line); margin-top:24px; padding-top:16px; }
+.rr-additional summary { font-size:.86rem; font-weight:700; padding:10px 0; cursor:pointer; }
+.rr-additional p { margin-top:8px; }
+.rr-shell label { display:block; font-size:.82rem; font-weight:650; line-height:1.5; margin-bottom:7px; }
+.rr-shell input:not([type="checkbox"]),.rr-shell select,.rr-shell textarea { background:var(--rr-card); color:var(--rr-ink); width:100%; border:1px solid #bdcdd5; border-radius:10px; padding:11px 12px; min-height:46px; font-size:.9rem; }
+.rr-shell textarea { resize:vertical; }
+.rr-shell :focus-visible { outline:3px solid #8fc4c3; outline-offset:3px; }
+.rr-shell button:disabled { opacity:.55; cursor:wait; }
+.rr-button { display:inline-flex; align-items:center; justify-content:center; min-height:46px; padding:11px 18px; background:#176b73; color:#fff; border:1px solid transparent; border-radius:11px; font-size:.86rem; font-weight:700; text-decoration:none; }
+.rr-button:hover { filter:brightness(.95); }
+.rr-secondary { background:var(--rr-card); color:var(--rr-ink); border-color:var(--rr-line); }
+.rr-text { background:transparent; color:#176b73; }
+.rr-button-row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.rr-actions { display:flex; gap:10px; justify-content:space-between; flex-wrap:wrap; margin:22px 0; padding-bottom:8px; }
+.rr-checkbox { display:flex!important; gap:12px; align-items:start; font-weight:400!important; margin:20px 0!important; }
+.rr-checkbox input { width:20px; height:20px; flex-shrink:0; margin-top:2px; accent-color:#176b73; }
+.rr-downloads { background:var(--rr-soft); }
+.rr-downloads .rr-button-row { margin-top:14px; }
+.rr-review dl { margin:14px 0 0; }
+.rr-review dl>div { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.5fr); padding:10px 0; gap:20px; border-top:1px solid var(--rr-line); font-size:.85rem; }
+.rr-review dt { color:var(--rr-muted); }
+.rr-review dd { white-space:pre-wrap; overflow-wrap:anywhere; margin:0; }
+.rr-email { border-top:1px solid var(--rr-line); padding-top:16px; margin-top:20px; }
+.rr-email p { font-size:.8rem; }
+.rr-filters { display:grid; grid-template-columns:1fr 1fr 1.5fr auto; gap:12px; align-items:end; margin:20px 0; }
+.rr-counts { display:flex; flex-wrap:wrap; gap:8px; }
+.rr-counts span { padding:9px 13px; border:1px solid var(--rr-line); border-radius:11px; background:var(--rr-card); font-size:.8rem; }
+.rr-list-row { display:flex; gap:16px; justify-content:space-between; width:100%; text-align:left; padding:17px 20px; border-bottom:1px solid var(--rr-line); color:var(--rr-ink); min-width:0; }
+.rr-list-row:hover { background:var(--rr-soft); }
+.rr-list-row strong { display:block; }
+.rr-list-row p { color:var(--rr-muted); font-size:.8rem; }
+.rr-list { border:1px solid var(--rr-line); border-radius:18px; background:var(--rr-card); overflow:hidden; margin-top:20px; }
+.rr-pagination { display:flex; align-items:center; justify-content:space-between; margin-top:16px; gap:10px; }
+[data-theme="dark"] .rr-admin { --rr-ink:#e3edf8; --rr-muted:#a6b7ca; --rr-line:#42566c; --rr-card:#1f2e40; --rr-soft:#233c4a; }
+[data-theme="dark"] .rr-admin .rr-text { color:#8fd4cf; }
+@media(max-width:640px) { .rr-heading { flex-direction:column; gap:6px; margin-bottom:18px; } .rr-card { padding:18px; border-radius:16px; } .rr-fields { grid-template-columns:1fr; gap:18px; } .rr-field-wide { grid-column:auto; } .rr-filters { grid-template-columns:1fr 1fr; } .rr-filters>div:nth-child(3) { grid-column:1/-1; } .rr-review dl>div { grid-template-columns:1fr; gap:4px; } .rr-list-row { padding:15px; gap:8px; } .rr-list-row .rr-status { font-size:.65rem; padding:6px 8px; } .rr-steps { gap:6px; } .rr-steps button { font-size:.72rem; padding:8px; } .rr-button { padding:11px 14px; } }

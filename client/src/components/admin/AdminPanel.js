@@ -6,6 +6,7 @@ import { Settings, BarChart3, ClipboardList, GraduationCap, Users, DollarSign, S
 import SystemSettings from './SystemSettings';
 import EnrollmentManagement from './EnrollmentManagement';
 import EnquiryAlert from './EnquiryAlert';
+import ReRegistrationAlert from './ReRegistrationAlert';
 
 const AdminPanel = () => {
   const { user } = useAuth();
@@ -26,6 +27,10 @@ const AdminPanel = () => {
   ];
 
   const overviewCards = [
+    {
+      title: 'Re-registration', description: 'Review returning-learner forms for 2027 and record signed paper forms.',
+      gradient: 'from-teal-600 to-teal-700', shadow: 'shadow-teal-500/25', icon: ClipboardList, href: '/re-registration',
+    },
     {
       title: 'Enquiries',
       description: 'Read parent questions, reply and track progress.',
@@ -94,6 +99,7 @@ const AdminPanel = () => {
         return (
           <>
           <div className="mb-5"><EnquiryAlert /></div>
+          <div className="mb-5"><ReRegistrationAlert /></div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {overviewCards.map(({ title, description, gradient, shadow, icon: Icon, href, action }) => (
               <div

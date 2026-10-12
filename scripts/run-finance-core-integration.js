@@ -16,11 +16,13 @@ if (!String(process.env.FINANCE_TEST_DATABASE_URL || '').trim()) {
     process.execPath,
     [
       '--test',
+      '--test-concurrency=1',
       path.join(__dirname, '..', 'tests', 'finance-core-postgres.integration.test.js'),
       path.join(__dirname, '..', 'tests', 'finance-invoice-cancellation-postgres.integration.test.js'),
       path.join(__dirname, '..', 'tests', 'admin-discount-assignments-postgres.integration.test.js'),
       path.join(__dirname, '..', 'tests', 'parent-admin-contact-postgres.integration.test.js'),
       path.join(__dirname, '..', 'tests', 'parent-enquiries-postgres.integration.test.js'),
+      path.join(__dirname, '..', 'tests', 'parent-reregistration-postgres.integration.test.js'),
     ],
     { stdio: 'inherit', env: process.env },
   );

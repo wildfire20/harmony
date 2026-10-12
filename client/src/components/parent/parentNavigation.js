@@ -6,6 +6,7 @@ const PARENT_DESTINATIONS = new Set([
   '/parent/documents',
   '/parent/announcements',
   '/parent/notifications',
+  '/parent/re-registration',
 ]);
 
 export const getSafeParentDestination = (value) => {

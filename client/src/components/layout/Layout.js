@@ -27,6 +27,7 @@ import { ThemeToggle, useTheme, ThemedLayout } from '../common/ThemeProvider';
 import { StatusIndicator, DepartmentBadge } from '../common/BrandingElements';
 import { useResponsive, useTouchDevice } from '../../hooks/useResponsive';
 import useAdminEnquiryAlerts from '../../hooks/useAdminEnquiryAlerts';
+import useAdminReRegistrationAlerts from '../../hooks/useAdminReRegistrationAlerts';
 
 const Layout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -36,6 +37,7 @@ const Layout = () => {
   const { isMobile, isTablet } = useResponsive();
   const isTouch = useTouchDevice();
   const { count: unreadEnquiries } = useAdminEnquiryAlerts();
+  const { count: pendingReRegistrations } = useAdminReRegistrationAlerts();
 
   const { data: enrollmentStatsData } = useQuery(
     ['enrollment-stats'],
@@ -76,6 +78,7 @@ const Layout = () => {
       { name: 'Admin Panel', href: '/admin', icon: Settings, color: 'harmony-navy', badge: pendingEnrollments },
       { name: 'Admissions Notifications', href: '/enrollments?notifications=1', icon: Bell, color: 'harmony-secondary', badge: unreadAdmissionsNotifications },
       { name: 'Enquiries', href: '/enquiries', icon: MessageSquare, color: 'harmony-secondary', badge: unreadEnquiries },
+      { name: 'Re-registration', href: '/re-registration', icon: ClipboardCheck, color: 'harmony-secondary', badge: pendingReRegistrations },
       { name: 'Users', href: '/users', icon: Users, color: 'harmony-secondary' },
       { name: 'Analytics', href: '/analytics', icon: BarChart3, color: 'harmony-gold' },
       { name: 'Payments', href: '/payments', icon: CreditCard, color: 'harmony-gold' }

@@ -67,6 +67,10 @@ const ParentDashboard = ({ child, user }) => {
       </div>
 
       {/* Attendance this week */}
+      <Link to="/parent/re-registration" className="flex min-h-[80px] items-center justify-between gap-3 rounded-2xl border border-[#b9d5d4] bg-[#e8f1ef] px-5 py-4 text-[#19324a]">
+        <span><strong className="block text-base">Re-register for 2027</strong><span className="text-sm text-[#526c7b]">Complete your child’s form online or download both pages.</span></span>
+        <span aria-hidden="true" className="text-2xl">→</span>
+      </Link>
       <Link to="/parent/enquiries" className="flex min-h-[56px] items-center gap-3 rounded-2xl border border-[#dce7eb] bg-white px-4 py-3 text-[#176b73]">
         <MessageSquare className="h-5 w-5 shrink-0" />
         <span><strong className="block text-sm">Enquiry</strong><span className="text-xs text-[#617487]">Need help? Ask the school office and read replies here.</span></span>

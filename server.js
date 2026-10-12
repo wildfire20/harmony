@@ -676,6 +676,9 @@ const startServer = async () => {
     console.log(`🔗 Server URL: ${process.env.NODE_ENV === 'production' ? 'https://web-production-618c0.up.railway.app' : `http://localhost:${PORT}`}`);
   });
 
+  const stopReRegistrationEmails = require('./services/parentReRegistrationEmails').startEmailWorker();
+  server.once('close', stopReRegistrationEmails);
+
   // Initialize database asynchronously after server starts
   try {
     console.log('🔄 Initializing database connection...');
