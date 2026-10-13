@@ -54,6 +54,7 @@ export function FormDownloads({download,busy,category='primary'}) {
 export function EmailUpdates({ updates = [] }) {
   if (!updates.length) return null;
   const labels = { queued: 'Queued', sending: 'Sending', accepted: 'Accepted by email provider', skipped: 'Portal confirmation only', failed: 'Email needs attention', check_required: 'Check email provider before retrying' };
-  return <div className="rr-email"><h3>Email updates</h3>{updates.map(event => <p key={event.kind}>{event.kind === 'received' ? 'Received confirmation' : 'Approval confirmation'}: {labels[event.status] || event.status}</p>)}
+  const names = { received: 'Received confirmation', approved: 'Approval confirmation', admin_received: 'Admin notification' };
+  return <div className="rr-email"><h3>Email updates</h3>{updates.map(event => <p key={event.kind}>{names[event.kind] || 'Email notification'}: {labels[event.status] || event.status}</p>)}
     <p className="rr-muted">Email goes to the submitting account’s verified email, if available. The portal status is the main confirmation.</p></div>;
 }

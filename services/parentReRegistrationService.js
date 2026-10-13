@@ -105,7 +105,8 @@ async function detail(client, child, row, actor) {
   result.deposit=await deposits.summary(client,row,actor);
   if (row?.form_data?.returning==='Yes' && !result.deposit.verified && ['submitted','approved'].includes(row.status)) result.registration.status_label='Awaiting deposit verification';
   if (row && (isAdmin(actor) || row.submitted_by === actor.id)) result.email_updates = (await client.query(
-    'SELECT kind,status,error_category FROM parent_reregistration_emails WHERE registration_id=$1 ORDER BY id', [row.id])).rows;
+    `SELECT kind,status,error_category FROM parent_reregistration_emails WHERE registration_id=$1
+      ${isAdmin(actor) ? '' : "AND kind IN ('received','approved')"} ORDER BY id`, [row.id])).rows;
   if (isAdmin(actor)) result.parents = (await client.query(`SELECT u.id,u.first_name,u.last_name,u.phone_number FROM parent_students ps JOIN users u ON u.id=ps.parent_id
     WHERE ps.student_id=$1 AND u.role='parent' AND u.is_active=true ORDER BY u.id`, [child.id])).rows;
   return result;
@@ -167,6 +168,7 @@ async function saveRegistration(studentId, actor, body, submit = false) {
       await ensureDeposit(client,row,actor);
       row=await getRow(client,child.id);
       await queueEmail(client, row, child, 'received');
+      await require('./parentReRegistrationEmails').queueAdminReceipt(client, row, child);
     }
     await recordAction(client, row, body, actor, action, hash);
     return detail(client, child, row, actor);

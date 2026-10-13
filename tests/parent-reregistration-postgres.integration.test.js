@@ -4,13 +4,16 @@ const fs=require('node:fs');const path=require('node:path');const express=requir
 const url=process.env.FINANCE_TEST_DATABASE_URL;
 test('Short re-registration, separate fee, bank verification and preserved history',{skip:url?false:'Explicit disposable database required',timeout:120000},async t=>{
  const schema=`rereg_${crypto.randomBytes(8).toString('hex')}`;const control=new Pool({connectionString:url,max:1,ssl:false});
- let db,server;const savedSecret=process.env.JWT_SECRET;const tokens={};const key=()=>crypto.randomUUID();
+ let db,server;const savedSecret=process.env.JWT_SECRET;const savedAdminEmail=process.env.ADMIN_NOTIFICATION_EMAIL;const tokens={};const key=()=>crypto.randomUUID();
  const complete=(extra={})=>({date_of_birth:'2018-05-12',gender:'Male',parent_full_name:'Synthetic Parent',parent_mobile:'0731234567',parent_whatsapp:'0731234567',physical_address:'123 Synthetic Street',returning:'Yes',grade_applied_for:'Grade 3',declared_name:'Synthetic Parent',declaration_accepted:true,...extra});
  try{
   await control.query(`CREATE SCHEMA "${schema}"`);const scoped=new URL(url);scoped.searchParams.set('options',`-csearch_path=${schema}`);
   db=require('../config/database');assert.equal(db.pool.totalCount,0);db.pool.options.connectionString=scoped.toString();db.pool.options.ssl=false;db.pool.options.max=8;db.pool.options.query_timeout=15000;
   process.env.JWT_SECRET='synthetic-short-returning-learner-test';
+  process.env.ADMIN_NOTIFICATION_EMAIL='office@example.test';
   await db.query(fs.readFileSync(path.join(__dirname,'fixtures','finance-core-base.sql'),'utf8'));
+  // Reproduce the older production proof schema, rather than relying on a newer fixture.
+  await db.query('ALTER TABLE pending_payments DROP COLUMN payment_date');
   await db.query(`ALTER TABLE users ADD COLUMN email_verified_at TIMESTAMPTZ,ADD COLUMN auth_revoked_at TIMESTAMPTZ,ADD COLUMN date_of_birth DATE,ADD COLUMN gender TEXT;
     ALTER TABLE grades ADD COLUMN is_active BOOLEAN DEFAULT true;
     CREATE TABLE classes(id INTEGER PRIMARY KEY,name TEXT);
@@ -32,7 +35,7 @@ test('Short re-registration, separate fee, bank verification and preserved histo
     SELECT setval(pg_get_serial_sequence('payment_transactions','id'),2);`);
   for(const file of ['finance_core_architecture.sql','finance_invoice_cancellation.sql']) await db.query(fs.readFileSync(path.join(__dirname,'..','migrations',file),'utf8'));
   for(const id of [1,2,10,11,12]){const session=key();if(id>=10)await db.query('INSERT INTO parent_sessions(id,user_id) VALUES($1,$2)',[session,id]);tokens[id]=jwt.sign({id,...(id>=10?{session_id:session}:{})},process.env.JWT_SECRET,{expiresIn:'10m'});}
-  const app=express();app.use(express.json());app.use('/api/parent/re-registration',require('../routes/parentReRegistration'));app.use('/api/payment-proofs',require('../routes/paymentProofs'));
+  const app=express();app.use(express.json());app.use('/api/parent/re-registration',require('../routes/parentReRegistration'));app.use('/api/parent/enquiries',require('../routes/parentEnquiries'));app.use('/api/payment-proofs',require('../routes/paymentProofs'));
   server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});const base=`http://127.0.0.1:${server.address().port}`;
   const req=async(p='',body,actor=10,multipart=false)=>{const res=await fetch(base+(p.startsWith('/api/')?p:'/api/parent/re-registration'+p),{method:body?'POST':'GET',headers:{...(actor?{Authorization:`Bearer ${tokens[actor]}`} : {}),...(!multipart?{'Content-Type':'application/json'}:{})},...(body?{body:multipart?body:JSON.stringify(body)}:{})});return {status:res.status,...(res.headers.get('content-type')?.includes('json')?{data:await res.json()}:{bytes:Buffer.from(await res.arrayBuffer())})};};
   const get=(id,actor=10)=>req(actor<10?`/admin/${id}`:`?child_id=${id}`,undefined,actor);
@@ -42,12 +45,41 @@ test('Short re-registration, separate fee, bank verification and preserved histo
   const proof=async(id,amount='500',request_key=key(),actor=10)=>{const fd=new FormData();for(const [k,v]of Object.entries({amount,payment_date:'2026-10-12',payment_method:'eft',request_key}))fd.append(k,v);fd.append('receipt',new Blob([Buffer.from('%PDF-1.4\nSynthetic proof\n%%EOF')],{type:'application/pdf'}),'synthetic-proof.pdf');return req(`/deposit-proof?child_id=${id}`,fd,actor,true);};
   const rows=async(table,where='')=>(await db.query(`SELECT * FROM ${table} ${where} ORDER BY id`)).rows;
   const protectedInvoices=await rows('invoices');const protectedPayments=await rows('payment_transactions');const originalUsers=await rows('users');
-  await t.test('migration is additive, repeatable and absent schema returns 503',async()=>{assert.equal((await get(501)).status,503);await require('../scripts/run-parent-reregistration-migration').run(db);await require('../scripts/run-parent-reregistration-migration').run(db);assert.deepEqual(await rows('invoices'),protectedInvoices);assert.deepEqual(await rows('users'),originalUsers);});
+  await t.test('release migration repairs the old enquiry and proof schemas without losing existing records',async()=>{
+    assert.equal((await get(501)).status,503);
+    await require('../scripts/run-parent-enquiries-migration').run(db);
+    const enquiry=(await db.query(`INSERT INTO parent_enquiries(parent_id,source,contact_name,contact_phone,subject,request_key,request_hash)
+      VALUES(10,'portal','Synthetic Parent','27731234567','Existing question',$1,$2) RETURNING id`,[key(),'0'.repeat(64)])).rows[0];
+    await db.query(`INSERT INTO parent_enquiry_messages(enquiry_id,author_id,author_role,body,request_key,request_hash)
+      VALUES($1,10,'parent','Keep this existing conversation',$2,$3)`,[enquiry.id,key(),'0'.repeat(64)]);
+    const savedMessages=await rows('parent_enquiry_messages');
+    await db.query('DROP TABLE parent_enquiry_admin_reads');
+    assert.equal((await req('/api/parent/enquiries/admin',undefined,1)).status,503);
+    const migrate=require('../scripts/run-parent-portal-migrations').run;
+    await migrate(db);await migrate(db);
+    const inbox=await req('/api/parent/enquiries/admin',undefined,1);
+    assert.equal(inbox.status,200);assert.equal(inbox.data.enquiries[0].id,enquiry.id);assert.equal(inbox.data.enquiries[0].unread,true);
+    assert.deepEqual(await rows('parent_enquiry_messages'),savedMessages);
+    await db.query('SELECT payment_date FROM pending_payments LIMIT 0');
+    assert.deepEqual(await rows('invoices'),protectedInvoices);assert.deepEqual(await rows('users'),originalUsers);
+  });
   await t.test('roles, active sessions, ownership and download authentication',async()=>{assert.equal((await get(501,null)).status,401);assert.equal((await get(501,12)).status,401);assert.equal((await get(501,2)).status,403);assert.equal((await get(504)).status,404);assert.equal((await req('/admin',undefined,10)).status,403);assert.equal((await req('/forms/primary?child_id=504')).status,404);const pdf=await req('/forms/primary?child_id=501');assert.equal(pdf.status,200);assert.equal(pdf.bytes.subarray(0,5).toString(),'%PDF-');assert.equal((await req('/forms/complete?child_id=501')).status,404);});
   await t.test('short prefills bind HAR identity and do not guess next-year grade',async()=>{const x=await get(501);assert.equal(x.status,200);assert.equal(x.data.registration.form.learner_reference,'HARTEST501');assert.equal(x.data.registration.form.current_grade,'Grade 2');assert.equal(x.data.registration.form.grade_applied_for,undefined);assert.ok(!JSON.stringify(x.data).includes('password'));assert.equal((await submit(501,complete({learner_reference:'HARTEST999'}))).status,400);assert.equal((await submit(501,complete({gender:'Other'}))).status,400);});
   await t.test('draft creates no fee; submit issues exactly one separate fee and repeated requests are safe',async()=>{const draft=await submit(501,complete(),0,key(),10,'draft');assert.equal(draft.status,200);assert.equal(draft.data.deposit.invoice_id,null);const k=key();const result=await submit(501,complete(),1,k);assert.equal(result.status,200);assert.equal(result.data.deposit.outstanding,500);assert.equal(result.data.registration.status_label,'Awaiting deposit verification');assert.equal((await submit(501,complete(),1,k)).data.duplicate,true);assert.equal((await rows('invoices',"WHERE invoice_source='parent_reregistration' AND student_id=501")).length,1);assert.equal((await review(501,'approve',2,'',{review_confirmed:true})).status,409);assert.equal((await get(501,11)).data.registration.form,null);});
   await t.test('typed proof is stored durably and reservations block duplicate or competing uploads',async()=>{const k=key();const first=await proof(501,'500',k);assert.equal(first.status,200);assert.equal(first.data.deposit.pending_amount,500);assert.equal((await proof(501,'500',k)).data.duplicate,true);assert.equal((await proof(501,'500')).status,409);assert.equal((await proof(501,'500',key(),11)).status,409);const pp=(await rows('pending_payments'))[0];assert.ok(pp.receipt_data.length>0);assert.equal((await req('/api/payment-proofs/'+pp.id+'/receipt',undefined,11)).status,403);});
   await t.test('bank confirmation and exact learner allocation are required before approval',async()=>{const id=(await rows('pending_payments'))[0].id;assert.equal((await req('/admin/501/proof',{action:'verify',proof_id:id,request_key:key()},1)).status,400);assert.equal((await req('/admin/502/proof',{action:'verify',proof_id:id,bank_confirmed:true,request_key:key()},1)).status,409);const verified=await req('/admin/501/proof',{action:'verify',proof_id:id,bank_confirmed:true,request_key:key()},1);assert.equal(verified.status,200);assert.equal(verified.data.deposit.verified,true);const approved=await review(501,'approve',2,'Welcome back.',{review_confirmed:true});assert.equal(approved.status,200);assert.equal(approved.data.registration.status,'approved');});
+  await t.test('phone screenshots upload with the declared payment date on the upgraded schema',async()=>{
+    assert.equal((await submit(510)).status,200);
+    const requestKey=key();const fd=new FormData();
+    for(const [k,v]of Object.entries({amount:'500',payment_date:'2026-10-12',payment_method:'eft',request_key:requestKey}))fd.append(k,v);
+    fd.append('receipt',new Blob([Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9','hex')],{type:'image/jpeg'}),'phone-screenshot.jpg');
+    const uploaded=await req('/deposit-proof?child_id=510',fd,10,true);
+    assert.equal(uploaded.status,200);const id=uploaded.data.deposit.proofs[0].id;
+    assert.equal((await db.query("SELECT to_char(payment_date,'YYYY-MM-DD') AS day FROM pending_payments WHERE id=$1",[id])).rows[0].day,'2026-10-12');
+    assert.equal((await req('/admin/510/proof',{action:'verify',proof_id:id,bank_confirmed:true,request_key:key()},1)).status,200);
+    const payment=(await db.query("SELECT amount,to_char(payment_date,'YYYY-MM-DD') AS day FROM payment_transactions WHERE reference_number=$1",['PROOF-'+id])).rows[0];
+    assert.equal(Number(payment.amount),500);assert.equal(payment.day,'2026-10-12');
+  });
   await t.test('No and preschool confirmations issue no fee or false approval',async()=>{const no=await submit(502,complete({returning:'No',nonreturn_reason:'Moving schools'}));assert.equal(no.status,200);assert.equal(no.data.deposit.invoice_id,null);assert.equal((await review(502,'approve',1,'',{review_confirmed:true})).status,409);assert.equal((await review(502,'record_not_returning',1,'',{review_confirmed:true})).data.registration.status,'recorded');const pre=await submit(503,complete({grade_applied_for:'Grade R'}));assert.equal(pre.status,200);assert.equal(pre.data.deposit.required,false);assert.equal((await review(503,'approve',1,'',{review_confirmed:true})).status,200);});
   await t.test('paper form with no email, partial card payment and POS receipt',async()=>{assert.equal((await review(505,'paper',0,'Office only',{form:complete(),parent_id:11,paper_signed:true,received_date:'2026-10-12'})).status,200);assert.equal((await get(505,11)).data.registration.form,null);assert.equal((await deposit(505,'200')).status,200);assert.equal((await review(505,'approve',1,'',{review_confirmed:true})).status,409);assert.equal((await deposit(505,'300')).data.deposit.verified,true);assert.equal((await review(505,'approve',1,'',{review_confirmed:true})).status,200);});
   await t.test('required form audit failure rolls back fee, snapshot, outbox and form',async()=>{const before=(await rows('invoices')).length;await db.query("ALTER TABLE audit_logs ADD CONSTRAINT inject_submit_failure CHECK(action<>'reregistration_submit') NOT VALID");try{assert.equal((await submit(506)).status,500);}finally{await db.query('ALTER TABLE audit_logs DROP CONSTRAINT inject_submit_failure');}assert.equal((await rows('invoices')).length,before);assert.equal((await get(506)).data.registration.status,'not_started');});
@@ -56,7 +88,22 @@ test('Short re-registration, separate fee, bank verification and preserved histo
   await t.test('rejected proof can be replaced without creating another fee',async()=>{const x=await proof(507);assert.equal(x.status,200);const id=x.data.deposit.proofs[0].id;assert.equal((await req('/admin/507/proof',{action:'reject',proof_id:id,request_key:key()},1)).status,400);assert.equal((await req('/admin/507/proof',{action:'reject',proof_id:id,note:'Receipt not readable.',request_key:key()},1)).status,200);assert.equal((await proof(507)).status,200);});
   await t.test('late bank audit failure rolls back the payment and invoice balance',async()=>{await submit(508);const x=await proof(508);const id=x.data.deposit.proofs[0].id;await db.query("ALTER TABLE audit_logs ADD CONSTRAINT inject_verify_failure CHECK(action<>'reregistration_review_proof') NOT VALID");try{assert.equal((await req('/admin/508/proof',{action:'verify',proof_id:id,bank_confirmed:true,request_key:key()},1)).status,500);}finally{await db.query('ALTER TABLE audit_logs DROP CONSTRAINT inject_verify_failure');}const after=await get(508);assert.equal(after.data.deposit.amount_paid,0);assert.equal(after.data.deposit.proofs[0].status,'pending');});
   await t.test('legacy long drafts remain in Admin history and are replaced with safe short prefills',async()=>{await db.query(`INSERT INTO parent_reregistrations(school_year,student_id,submitted_by,source,form_data) VALUES(2027,509,10,'portal','{"parent_id_passport":"PRIVATE-LEGACY"}')`);const before=await get(509);assert.ok(!JSON.stringify(before.data).includes('PRIVATE-LEGACY'));assert.equal(before.data.registration.form.learner_reference,'HARTEST509');assert.equal((await submit(509,complete(),1)).status,200);const h=await req('/admin/509/history',undefined,1);assert.equal(h.data.versions[0].form_data.parent_id_passport,'PRIVATE-LEGACY');});
-  await t.test('only two durable email events and none required for parents without email',async()=>{const outbox=require('../services/parentReRegistrationEmails');const sent=[];let result;do{result=await outbox.processOne({database:db,ready:true,environment:{},send:async(...args)=>{sent.push(args);return{success:true};}});}while(!result.empty);assert.ok(sent.length>0);const events=await rows('parent_reregistration_emails');assert.ok(events.every(e=>['received','approved'].includes(e.kind)));assert.ok(events.filter(e=>e.registration_id===(null)).length===0);assert.ok(!events.some((e,i)=>events.some((other,j)=>j!==i && other.registration_id===e.registration_id && other.kind===e.kind)));assert.ok(events.some(e=>e.status==='skipped'));});
+  await t.test('one Admin email alert per online submission and private Parent confirmations',async()=>{
+    const parentDetail=await get(501);assert.ok(parentDetail.data.email_updates.every(e=>['received','approved'].includes(e.kind)));
+    const adminDetail=await get(501,1);assert.ok(adminDetail.data.email_updates.some(e=>e.kind==='admin_received'));
+    const paperId=(await get(505,1)).data.registration.id;
+    const outbox=require('../services/parentReRegistrationEmails');const sent=[];let result;
+    do{result=await outbox.processOne({database:db,ready:true,environment:{ADMIN_NOTIFICATION_EMAIL:'office@example.test'},send:async(...args)=>{sent.push(args);return{success:true};}});}while(!result.empty);
+    const events=await rows('parent_reregistration_emails');
+    assert.ok(events.every(e=>['received','approved','admin_received'].includes(e.kind)));
+    assert.ok(!events.some((e,i)=>events.some((other,j)=>j!==i && other.registration_id===e.registration_id && other.kind===e.kind)));
+    const alerts=events.filter(e=>e.kind==='admin_received');assert.ok(alerts.length>0);
+    assert.ok(alerts.every(e=>e.recipient_email==='office@example.test' && e.status==='accepted'));
+    assert.ok(!alerts.some(e=>e.registration_id===paperId));
+    assert.equal(sent.filter(args=>args[0]==='office@example.test').length,alerts.length);
+    assert.ok(sent.some(args=>args[0]==='first@example.test'));assert.ok(events.some(e=>e.kind==='received' && e.status==='skipped'));
+    assert.ok(sent.filter(args=>args[0]==='office@example.test').every(args=>args[2].includes('https://www.harmonylearning.co.za/re-registration')));
+  });
   await t.test('tuition, October billing, existing transactions and accounts remain byte-for-byte unchanged',async()=>{assert.deepEqual(await rows('invoices','WHERE id IN (11091,11473)'),protectedInvoices);assert.deepEqual(await rows('payment_transactions','WHERE id IN (1,2)'),protectedPayments);assert.deepEqual(await rows('users'),originalUsers);});
- }finally{if(server)await new Promise(r=>server.close(r));if(db)await db.pool.end();await control.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(()=>{});await control.end();if(savedSecret===undefined)delete process.env.JWT_SECRET;else process.env.JWT_SECRET=savedSecret;}
+ }finally{if(server)await new Promise(r=>server.close(r));if(db)await db.pool.end();await control.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(()=>{});await control.end();if(savedSecret===undefined)delete process.env.JWT_SECRET;else process.env.JWT_SECRET=savedSecret;if(savedAdminEmail===undefined)delete process.env.ADMIN_NOTIFICATION_EMAIL;else process.env.ADMIN_NOTIFICATION_EMAIL=savedAdminEmail;}
 });

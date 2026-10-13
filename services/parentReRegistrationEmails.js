@@ -1,8 +1,24 @@
-/* Durable two-event outbox. No parent form or approval depends on mail availability. */
+/* Durable Parent confirmations and Admin alerts. Forms do not depend on mail availability. */
 const db = require('../config/database');
-const { sendEmail, getEmailProvider } = require('./gmailService');
+const { sendEmail, getEmailProvider, escapeHtml } = require('./gmailService');
 const { getResendConfig } = require('./resendService');
 const LOCK = 7272027;
+function adminNotificationAddress(environment = process.env) {
+  const address = String(environment.ADMIN_NOTIFICATION_EMAIL || '').trim();
+  return /^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(address) ? address : null;
+}
+async function queueAdminReceipt(client, registration, child, environment = process.env) {
+  if (registration.source !== 'portal') return;
+  const recipient = adminNotificationAddress(environment);
+  const ref = `RR-${registration.school_year}-${String(registration.id).padStart(6, '0')}`;
+  const html = `<div style="font-family:Arial,sans-serif;color:#19324a;max-width:560px;margin:auto"><h2>New re-registration received</h2>
+    <p>A parent has submitted a re-registration form for ${registration.school_year}. Please review it in the Admin dashboard.</p>
+    <p><strong>Learner:</strong> ${escapeHtml(`${child.first_name} ${child.last_name}`)}<br><strong>Child reference:</strong> ${escapeHtml(child.student_number)}<br><strong>Re-registration:</strong> ${ref}</p>
+    <p><a href="https://www.harmonylearning.co.za/re-registration">Review re-registrations</a></p><p>Harmony Learning Institute</p></div>`;
+  await client.query(`INSERT INTO parent_reregistration_emails(registration_id,kind,recipient_email,subject,html,status,error_category)
+    VALUES($1,'admin_received',$2,$3,$4,$5,$6) ON CONFLICT(registration_id,kind) DO NOTHING`,
+    [registration.id, recipient, `New re-registration received — ${ref}`, html, recipient ? 'queued' : 'skipped', recipient ? null : 'NO_ADMIN_NOTIFICATION_EMAIL']);
+}
 function dailyLimit(environment = process.env) {
   const value = Number(environment.PARENT_REREGISTRATION_EMAIL_DAILY_LIMIT || 50);
   return Number.isInteger(value) && value >= 1 && value <= 10000 ? value : 50;
@@ -16,10 +32,10 @@ async function processOne({ database = db, send = sendEmail, environment = proce
   try {
     locked = (await client.query('SELECT pg_try_advisory_lock($1) AS locked', [LOCK])).rows[0].locked;
     if (!locked) return { busy: true };
-    const row = (await client.query(`SELECT e.*,r.student_id,r.status AS registration_status,r.definition_version,r.form_data,r.deposit_invoice_id FROM parent_reregistration_emails e
+    const row = (await client.query(`SELECT e.*,r.student_id,r.source AS registration_source,r.status AS registration_status,r.definition_version,r.form_data,r.deposit_invoice_id FROM parent_reregistration_emails e
       JOIN parent_reregistrations r ON r.id=e.registration_id
       WHERE e.status IN ('queued','sending') AND e.next_attempt_at<=NOW()
-        AND (e.kind='received' OR NOT EXISTS (SELECT 1 FROM parent_reregistration_emails receipt
+        AND (e.kind<>'approved' OR NOT EXISTS (SELECT 1 FROM parent_reregistration_emails receipt
           WHERE receipt.registration_id=e.registration_id AND receipt.kind='received' AND receipt.status IN ('queued','sending')))
       ORDER BY e.created_at,e.id LIMIT 1`)).rows[0];
     if (!row) return { empty: true };
@@ -41,7 +57,10 @@ async function processOne({ database = db, send = sendEmail, environment = proce
       await client.query("UPDATE parent_reregistration_emails SET status='check_required',error_category='CHECK_RESEND_BEFORE_RETRY' WHERE id=$1", [row.id]);
       return { check_required: true };
     }
-    const recipient = (await client.query(`SELECT u.id FROM users u JOIN parent_students ps ON ps.parent_id=u.id
+    const recipient = row.kind === 'admin_received'
+      ? row.registration_source === 'portal' && Boolean(adminNotificationAddress(environment)) && row.recipient_email === adminNotificationAddress(environment)
+        && Boolean((await client.query("SELECT 1 FROM users WHERE id=$1 AND role='student' AND is_active=true", [row.student_id])).rows.length)
+      : (await client.query(`SELECT u.id FROM users u JOIN parent_students ps ON ps.parent_id=u.id
       JOIN users child ON child.id=ps.student_id WHERE u.id=$1 AND ps.student_id=$2 AND u.email=$3
       AND u.role='parent' AND u.is_active=true AND (to_jsonb(u)->>'email_verified_at') IS NOT NULL
       AND child.role='student' AND child.is_active=true`, [row.recipient_id, row.student_id, row.recipient_email])).rows[0];
@@ -98,4 +117,4 @@ function startEmailWorker() {
   timer.unref();
   return () => clearInterval(timer);
 }
-module.exports = { processOne, startEmailWorker, dailyLimit };
+module.exports = { processOne, startEmailWorker, dailyLimit, queueAdminReceipt, adminNotificationAddress };

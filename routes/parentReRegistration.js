@@ -15,7 +15,10 @@ router.use((req, res, next) => {
 const handle = operation => async (req, res) => {
   try { await operation(req, res); }
   catch (error) {
-    if (['42P01','42703'].includes(error.code)) return res.status(503).json({ message: 'Online re-registration is not available yet. Please contact the school office.' });
+    if (['42P01','42703'].includes(error.code)) {
+      console.error('Parent re-registration schema is incomplete.', { code: error.code });
+      return res.status(503).json({ message: 'Online re-registration is not available yet. Please contact the school office.' });
+    }
     if (error.code === '23505' || error.code === '40P01') return res.status(409).json({ message: 'This form has changed. Please reload it before trying again.' });
     if (error.status) return res.status(error.status).json({ message: error.message });
     console.error('Parent re-registration request failed');

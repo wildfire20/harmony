@@ -47,14 +47,16 @@ There is one form and at most one registration-fee invoice per child/year. Conta
 | Approved | School approved the returning learner |
 | Not returning | Admin recorded the signed No response |
 
-Only two email events are queued: first receipt and approval. They use the submitting guardian's active, verified account email. Parents without verified email receive the same portal status. Drafts, proof uploads, corrections and refreshes do not create extra re-registration emails. Provider acceptance is not a promise of inbox delivery. The existing Resend configuration is reused.
+Parents receive two email events: first receipt and approval, using the submitting guardian's active, verified account email. Parents without verified email receive the same portal status.
+
+The first online submission also queues one Admin email alert to the school's existing `ADMIN_NOTIFICATION_EMAIL`. A duplicate submission, refresh, proof upload or draft does not create another alert. Paper forms recorded by Admin do not alert Admin again. The Admin email status is visible only to Admin. These messages share the existing re-registration daily budget and Resend configuration. Provider acceptance is not a promise of inbox delivery.
 
 ## Release
 
 Merge the tested feature changes into master and wait for the Railway web deployment to show SUCCESS. Then run the additive migration in the service container:
 
 ```sh
-npm run migrate:parent-reregistration
+npm run migrate:parent-portal
 ```
 
 The migration is repeatable and does not populate registration forms, invoices or payments. It adds the registration tables/columns and scoped constraints only. Startup does not run it automatically. Synthetic tests use an explicit disposable FINANCE_TEST_DATABASE_URL, never production.
