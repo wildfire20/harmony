@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS parent_reregistration_actions (
 CREATE TABLE IF NOT EXISTS parent_reregistration_emails (
   id SERIAL PRIMARY KEY,
   registration_id INTEGER NOT NULL REFERENCES parent_reregistrations(id) ON DELETE RESTRICT,
-  kind TEXT NOT NULL CHECK (kind IN ('received','approved')),
+  kind TEXT NOT NULL CHECK (kind IN ('received','approved','admin_received')),
   recipient_id INTEGER REFERENCES users(id) ON DELETE RESTRICT,
   recipient_email TEXT,
   subject TEXT NOT NULL,
@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS parent_reregistration_emails (
   UNIQUE(registration_id,kind)
 );
 CREATE INDEX IF NOT EXISTS parent_reregistration_emails_pending ON parent_reregistration_emails(next_attempt_at) WHERE status IN ('queued','sending');
+ALTER TABLE parent_reregistration_emails DROP CONSTRAINT IF EXISTS parent_reregistration_emails_kind_check;
+ALTER TABLE parent_reregistration_emails ADD CONSTRAINT parent_reregistration_emails_kind_check
+  CHECK(kind IN ('received','approved','admin_received'));
 CREATE TABLE IF NOT EXISTS parent_reregistration_email_budget (
   budget_day DATE PRIMARY KEY,
   attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0)
@@ -71,6 +74,9 @@ CREATE TABLE IF NOT EXISTS parent_reregistration_versions (
   archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(registration_id,version)
 );
+-- Older Finance installations do not have a declared payment date on a proof.
+-- A nullable column preserves all existing rows and lets approval use the parent's date.
+ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS payment_date DATE;
 CREATE TABLE IF NOT EXISTS parent_reregistration_proofs (
   proof_id INTEGER PRIMARY KEY REFERENCES pending_payments(id) ON DELETE RESTRICT,
   registration_id INTEGER NOT NULL REFERENCES parent_reregistrations(id) ON DELETE RESTRICT,

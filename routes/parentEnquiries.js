@@ -20,7 +20,10 @@ router.use((req, res, next) => {
 const handle = operation => async (req, res) => {
   try { await operation(req, res); }
   catch (error) {
-    if (['42P01', '42703'].includes(error.code)) return res.status(503).json({ message: 'Enquiries are not available yet. Please contact the school office.' });
+    if (['42P01', '42703'].includes(error.code)) {
+      console.error('Parent enquiry schema is incomplete.', { code: error.code });
+      return res.status(503).json({ message: 'Enquiries are not available yet. Please contact the school office.' });
+    }
     if (error.code === '23505') return res.status(409).json({ message: 'This request has changed. Please refresh and try again.' });
     if (error.status) return res.status(error.status).json({ message: error.message });
     console.error('Parent enquiry request failed');

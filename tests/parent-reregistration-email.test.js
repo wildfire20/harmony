@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { sendResendEmail } = require('../services/resendService');
+const { adminNotificationAddress } = require('../services/parentReRegistrationEmails');
+test('Admin alerts use only the configured school address and reject ambiguous or unsafe recipients',()=>{
+  assert.equal(adminNotificationAddress({ADMIN_NOTIFICATION_EMAIL:' office@example.test '}),'office@example.test');
+  for(const value of [undefined,'','invalid','one@example.test,two@example.test','office@example.test\r\nBcc:other@example.test']) {
+    assert.equal(adminNotificationAddress({ADMIN_NOTIFICATION_EMAIL:value}),null);
+  }
+});
 test('optional provider idempotency header preserves existing mail payloads and stays on the fixed origin',async()=>{
   const original=global.fetch;const calls=[];
   global.fetch=async(url,options)=>{calls.push({url,options});return{ok:true,json:async()=>({id:'synthetic-id'})};};

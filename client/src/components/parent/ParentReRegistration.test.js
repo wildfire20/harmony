@@ -48,6 +48,15 @@ test('a successful submission shows receipt and status without claiming approval
   expect(container.textContent).toContain('Your re-registration has been received');expect(container.textContent).toContain('Queued');expect(container.textContent).toContain('Admin will review it');
   expect(button('Save draft')).toBeUndefined();expect(button('View submitted form')).toBeTruthy();
 });
+test('the declaration label toggles the real checkbox and unchecked forms cannot be submitted',async()=>{
+  parentApi.mockResolvedValue(fixture({form:{...form,declaration_accepted:false}}));
+  await render();const checkbox=container.querySelector('.rr-checkbox input[type="checkbox"]');
+  expect(checkbox.checked).toBe(false);await click(button('Submit re-registration'));
+  expect(container.querySelector('[role="alert"]').textContent).toContain('declaration');
+  expect(parentApi.mock.calls.some(([,options])=>options)).toBe(false);
+  await click(checkbox.closest('label').querySelector('span'));expect(checkbox.checked).toBe(true);
+  await click(checkbox.closest('label').querySelector('span'));expect(checkbox.checked).toBe(false);
+});
 test('a parent without email sees the same confirmation and a changes-needed message can be corrected',async()=>{
   parentApi.mockResolvedValue({...fixture({status:'changes_needed',status_label:'Changes needed',version:2,review_note:'Please check the address.'}),email_updates:[{kind:'received',status:'skipped'}]});
   await render();expect(container.textContent).toContain('Please check the address.');expect(button('Save draft')).toBeTruthy();

@@ -38,8 +38,8 @@
 .rr-text { background:transparent; color:#176b73; }
 .rr-button-row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
 .rr-actions { display:flex; gap:10px; justify-content:space-between; flex-wrap:wrap; margin:22px 0; padding-bottom:8px; }
-.rr-checkbox { display:flex!important; gap:12px; align-items:start; font-weight:400!important; margin:20px 0!important; }
-.rr-checkbox input { width:20px; height:20px; flex-shrink:0; margin-top:2px; accent-color:#176b73; }
+.rr-checkbox { display:flex!important; gap:12px; align-items:start; font-weight:400!important; margin:20px 0!important; min-height:44px; cursor:pointer; }
+.rr-shell .rr-checkbox input[type="checkbox"] { -webkit-appearance:checkbox; appearance:auto; display:inline-block; width:22px; height:22px; min-width:22px; min-height:22px; flex:0 0 22px; padding:0; margin:2px 0 0; accent-color:#176b73; cursor:pointer; }
 .rr-downloads { background:var(--rr-soft); }
 .rr-downloads .rr-button-row { margin-top:14px; }
 .rr-review dl { margin:14px 0 0; }
