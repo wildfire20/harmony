@@ -80,7 +80,7 @@ export const parentApi = async (path, opts = {}) => {
     : `${path}${path.includes('?') ? '&' : '?'}child_id=${encodeURIComponent(selected.id)}`;
   const request = (authToken) => fetch(`/api/parent${requestPath}`, {
     ...requestOptions, credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...(opts.headers || {}) },
+    headers: { ...(requestOptions.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...(opts.headers || {}) },
   });
   let res = await request(token);
   if (res.status === 401) {

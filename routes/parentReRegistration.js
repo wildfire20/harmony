@@ -1,6 +1,5 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
-const path = require('node:path');
 const { authenticate, authorize } = require('../middleware/auth');
 const service = require('../services/parentReRegistrationService');
 const router = express.Router();
@@ -10,7 +9,7 @@ const writeLimiter = rateLimit({ windowMs: 15*60*1000, max: 60, standardHeaders:
   keyGenerator: req => String(req.user.id), message: { message: 'Too many requests. Please try again later.' } });
 router.use((req, res, next) => {
   res.set('Cache-Control','no-store');
-  if (['POST','PATCH'].includes(req.method) && !req.is('application/json')) return res.status(415).json({ message: 'Please use the re-registration form.' });
+  if (['POST','PATCH'].includes(req.method) && !req.is('application/json') && !(req.path==='/deposit-proof' && req.is('multipart/form-data'))) return res.status(415).json({ message: 'Please use the re-registration form.' });
   next();
 });
 const handle = operation => async (req, res) => {
@@ -23,14 +22,15 @@ const handle = operation => async (req, res) => {
     res.status(500).json({ message: 'We could not save or load this form. Please try again.' });
   }
 };
-const documents = { complete: 'Harmony_2027_Re_registration_Complete.pdf', page1: 'Harmony_2027_Re_registration_Page_1.pdf', page2: 'Harmony_2027_Re_registration_Page_2.pdf' };
-router.get('/forms/:document', authenticate, authorize('parent','admin','super_admin'), (req, res) => {
-  const filename = documents[req.params.document];
-  if (!filename) return res.status(404).json({ message: 'Form not found.' });
-  res.download(path.join(__dirname,'..','assets','forms',filename), filename, error => {
-    if (error && !res.headersSent) res.status(503).json({ message: 'The form download is unavailable. Please contact the school office.' });
-  });
-});
+router.get('/forms/:document',authenticate,authorize('parent','admin','super_admin'),handle(async(req,res)=>{
+  const result=await service.downloadForm(req.query.child_id,req.user,req.params.document);
+  res.type('application/pdf').set('Content-Disposition',`attachment; filename="${result.filename}"`).send(result.bytes);
+}));
+router.post('/deposit-proof',...parent,writeLimiter,require('./paymentProofs').uploadReceipt,handle(async(req,res)=>
+  res.json(await service.depositAction(req.query.child_id,req.user,req.body,req.file,'submit_proof'))));
+router.get('/admin/:studentId/history',...admin,handle(async(req,res)=>res.json(await service.history(req.params.studentId,req.user))));
+router.post('/admin/:studentId/deposit',...admin,writeLimiter,handle(async(req,res)=>res.json(await service.depositAction(req.params.studentId,req.user,req.body,null,'record_deposit'))));
+router.post('/admin/:studentId/proof',...admin,writeLimiter,handle(async(req,res)=>res.json(await service.depositAction(req.params.studentId,req.user,req.body,null,'review_proof'))));
 router.get('/admin', ...admin, handle(async (req,res) => res.json(await service.listRegistrations(req.user,req.query))));
 router.get('/admin/pending-count', ...admin, handle(async (req,res) => res.json(await service.pendingCount(req.user))));
 router.get('/admin/:studentId', ...admin, handle(async (req,res) => res.json(await service.getRegistration(req.params.studentId,req.user))));

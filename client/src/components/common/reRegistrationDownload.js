@@ -1,7 +1,7 @@
-const filenames = { complete: 'Harmony_2027_Re_registration_Complete.pdf', page1: 'Harmony_2027_Re_registration_Page_1.pdf', page2: 'Harmony_2027_Re_registration_Page_2.pdf' };
-export async function downloadReRegistration(document, getBlob) {
+const filenames={primary:'Harmony_2027_Grades_1_7_Re_registration_Form.pdf',preschool:'Harmony_2027_Preschool_Re_registration_Form.pdf'};
+export async function downloadReRegistration(document, getBlob, childId) {
   if (!filenames[document]) throw new Error('Form not found.');
-  const blob = await getBlob(`/api/parent/re-registration/forms/${document}`);
+  const blob = await getBlob(`/api/parent/re-registration/forms/${document}${childId ? `?child_id=${childId}` : ''}`);
   if (blob.type && !blob.type.includes('pdf')) throw new Error('The form download is unavailable. Please try again.');
   const url = URL.createObjectURL(blob);
   const anchor = window.document.createElement('a');

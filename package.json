@@ -74,7 +74,9 @@
     "node-fetch": "^3.3.2",
     "pdf.js-extract": "^0.2.1",
     "pg": "^8.11.3",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "pdf-lib": "1.17.1",
+    "@pdf-lib/fontkit": "1.1.1"
   },
   "devDependencies": {
     "concurrently": "^8.2.0",

@@ -60,3 +60,10 @@
 [data-theme="dark"] .rr-admin { --rr-ink:#e3edf8; --rr-muted:#a6b7ca; --rr-line:#42566c; --rr-card:#1f2e40; --rr-soft:#233c4a; }
 [data-theme="dark"] .rr-admin .rr-text { color:#8fd4cf; }
 @media(max-width:640px) { .rr-heading { flex-direction:column; gap:6px; margin-bottom:18px; } .rr-card { padding:18px; border-radius:16px; } .rr-fields { grid-template-columns:1fr; gap:18px; } .rr-field-wide { grid-column:auto; } .rr-filters { grid-template-columns:1fr 1fr; } .rr-filters>div:nth-child(3) { grid-column:1/-1; } .rr-review dl>div { grid-template-columns:1fr; gap:4px; } .rr-list-row { padding:15px; gap:8px; } .rr-list-row .rr-status { font-size:.65rem; padding:6px 8px; } .rr-steps { gap:6px; } .rr-steps button { font-size:.72rem; padding:8px; } .rr-button { padding:11px 14px; } }
+
+.rr-proof {border-top:1px solid var(--rr-line);padding:16px 0;margin-top:14px;}
+.rr-bank {display:grid;grid-template-columns:minmax(100px,1fr) minmax(0,2fr);gap:8px;font-size:.9rem;margin:20px 0;}
+.rr-bank dd {margin:0;overflow-wrap:anywhere;}
+.rr-proof-view {margin:14px 0;max-width:100%;}.rr-proof-view img {max-width:100%;}.rr-proof-view iframe {width:100%;height:450px;border:1px solid var(--rr-line);}
+.rr-status-waiting_list {background:#fff0c7;color:#7c5318;}.rr-status-recorded {background:#edf0f2;color:#4a5b6c;}
+.rr-history {white-space:pre-wrap;overflow-wrap:anywhere;font-size:.8rem;}

@@ -16,13 +16,26 @@ async function processOne({ database = db, send = sendEmail, environment = proce
   try {
     locked = (await client.query('SELECT pg_try_advisory_lock($1) AS locked', [LOCK])).rows[0].locked;
     if (!locked) return { busy: true };
-    const row = (await client.query(`SELECT e.*,r.student_id FROM parent_reregistration_emails e
+    const row = (await client.query(`SELECT e.*,r.student_id,r.status AS registration_status,r.definition_version,r.form_data,r.deposit_invoice_id FROM parent_reregistration_emails e
       JOIN parent_reregistrations r ON r.id=e.registration_id
       WHERE e.status IN ('queued','sending') AND e.next_attempt_at<=NOW()
         AND (e.kind='received' OR NOT EXISTS (SELECT 1 FROM parent_reregistration_emails receipt
           WHERE receipt.registration_id=e.registration_id AND receipt.kind='received' AND receipt.status IN ('queued','sending')))
       ORDER BY e.created_at,e.id LIMIT 1`)).rows[0];
     if (!row) return { empty: true };
+    if (row.kind==='approved') {
+      const {primary,preschool}=require('./parentReRegistrationPolicy');
+      let eligible=row.registration_status==='approved' && row.definition_version===2 && row.form_data.returning==='Yes';
+      if (eligible && primary(row.form_data.grade_applied_for)) eligible=Boolean((await client.query(`SELECT 1 FROM invoices
+        WHERE id=$1 AND student_id=$2 AND invoice_source='parent_reregistration' AND invoice_kind='one_off'
+        AND billing_period='2027-01-01'::date AND amount_due=500 AND amount_paid>=500
+        AND status NOT IN ('Cancelled','Carried Forward')`,[row.deposit_invoice_id,row.student_id])).rows.length);
+      else eligible=eligible && preschool(row.form_data.grade_applied_for);
+      if (!eligible) {
+        await client.query("UPDATE parent_reregistration_emails SET status='skipped',error_category='APPROVAL_NO_LONGER_ELIGIBLE' WHERE id=$1",[row.id]);
+        return {skipped:true};
+      }
+    }
     // The provider keeps keys for 24h. Never retry an uncertain old send outside that window.
     if (row.first_attempt_at && Date.now() - new Date(row.first_attempt_at).getTime() >= 23 * 60 * 60 * 1000) {
       await client.query("UPDATE parent_reregistration_emails SET status='check_required',error_category='CHECK_RESEND_BEFORE_RETRY' WHERE id=$1", [row.id]);

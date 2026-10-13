@@ -1,78 +1,60 @@
 # Re-registration for 2027
 
-This feature is for a child who is already enrolled at Harmony. A child joining for the first time, including a new sibling, still uses **Apply for 2027** on the public website.
+For a learner already enrolled at Harmony, use **Re-registration** in the Parent Portal. For a new learner, including a new sibling, use **Apply for 2027** on the public website.
 
-## Parents
+## Parent steps
 
-1. Sign in to the **Parent Portal** and choose the correct child.
-2. Select **Re-register for 2027** on Home, or **Re-registration** in the menu.
-3. Check the existing details and choose the **Grade requested for 2027**. The system does not assume next year's grade.
-4. Complete the required fields marked `*`. Open **More details from the paper form (optional)** for other details that apply.
-5. Use **Next** and **Back** to move through the sections. **Save draft** saves progress without sending the form to Admin. Save before leaving the page or changing child.
-6. Select **Review & submit**, check the information, accept the declaration and enter your full name.
-7. Select **Submit re-registration**. **Submitted** means the school received the form; it is not approval yet.
-8. Return to **Re-registration** to see the status and any message from Admin. If the status is **Changes needed**, correct the online form and submit again. For a paper form, contact the office and hand in the correction.
+1. Sign in and select the correct child.
+2. Open **Re-registration**, then **Re-register online**.
+3. Check the prefilled learner details. The HAR number is the school reference, not a national ID number. Contact the office if the learner identity is wrong.
+4. Complete the short guardian details. Select **Yes** or **No** for returning in 2027. If Yes, choose the next-year grade. If No, give the reason.
+5. **Save draft** stores your progress. Save before leaving or changing child.
+6. Read the fees undertaking if returning. Type your full name, accept the declaration and select **Submit re-registration**.
+7. For Grades 1–7 in 2027, pay the separate **R500 non-refundable re-registration deposit**, due on or before **11 January 2027**. This is separate from monthly tuition. Use the child's **HAR reference** in your bank app.
+8. Return to the same page. Select **Upload proof of payment**, enter amount, payment date and method, choose **Upload Receipt**, then **Submit Proof of Payment**. PDF, JPG, PNG or WebP up to 10MB is supported. A screenshot or bank receipt must show the actual payment. Never upload a password or banking login details.
+9. **Refresh status** checks progress. **Awaiting deposit verification** means Admin must check the money. **Approved** means Admin has approved re-registration. Uploading proof does not automatically approve the place.
 
-Parents can also use **Download both pages**, **Page 1** or **Page 2**. Print, complete and sign both pages, then hand them to the school. A printed copy can also be collected at school. Downloading alone does not submit a form.
+Already paid? Upload the proof or contact the office. Do not pay twice. A pending proof reserves its amount until Admin reviews it. Partial payments can be verified, but the full R500 is needed before approval.
 
-There is one form per child for 2027. Another linked parent can see the child's status, but cannot read or overwrite the submitting guardian's private form details.
+Baby Class, Preschool and Grade R in 2027 have no re-registration deposit. A learner moving from Grade R to Grade 1 uses the Grade 1–7 fee.
 
-## Admin
+For paper: select the correct next-year category and **Download form**. Known learner and guardian details are filled in; the next-year choice, declaration, signature and office fields stay blank. Print and sign the one-page form, return it to the office or privately to WhatsApp **071 167 9620**. A paper copy can also be collected at school. Downloading does not submit the form.
 
-1. Open **Re-registration** in the Admin menu, or select **View re-registrations** on the Admin Panel alert.
-2. Use **Status**, **Current grade**, and **Learner name / reference** to find forms. **Not started** includes active learners who have not started a form. **Refresh** checks for new submissions; the menu count also refreshes automatically.
-3. Select a learner to review the form. Check the requested grade, contact details, health information and document arrangements.
-4. To ask for a correction, write a clear message and select **Request changes**. The parent sees the message in the portal. No extra email is sent for this step.
-5. To approve, tick **I have reviewed the form and documents and approve re-registration for 2027**, then select **Approve re-registration**.
-6. For a signed paper form, open the learner, choose the linked parent who handed it in if applicable, enter an office note, confirm receipt, and select **Record paper form**. It enters the same review list. Review the actual signed document before approving.
+## Admin steps
 
-Approval records the 2027 decision. It does not create a new learner or change the current grade, login details, discounts, invoices, payments or Finance services. Apply any approved learner or service changes through the existing Admin tools with the correct effective dates. An existing online draft converted to a paper receipt is retained for Admin and is not shared with another guardian.
+1. Open **Re-registration** or the **View re-registrations** alert. Use **Status**, **Current grade**, or **Learner name / reference** to find the child. **Refresh** checks for new forms.
+2. Review the short signed form and requested grade. **View previous versions** keeps earlier signed details available to Admin.
+3. In **Deposit verification**, select **View proof**. Check the school bank statement or POS receipt. Tick **I confirm that the school has received this money**, then select **Verify deposit**. It uses the existing Finance allocation system and applies money to the exact re-registration invoice.
+4. If the proof is unsuitable, enter a clear reason and select **Reject proof**. The parent can upload another proof.
+5. For money received at school by card or cash, use **Record deposit received**. Enter the amount, date, method and bank/POS receipt number, confirm receipt, then select **Save deposit payment**. If Finance has already recorded the money, apply that existing payment in Finance instead. Do not record it again.
+6. When the full fee is verified, review the form, tick the review confirmation and select **Approve re-registration**. Preschool approval needs the form review but no deposit.
+7. For a correction, write the reason and select **Request changes**. For an explicit unresolved returning-learner decision, write a reason and select **Put on waiting list**. An unpaid form is not automatically placed on the waiting list.
+8. For a signed No response, review it and select **Record not returning**. This keeps the learner/account history. It does not delete the account or send a place-approval email.
+9. For paper submissions, open the child and complete **Record paper form** from the signed document. Choose the linked guardian if applicable, enter **Date received**, the name on the signed declaration, and confirm the signed copy is kept at school. **Record paper form** puts it in the same review list. Verify the payment and approve separately.
 
-## The two email updates
+There is one form and at most one registration-fee invoice per child/year. Contact and grade requests in the form do not silently change login details, current grades, monthly tuition, discounts or service enrolments. Use the existing Admin tools for those approved changes. Old invoice amounts, payment history and reversals are preserved.
 
-- **Re-registration received:** sent after the first successful submission or recorded paper receipt.
-- **Re-registration approved:** sent after Admin approves it.
+## Status and email confirmations
 
-Emails go only to the submitting/recorded parent's active account with a verified email address. Typing an email in the form does not change or verify the account email. A parent without email, or with an unverified email, receives the same confirmation in the portal and can still re-register.
+| Status | Meaning |
+| --- | --- |
+| Not started | No form yet |
+| Draft | Saved, not submitted |
+| Submitted | School received it |
+| Awaiting deposit verification | The applicable deposit is not fully verified |
+| Changes needed | Admin requested a correction |
+| Waiting list | Admin recorded this decision with a reason |
+| Approved | School approved the returning learner |
+| Not returning | Admin recorded the signed No response |
 
-Each form gets at most one logical receipt and one logical approval event. Saving drafts, refreshing, retrying a request or resubmitting corrections does not add another event. Resend acceptance is shown as **Accepted by email provider**, which does not guarantee inbox delivery. The portal status is the main confirmation.
+Only two email events are queued: first receipt and approval. They use the submitting guardian's active, verified account email. Parents without verified email receive the same portal status. Drafts, proof uploads, corrections and refreshes do not create extra re-registration emails. Provider acceptance is not a promise of inbox delivery. The existing Resend configuration is reused.
 
-The outbox retries temporary provider errors. Receipt is processed before approval. Old uncertain sends stop for a Resend log check rather than risking duplicate email. **Email needs attention** or **Check email provider before retrying** means support should check Resend; the form remains valid.
+## Release
 
-Resend retains [idempotency keys for 24 hours](https://resend.com/docs/dashboard/emails/idempotency-keys); this worker stops automatic uncertain retries after 23 hours.
+Merge the tested feature changes into master and wait for the Railway web deployment to show SUCCESS. Then run the additive migration in the service container:
 
-The default re-registration budget is **50 send attempts per UTC day**. Remaining emails wait in the queue. This limits only re-registration; OTPs, announcements and other emails share the Resend plan allowance. It does not change the plan or guarantee enough allowance for every email on a busy day. No reminder, draft or correction emails are sent.
+```sh
+npm run migrate:parent-reregistration
+```
 
-## Release steps
-
-Before release, run the normal release gate against a fresh disposable `FINANCE_TEST_DATABASE_URL`. Never use production as a test database.
-
-1. Merge the tested feature PR into `master` and wait for the new Railway **web** deployment to show **SUCCESS**.
-2. In Windows PowerShell, connect to the correct linked Railway project:
-
-   ```powershell
-   railway ssh -s web -e production
-   ```
-
-3. Inside the service shell, run:
-
-   ```sh
-   cd /app
-   npm run migrate:parent-reregistration
-   ```
-
-   Expect `Parent re-registration migration applied successfully.` The migration creates new tables only and can be run again safely. Application startup never runs this migration automatically.
-
-4. Reload the Parent Portal and Admin Portal. Confirm **Re-registration**, the learner list, and **Download both pages** are available.
-5. Check a controlled returning learner's form with the school before announcing the feature. A real submission may queue the two real emails; use the synthetic disposable tests for bulk validation.
-
-The existing `EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, and `RESEND_FROM_EMAIL` configuration is reused. No new provider account is needed. The worker checks the queue every 30 seconds after application startup, including after an operator applies the migration.
-
-Optional Railway variables:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `PARENT_REREGISTRATION_EMAIL_DAILY_LIMIT` | `50` | Maximum re-registration send attempts per UTC day; choose using the actual Resend plan and remaining allowance. |
-| `PARENT_REREGISTRATION_EMAILS_ENABLED` | enabled | Set to `false` to pause these two notifications; portal submissions and approvals still work. |
-
-No real emails or production changes are needed to run the automated tests.
+The migration is repeatable and does not populate registration forms, invoices or payments. It adds the registration tables/columns and scoped constraints only. Startup does not run it automatically. Synthetic tests use an explicit disposable FINANCE_TEST_DATABASE_URL, never production.
