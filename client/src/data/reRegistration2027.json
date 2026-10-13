@@ -1,0 +1,115 @@
+{
+  "schoolYear": 2027,
+  "definitionVersion": 2,
+  "deadline": "2027-01-11",
+  "depositAmount": 500,
+  "bank": {
+    "bank": "FNB",
+    "holder": "Harmony Learning Institute",
+    "account": "63035320265",
+    "branch": "250655"
+  },
+  "sections": [
+    {
+      "title": "Learner details",
+      "fields": [
+        {
+          "key": "learner_full_name",
+          "label": "Learner full name",
+          "type": "text",
+          "required": true,
+          "readonly": true
+        },
+        {
+          "key": "learner_reference",
+          "label": "Child reference number (HAR)",
+          "type": "text",
+          "required": true,
+          "readonly": true
+        },
+        {
+          "key": "current_grade",
+          "label": "Current grade (2026)",
+          "type": "text",
+          "required": true,
+          "readonly": true
+        },
+        {
+          "key": "grade_applied_for",
+          "label": "Grade requested for 2027",
+          "type": "grade",
+          "requiredWhen": "Yes",
+          "when": "Yes"
+        },
+        {
+          "key": "date_of_birth",
+          "label": "Date of birth",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "gender",
+          "label": "Gender",
+          "type": "text",
+          "choices": [
+            "Male",
+            "Female"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
+      "title": "Parent / guardian details",
+      "fields": [
+        {
+          "key": "parent_full_name",
+          "label": "Parent / guardian full name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "parent_mobile",
+          "label": "Parent / guardian phone number",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "parent_whatsapp",
+          "label": "WhatsApp school group number",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "physical_address",
+          "label": "Physical address",
+          "type": "textarea",
+          "required": true
+        }
+      ]
+    },
+    {
+      "title": "Confirmation for 2027",
+      "fields": [
+        {
+          "key": "returning",
+          "label": "Will your child return to Harmony in 2027?",
+          "type": "text",
+          "choices": [
+            "Yes",
+            "No"
+          ],
+          "required": true
+        },
+        {
+          "key": "nonreturn_reason",
+          "label": "Reason for not returning",
+          "type": "textarea",
+          "when": "No",
+          "requiredWhen": "No"
+        }
+      ]
+    }
+  ],
+  "declaration": "I confirm that these details are correct and that I am the learner\u2019s parent or guardian. If my child is returning, I agree to the fees undertaking shown above."
+}

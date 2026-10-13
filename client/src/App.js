@@ -45,6 +45,7 @@ import ParentActivation from './components/parent/ParentActivation';
 import ParentResetPassword from './components/parent/ParentResetPassword';
 import ParentHelp from './components/parent/ParentHelp';
 import ParentEnquiriesAdmin from './components/admin/ParentEnquiriesAdmin';
+import ParentReRegistrationAdmin from './components/admin/ParentReRegistrationAdmin';
 import StaffScanStation from './components/attendance/StaffScanStation';
 import AdmissionsPortal from './components/admissions/AdmissionsPortal';
 
@@ -199,6 +200,12 @@ const AppContent = () => {
         <Route path="enquiries" element={
           <ProtectedRoute roles={['admin', 'super_admin']}>
             <ParentEnquiriesAdmin />
+          </ProtectedRoute>
+        } />
+
+        <Route path="re-registration" element={
+          <ProtectedRoute roles={['admin', 'super_admin']}>
+            <ParentReRegistrationAdmin />
           </ProtectedRoute>
         } />
         

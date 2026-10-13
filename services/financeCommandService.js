@@ -1774,7 +1774,68 @@ async function generateMonthlyInvoices(options = {}) {
   }, options.executor, 'REPEATABLE READ');
 }
 
+async function issueReRegistrationDeposit(options = {}) {
+  const studentId = asId(options.studentId, 'learner ID');
+  const schoolYear = Number(options.schoolYear);
+  if (!Number.isInteger(schoolYear) || schoolYear < 2027 || schoolYear > 2100 ||
+      !options.registrationId || !['admin','super_admin','parent'].includes(options.actor?.role)) {
+    throw new FinanceCommandError('Invalid re-registration fee request', 400);
+  }
+  return withTransaction(async executor => {
+    await lockIdempotency(executor, `reregistration-fee:${schoolYear}:${studentId}`);
+    const existing = (await executor.query(`
+      SELECT * FROM invoices WHERE student_id=$1 AND billing_period=$2::date
+      AND invoice_kind='one_off' AND invoice_source='parent_reregistration' FOR UPDATE`,
+    [studentId, `${schoolYear}-01-01`])).rows[0];
+    if (existing) {
+      if (Number(existing.amount_due) !== 500 || existing.status === 'Cancelled') {
+        throw new FinanceCommandError('The registration fee needs an Admin review', 409);
+      }
+      return { invoice: existing, idempotent: true };
+    }
+    const child = (await executor.query("SELECT id,student_number FROM users WHERE id=$1 AND role='student' AND is_active=true FOR SHARE", [studentId])).rows[0];
+    if (!child) throw new FinanceCommandError('Active learner not found', 404);
+    const invoice = (await executor.query(`
+      INSERT INTO invoices(student_id,student_number,amount_due,amount_paid,due_date,status,
+        billing_period,invoice_kind,invoice_source,finance_origin,reference_number,description,created_by)
+      VALUES($1,$2,500,0,$3::date,'Unpaid',$4::date,'one_off','parent_reregistration','canonical',$5,$6,$7)
+      RETURNING *`, [studentId,child.student_number,`${schoolYear}-01-11`,`${schoolYear}-01-01`,
+      `RR-DEPOSIT-${schoolYear}-${studentId}`,`Re-registration fee for ${schoolYear}`,options.actor.id])).rows[0];
+    await executor.query(`
+      INSERT INTO invoice_line_items(invoice_id,line_type,service_key,label,description,quantity,unit_amount,amount,is_included,metadata)
+      VALUES($1,'charge','registration',$2::varchar(255),$2::text,1,500,500,false,$3::jsonb)`,
+    [invoice.id,`Re-registration fee for ${schoolYear}`,JSON.stringify({source:'parent_reregistration',category:'one_off',
+      school_year:schoolYear,registration_id:options.registrationId,registration_kind:'re_registration'})]);
+    await verifyLedger(executor,[invoice.id]);
+    await audit(executor,options.actor,'reregistration_fee_created','invoice',invoice.id,{
+      student_id:studentId,school_year:schoolYear,registration_id:options.registrationId,amount:500 });
+    return { invoice,idempotent:false };
+  }, options.executor);
+}
+
+async function withdrawReRegistrationDeposit(options = {}) {
+  if (!['admin','super_admin'].includes(options.actor?.role)) throw new FinanceCommandError('Admin access is required',403);
+  return withTransaction(async executor => {
+    const invoiceId = asId(options.invoiceId,'invoice ID');
+    await acquireInvoiceObligationLocks(executor,[{invoiceId,studentId:options.studentId,lineId:'legacy',category:'one_off'}]);
+    const invoice = (await executor.query(`SELECT * FROM invoices WHERE id=$1 AND student_id=$2
+      AND invoice_source='parent_reregistration' AND invoice_kind='one_off'
+      AND billing_period=$3::date FOR UPDATE`,[invoiceId,options.studentId,`${options.schoolYear}-01-01`])).rows[0];
+    if (!invoice || Number(invoice.amount_due)!==500) throw new FinanceCommandError('Registration fee identity changed',409);
+    if (invoice.status==='Cancelled' || Number(invoice.amount_paid)>=500) return {retained:true};
+    if (Number(invoice.amount_paid)!==0 || invoice.status==='Carried Forward') throw new FinanceCommandError('Review the registration payment in Finance before recording not returning',409);
+    const pending = await executor.query(`SELECT 1 FROM payment_proof_allocation_proposals p
+      JOIN pending_payments pp ON pp.id=p.proof_id WHERE p.invoice_id=$1 AND pp.status='pending' LIMIT 1`,[invoiceId]);
+    if (pending.rows.length) throw new FinanceCommandError('Review the pending deposit proof first',409);
+    await executor.query("UPDATE invoices SET status='Cancelled',updated_at=NOW() WHERE id=$1",[invoiceId]);
+    await audit(executor,options.actor,'reregistration_fee_cancelled','invoice',invoiceId,{reason:options.reason,student_id:options.studentId});
+    return {cancelled:true};
+  },options.executor);
+}
+
 module.exports = {
+  issueReRegistrationDeposit,
+  withdrawReRegistrationDeposit,
   FinanceCommandError,
   withTransaction,
   acquireInvoiceObligationLocks,

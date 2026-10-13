@@ -185,6 +185,7 @@ async function sendEmail(to, subject, htmlBody, options = {}) {
       text: htmlToPlainText(htmlBody),
       fromName: options.fromName || SENDER_NAME,
       replyTo: options.replyTo || REPLY_TO,
+        idempotencyKey: options.idempotencyKey,
     });
     if (!result.success) console.error(`Admissions email failed: ${result.error}`);
     return result;

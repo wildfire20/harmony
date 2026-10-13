@@ -663,6 +663,11 @@ const EnrollmentSection = () => {
   const inputClass = 'mt-1.5 w-full min-h-12 px-3.5 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent';
   return (
     <section id="apply" className="scroll-mt-28 py-20 sm:py-28 bg-slate-50">
+      <div className="mx-auto mb-10 max-w-7xl px-4 sm:px-6 lg:px-8"><div className="rounded-2xl border border-blue-200 bg-blue-50 p-6 text-blue-950">
+        <p className="font-extrabold">Is your child already at Harmony?</p>
+        <p className="mt-2 text-sm leading-relaxed">Use the Parent Portal to re-register for 2027, download the paper form, or collect a copy at the school office. The application below is for a child joining Harmony for the first time, including a new sibling.</p>
+        <Link to="/parent/login?returnTo=%2Fparent%2Fre-registration" className="mt-4 inline-flex min-h-11 items-center rounded-lg bg-blue-950 px-5 py-3 text-sm font-bold text-white">Re-register in the Parent Portal</Link>
+      </div></div>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid lg:grid-cols-[0.75fr_1.25fr] gap-10 lg:gap-16 items-start">
         <div className="lg:sticky lg:top-32">
           <SectionHeading eyebrow="2027 admissions" title="Take the next step with Harmony." copy="Complete the online application below and our admissions team will contact you to discuss the next steps." />

@@ -1179,3 +1179,5 @@ module.exports.validateExplicitObligationAmounts = validateExplicitObligationAmo
 module.exports.canonicalObligationLockKeys = canonicalObligationLockKeys;
 module.exports.acquireCanonicalObligationLocks = acquireCanonicalObligationLocks;
 module.exports.validateCanonicalSelections = validateCanonicalSelections;
+
+module.exports.uploadReceipt = uploadReceipt;
