@@ -347,7 +347,7 @@ async function verifyLedger(executor, invoiceIds = []) {
 
 async function insertUnallocated(executor, {
   studentId, amount: paymentAmount, paymentDate, paymentMethod, reference,
-  description, recordedBy,
+  description, recordedBy, transactionMonth, transactionYear,
 }) {
   const student = await executor.query(
     `SELECT student_number FROM users WHERE id=$1 AND role='student' FOR SHARE`,
@@ -359,13 +359,15 @@ async function insertUnallocated(executor, {
   const result = await executor.query(`
     INSERT INTO payment_transactions
       (invoice_id, student_id, student_number, reference_number, reference,
-       amount, transaction_date, payment_date, description, payment_method, recorded_by)
-    VALUES (NULL,$1,$2,$3,$3,$4,$5,$5,$6,$7,$8)
+       amount, transaction_date, payment_date, description, payment_method, recorded_by,
+       month, year)
+    VALUES (NULL,$1,$2,$3,$3,$4,$5,$5,$6,$7,$8,$9,$10)
     RETURNING id
   `, [
     asId(studentId, 'learner ID'), student.rows[0].student_number,
     reference, total.toFixed(2), date, description || 'Unallocated payment',
     paymentMethod || 'manual_entry', recordedBy || null,
+    transactionMonth ?? null, transactionYear ?? null,
   ]);
   return {
     total,
@@ -554,6 +556,7 @@ async function executePayment(executor, options) {
       studentId, amount: total, paymentDate: options.paymentDate,
       paymentMethod: options.paymentMethod, reference: options.reference,
       description: options.description, recordedBy: options.recordedBy,
+      transactionMonth: options.transactionMonth, transactionYear: options.transactionYear,
     });
   } else {
     allocation = await allocatePayment(executor, {
@@ -1065,7 +1068,7 @@ async function correctPayment(options = {}) {
       };
     }
     const payment = (await executor.query(`
-      SELECT invoice_id, student_id
+      SELECT invoice_id, student_id, amount, month, year
       FROM payment_transactions
       WHERE id=$1
       FOR SHARE
@@ -1087,13 +1090,25 @@ async function correctPayment(options = {}) {
       studentId: options.studentId || payment.student_id,
       matchedInvoiceId: options.matchedInvoiceId || reversal.effectiveInvoiceId,
       reference: options.reference || `CORRECTED-${transactionId}`,
-      obligations: options.obligations,
+      transactionMonth: options.transactionMonth ?? payment.month,
+      transactionYear: options.transactionYear ?? payment.year,
+      // Editing a credit changes that event, not its allocation disposition.
+      // Only a submitted invoice or allocation plan may move it into debt.
+      obligations: options.obligations ?? options.allocationProposals ?? (
+        payment.invoice_id == null && options.matchedInvoiceId == null && options.invoiceId == null
+          ? [] : undefined
+      ),
     });
     await audit(executor, options.actor, 'finance_payment_correction', 'payment', transactionId, {
       transaction_id: transactionId,
       reversal_id: reversal.reversalId,
       transaction_ids: allocation.allocations.map((item) => item.transactionId),
       idempotency_key: key,
+      reason: options.reason || options.description || null,
+      original_invoice_id: payment.invoice_id,
+      original_amount: Number(payment.amount),
+      replacement_amount: allocation.total,
+      replacement_allocations: allocation.allocations,
     });
     return { reversal, allocation };
   }, options.executor);

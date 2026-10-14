@@ -1700,6 +1700,7 @@ router.put('/manual-payment/:paymentId', [
         paymentMethod: normalizeManualPaymentMethod(payment_method || original.payment_method),
         reference: reference || original.reference || original.reference_number,
         description: `Correction replacement for payment ${paymentId}: ${description || original.description || reason}`,
+        reason,
         recordedBy: req.user.id,
         transactionMonth: newMonth,
         transactionYear: newYear,
