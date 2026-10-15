@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const db = require('../config/database');
 const { logAudit } = require('../utils/auditLogger');
+const { queueDemeritAlerts, correctDemeritAlerts } = require('./behaviourParentAlerts');
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const isAdmin = actor => ['admin', 'super_admin'].includes(actor?.role);
 const id = value => {
@@ -15,7 +16,9 @@ const fields = (body, allowed) => {
   if (!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(k=>!allowed.includes(k))) throw fail(400,'Invalid form fields.');
 };
 const today = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Johannesburg',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-const teacherScope = `EXISTS (SELECT 1 FROM teacher_assignments ta WHERE ta.teacher_id=$1 AND ta.is_active=true AND ta.grade_id=u.grade_id AND ta.class_id=u.class_id)`;
+// Standard assignments have no active flag. If a flag exists, only true grants access.
+const activeTeacherAssignment = `(NOT (to_jsonb(ta) ? 'is_active') OR to_jsonb(ta)->>'is_active'='true')`;
+const teacherScope = `EXISTS (SELECT 1 FROM teacher_assignments ta WHERE ta.teacher_id=$1 AND ${activeTeacherAssignment} AND ta.grade_id=u.grade_id AND ta.class_id=u.class_id)`;
 async function transaction(work) {
   const c=await db.pool.connect();
   try {await c.query('BEGIN');const result=await work(c);await c.query('COMMIT');return result;}
@@ -31,8 +34,8 @@ async function learner(c, actor, learnerId) {
   if (!row) throw fail(404,'Learner not found or access unavailable.');
   // Lock current links/assignments as well as the learner until the transaction ends.
   if (actor.role==='parent' && !(await c.query('SELECT parent_id FROM parent_students WHERE parent_id=$1 AND student_id=$2 FOR SHARE',[actor.id,studentId])).rowCount) throw fail(404,'Learner access changed.');
-  if (actor.role==='teacher' && !(await c.query(`SELECT teacher_id FROM teacher_assignments WHERE teacher_id=$1 AND is_active=true AND
-    grade_id=(SELECT grade_id FROM users WHERE id=$2) AND class_id=(SELECT class_id FROM users WHERE id=$2) FOR SHARE`,[actor.id,studentId])).rowCount) throw fail(404,'Learner access changed.');
+  if (actor.role==='teacher' && !(await c.query(`SELECT ta.teacher_id FROM teacher_assignments ta WHERE ta.teacher_id=$1 AND ${activeTeacherAssignment} AND
+    ta.grade_id=(SELECT grade_id FROM users WHERE id=$2) AND ta.class_id=(SELECT class_id FROM users WHERE id=$2) FOR SHARE OF ta`,[actor.id,studentId])).rowCount) throw fail(404,'Learner access changed.');
   return row;
 }
 async function audit(c,actor,action,entityId,details) {
@@ -114,6 +117,7 @@ async function createRecord(actor,body) {
     if(!type)throw fail(409,'This type is unavailable. Refresh the catalogue.');
     const record=(await c.query(`INSERT INTO behaviour_records(student_id,type_id,type_code,kind,label,category,points,event_date,notes,recorded_by,request_key,request_hash)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8::date,$9,$10,$11,$12) RETURNING id`,[studentId,type.id,type.code,type.kind,type.label,type.category,type.points,date,notes,actor.id,body.request_key,digest])).rows[0];
+    await queueDemeritAlerts(c,{id:record.id,student_id:studentId,kind:type.kind});
     await audit(c,actor,'behaviour_record_created',record.id,{student_id:studentId,type_code:type.code,kind:type.kind,label:type.label,category:type.category,points:type.points,event_date:date});
     return {id:record.id,duplicate:false};
   });
@@ -127,6 +131,7 @@ async function voidRecord(actor,recordId,body) {
     if(!isAdmin(actor)&&record.recorded_by!==actor.id)throw fail(403,'Ask Admin to correct another staff member’s record.');
     if(record.status==='voided'){if(record.void_reason!==reason)throw fail(409,'This record was already corrected.');return {voided:true,duplicate:true};}
     await c.query("UPDATE behaviour_records SET status='voided',voided_by=$2,voided_at=NOW(),void_reason=$3 WHERE id=$1",[record.id,actor.id,reason]);
+    await correctDemeritAlerts(c,record);
     await audit(c,actor,'behaviour_record_voided',record.id,{student_id:record.student_id,reason});return {voided:true};
   });
 }

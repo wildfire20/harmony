@@ -54,7 +54,7 @@
     "test:parent-reregistration:client": "npm run test --prefix client -- --watchAll=false --runInBand --runTestsByPath src/components/parent/ParentReRegistration.test.js",
     "migrate:learner-behaviour": "node scripts/run-learner-behaviour-migration.js",
     "test:behaviour": "node --test tests/learner-behaviour-postgres.integration.test.js",
-    "test:behaviour:client": "npm run test --prefix client -- --watchAll=false --runInBand --runTestsByPath src/components/common/BehaviourWorkspace.test.js",
+    "test:behaviour:client": "npm run test --prefix client -- --watchAll=false --runInBand --runTestsByPath src/components/common/BehaviourWorkspace.test.js src/components/parent/ParentNotifications.test.js",
     "test:statement-print": "node --test tests/statement-print-layout.test.js"
   },
   "dependencies": {

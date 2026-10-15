@@ -84,3 +84,19 @@ test('empty history and failed reads have clear feedback and a refresh action',a
   expect(container.querySelector('[role="alert"]').textContent).toContain('not available yet');
   request.mockResolvedValue(result([]));await click(button('Refresh'));expect(container.querySelector('[role="alert"]')).toBeNull();
 });
+
+test('Refresh retries a failed teacher learner search without retyping the reference',async()=>{
+  const original=request.getMockImplementation();let failSearch=true;
+  request.mockImplementation((path,opts)=>{
+    if(path.startsWith('/learners')&&failSearch){failSearch=false;return Promise.reject(new Error('Learner search unavailable.'));}
+    return original(path,opts);
+  });
+  await render({role:'teacher'});await change('input[type="search"]','TEST501');
+  await act(async()=>new Promise(resolve=>setTimeout(resolve,330)));
+  expect(container.querySelector('[role="alert"]').textContent).toContain('Learner search unavailable.');
+  await click(button('Refresh'));await act(async()=>new Promise(resolve=>setTimeout(resolve,330)));
+  expect(container.querySelector('input[type="search"]').value).toBe('TEST501');
+  expect(container.querySelectorAll('.behaviour-search-results button')).toHaveLength(1);
+  expect(request.mock.calls.filter(([path])=>path.startsWith('/learners'))).toHaveLength(2);
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+});

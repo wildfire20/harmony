@@ -45,7 +45,7 @@ export default function BehaviourWorkspace({ request, readOnly = false, parentCh
       .then(result => { if (active) setLearners(result.learners || []); })
       .catch(e => { if (active) setError(e.message); }), 300);
     return () => { active = false; clearTimeout(timer); };
-  }, [query, readOnly, request]);
+  }, [query, readOnly, request, reload]);
   useEffect(() => {
     let active = true;
     setData(null); setError(''); setLoading(Boolean(learnerId));

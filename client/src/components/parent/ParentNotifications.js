@@ -7,6 +7,7 @@ import {
 import { parentApi, useSelectedChild } from './ParentPortal';
 
 const ACTIONS = {
+  behaviour: { label: 'View merits & demerits', path: '/parent/behaviour' },
   attendance: { label: 'View attendance', path: '/parent/attendance' },
   payments: { label: 'View fees', path: '/parent/invoices' },
   invoices: { label: 'View fees', path: '/parent/invoices' },
@@ -17,6 +18,7 @@ const ACTIONS = {
 };
 
 const CATEGORIES = {
+  behaviour: { label: 'Merits & Demerits', Icon: AlertCircle, tone: 'bg-[#fcebea] text-[#ad5147]' },
   attendance: { label: 'Attendance', Icon: CalendarDays, tone: 'bg-[#e8f1ef] text-[#176b73]' },
   academic: { label: 'Academics', Icon: BookOpen, tone: 'bg-[#eaf0fa] text-[#315d9a]' },
   grades: { label: 'Academics', Icon: BookOpen, tone: 'bg-[#eaf0fa] text-[#315d9a]' },

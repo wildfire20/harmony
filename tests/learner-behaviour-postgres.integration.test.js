@@ -36,18 +36,26 @@ test('Merits and Demerits enforce portal permissions and preserve history',{
       (3,'teacher','Synthetic','Teacher',NULL,NULL,NULL),(4,'teacher','Other','Teacher',NULL,NULL,NULL),
       (10,'parent','Synthetic','Parent',NULL,NULL,NULL),(11,'parent','Other','Parent',NULL,NULL,NULL),
       (501,'student','First','Learner',1,1,'TEST501'),(502,'student','Second','Learner',2,2,'TEST502'),(503,'student','Sibling','Learner',2,2,'TEST503');
+      INSERT INTO users(id,role,first_name,last_name,email,is_active) VALUES
+      (12,'parent','No email','Parent',NULL,true),(13,'parent','Inactive','Parent','inactive@example.test',false),
+      (14,'parent','Second linked','Parent','second@example.test',true);
+      UPDATE users SET email='parent@example.test' WHERE id=10;
       INSERT INTO teacher_assignments VALUES(3,1,1),(4,2,2);
-      INSERT INTO parent_students VALUES(10,501),(10,503),(11,502);
+      INSERT INTO parent_students VALUES(10,501),(10,503),(11,502),(12,501),(13,501),(14,501);
       INSERT INTO invoices VALUES(1,501,2350,2350);INSERT INTO payment_transactions VALUES(1,501,2350);`);
     for(const actor of [1,2,3,4,10,11,501]){
       const session=key();if([10,11].includes(actor))await db.query('INSERT INTO parent_sessions(id,user_id) VALUES($1,$2)',[session,actor]);
       tokens[actor]=jwt.sign({id:actor,...([10,11].includes(actor)?{session_id:session}:{})},process.env.JWT_SECRET,{expiresIn:'10m'});
     }
-    const app=express();app.use(express.json({limit:'32kb'}));app.use('/api/behaviour',require('../routes/behaviour'));
+    const app=express();app.use(express.json({limit:'32kb'}));app.use('/api/behaviour',require('../routes/behaviour'));app.use('/api/parent',require('../routes/parent'));
     server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
     const request=async(path,{actor=1,method='GET',body,mime='application/json'}={})=>{
       const r=await fetch(`http://127.0.0.1:${server.address().port}/api/behaviour${path}`,{method,headers:{'Content-Type':mime,...(actor?{Authorization:`Bearer ${tokens[actor]}`}:{})},...(body?{body:JSON.stringify(body)}:{})});
       return {status:r.status,data:await r.json(),headers:r.headers};
+    };
+    const parentRequest=async(path,actor=10)=>{
+      const r=await fetch(`http://127.0.0.1:${server.address().port}/api/parent${path}`,{headers:{Authorization:`Bearer ${tokens[actor]}`}});
+      return {status:r.status,data:await r.json()};
     };
     const rows=async table=>(await db.query(`SELECT * FROM ${table} ORDER BY 1,2`)).rows;
     const protectedBefore={users:await rows('users'),links:await rows('parent_students'),invoices:await rows('invoices'),payments:await rows('payment_transactions')};
@@ -88,10 +96,12 @@ test('Merits and Demerits enforce portal permissions and preserve history',{
       assert.equal((await request('/records',{actor:3,method:'POST',body:{...draft(demerit),points:0}})).status,400);
     });
     await t.test('inactive teacher assignments cannot search, read or add learner records',async()=>{
-      await db.query('UPDATE teacher_assignments SET is_active=false WHERE teacher_id=3');
-      assert.equal((await request('/learners?q=TEST',{actor:3})).data.learners.length,0);
-      assert.equal((await request('/records?student_id=501',{actor:3})).status,404);
-      assert.equal((await request('/records',{actor:3,method:'POST',body:draft(merit)})).status,404);
+      for(const active of [false,null]){
+        await db.query('UPDATE teacher_assignments SET is_active=$1 WHERE teacher_id=3',[active]);
+        assert.equal((await request('/learners?q=TEST',{actor:3})).data.learners.length,0);
+        assert.equal((await request('/records?student_id=501',{actor:3})).status,404);
+        assert.equal((await request('/records',{actor:3,method:'POST',body:draft(merit)})).status,404);
+      }
       await db.query('UPDATE teacher_assignments SET is_active=true WHERE teacher_id=3');
     });
     await t.test('concurrent retries create one award and one audit; changed payload cannot reuse its key',async()=>{
@@ -142,11 +152,14 @@ test('Merits and Demerits enforce portal permissions and preserve history',{
     });
     await t.test('required audit failure rolls back the new record',async()=>{
       const before=(await rows('behaviour_records')).length;
+      const notificationsBefore=await rows('parent_notifications'),emailsBefore=await rows('behaviour_parent_emails');
       await db.query(`CREATE FUNCTION fail_behaviour_audit() RETURNS TRIGGER AS $$ BEGIN
         IF NEW.action='behaviour_record_created' THEN RAISE EXCEPTION 'injected audit failure'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql;
         CREATE TRIGGER test_audit_failure BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION fail_behaviour_audit();`);
-      assert.equal((await request('/records',{actor:3,method:'POST',body:draft(merit)})).status,500);
+      assert.equal((await request('/records',{actor:3,method:'POST',body:draft({id:(await db.query("SELECT id FROM behaviour_types WHERE code='2002'")).rows[0].id})})).status,500);
       assert.equal((await rows('behaviour_records')).length,before);
+      assert.deepEqual(await rows('parent_notifications'),notificationsBefore);
+      assert.deepEqual(await rows('behaviour_parent_emails'),emailsBefore);
       await db.query('DROP TRIGGER test_audit_failure ON audit_logs');
     });
     await t.test('disabled, revoked and sessionless Parent tokens are rejected',async()=>{
@@ -163,6 +176,132 @@ test('Merits and Demerits enforce portal permissions and preserve history',{
       await db.query('DELETE FROM parent_students WHERE parent_id=10 AND student_id=503');
       assert.equal((await request('/records?student_id=503',{actor:10})).status,404);
       await db.query('INSERT INTO parent_students VALUES(10,503)');
+    });
+    await t.test('standard assignments without is_active retain teacher scope and allow records and corrections',async()=>{
+      await db.query('ALTER TABLE teacher_assignments DROP COLUMN is_active');
+      try{
+        const search=await request('/learners?q=TEST',{actor:3});
+        assert.equal(search.status,200);assert.deepEqual(search.data.learners.map(row=>row.id),[501]);
+        assert.equal((await request('/records?student_id=501',{actor:3})).status,200);
+        assert.equal((await request('/records?student_id=502',{actor:3})).status,404);
+        assert.equal((await request('/records',{actor:3,method:'POST',body:draft(merit,502)})).status,404);
+        const created=await request('/records',{actor:3,method:'POST',body:draft(merit)});
+        assert.equal(created.status,201);
+        assert.ok((await request('/records?student_id=501',{actor:10})).data.records.some(row=>row.id===created.data.id));
+        assert.equal((await request(`/records/${created.data.id}/void`,{actor:3,method:'POST',body:{reason:'Synthetic compatibility correction.'}})).status,200);
+        await db.query('DELETE FROM teacher_assignments WHERE teacher_id=3');
+        assert.equal((await request('/records?student_id=501',{actor:3})).status,404);
+        assert.equal((await request('/records',{actor:3,method:'POST',body:draft(merit)})).status,404);
+        assert.equal((await request('/learners?q=TEST',{actor:2})).data.learners.length,3);
+      }finally{
+        if(!(await db.query('SELECT 1 FROM teacher_assignments WHERE teacher_id=3')).rowCount)await db.query('INSERT INTO teacher_assignments VALUES(3,1,1)');
+        await db.query('ALTER TABLE teacher_assignments ADD COLUMN is_active BOOLEAN DEFAULT true');
+      }
+    });
+    const alertType=(await db.query("SELECT * FROM behaviour_types WHERE code='2002'")).rows[0];
+    const {processOne}=require('../services/behaviourParentAlerts');
+    const emailJob=async()=>{
+      const created=await request('/records',{actor:3,method:'POST',body:draft(alertType)});
+      assert.equal(created.status,201);
+      await db.query("UPDATE behaviour_parent_emails SET next_attempt_at=NOW()+interval '2 days' WHERE status IN ('queued','sending')");
+      const job=(await db.query('SELECT * FROM behaviour_parent_emails WHERE record_id=$1 AND parent_id=10',[created.data.id])).rows[0];
+      await db.query('UPDATE behaviour_parent_emails SET next_attempt_at=NOW() WHERE id=$1',[job.id]);
+      return job;
+    };
+    await t.test('every new demerit alerts all active linked parents exactly once; merits do not alert',async()=>{
+      const body=draft(alertType);
+      const responses=await Promise.all([1,2,3].map(()=>request('/records',{actor:3,method:'POST',body})));
+      assert.deepEqual(responses.map(r=>r.status).sort(),[200,200,201]);
+      const record=responses[0].data.id;
+      const alerts=(await db.query('SELECT * FROM parent_notifications WHERE dedupe_key=$1 ORDER BY parent_id',[`behaviour-demerit:${record}`])).rows;
+      assert.deepEqual(alerts.map(n=>n.parent_id),[10,12,14]);
+      assert.ok(alerts.every(n=>n.deep_link==='/parent/behaviour'&&n.important&&n.event_type==='behaviour_demerit_recorded'));
+      const emails=(await db.query('SELECT * FROM behaviour_parent_emails WHERE record_id=$1 ORDER BY parent_id',[record])).rows;
+      assert.deepEqual(emails.map(e=>[e.parent_id,e.status]),[[10,'queued'],[12,'skipped'],[14,'queued']]);
+      assert.equal(emails[1].error_category,'NO_VALID_PARENT_EMAIL');
+      const before=(await rows('parent_notifications')).length;
+      assert.equal((await request('/records',{actor:2,method:'POST',body:draft(merit)})).status,201);
+      assert.equal((await rows('parent_notifications')).length,before);
+      const inbox=await parentRequest('/notifications');assert.equal(inbox.status,200);
+      const alert=inbox.data.notifications.find(n=>n.dedupe_key===`behaviour-demerit:${record}`||String(n.id)===String(alerts[0].id));
+      assert.ok(alert);assert.equal(alert.category,'behaviour');assert.equal(alert.action,'behaviour');assert.equal(alert.learner_id,501);
+      assert.ok((await parentRequest('/notifications/unread-count')).data.count>0);
+      await db.query('DELETE FROM parent_students WHERE parent_id=10 AND student_id=501');
+      assert.equal((await parentRequest('/notifications')).data.notifications.some(n=>String(n.id)===String(alert.id)),false);
+      await db.query('INSERT INTO parent_students VALUES(10,501)');
+    });
+    await t.test('alert persistence failure rolls back the incident, notifications, outbox and audit together',async()=>{
+      const before={records:await rows('behaviour_records'),alerts:await rows('parent_notifications'),emails:await rows('behaviour_parent_emails'),audit:await rows('audit_logs')};
+      await db.query(`CREATE FUNCTION fail_alert_outbox() RETURNS TRIGGER AS $$ BEGIN RAISE EXCEPTION 'injected outbox failure'; END; $$ LANGUAGE plpgsql;
+        CREATE TRIGGER test_alert_failure BEFORE INSERT ON behaviour_parent_emails FOR EACH ROW EXECUTE FUNCTION fail_alert_outbox();`);
+      assert.equal((await request('/records',{actor:3,method:'POST',body:draft(alertType)})).status,500);
+      assert.deepEqual(await rows('behaviour_records'),before.records);assert.deepEqual(await rows('parent_notifications'),before.alerts);
+      assert.deepEqual(await rows('behaviour_parent_emails'),before.emails);assert.deepEqual(await rows('audit_logs'),before.audit);
+      await db.query('DROP TRIGGER test_alert_failure ON behaviour_parent_emails');
+    });
+    await t.test('Resend acceptance uses a stable key, private body and only one concurrent worker',async()=>{
+      const job=await emailJob();let release,started;
+      const began=new Promise(resolve=>{started=resolve;});const gate=new Promise(resolve=>{release=resolve;});const calls=[];
+      const send=async(...args)=>{calls.push(args);started();await gate;return {success:true};};
+      const first=processOne({database:db,ready:true,send});await began;
+      assert.deepEqual(await processOne({database:db,ready:true,send}),{busy:true});release();
+      assert.deepEqual(await first,{accepted:true});assert.equal(calls.length,1);
+      assert.equal(calls[0][0],'parent@example.test');assert.equal(calls[0][3].idempotencyKey,`harmony-demerit-${job.record_id}-10`);
+      assert.match(calls[0][2],/https:\/\/www.harmonylearning.co.za\/parent\/behaviour/);
+      for(const privateText of ['TEST501','First Learner','Synthetic classroom observation','Disrespecting Student Council'])assert.ok(!calls[0][2].includes(privateText));
+      assert.equal((await db.query('SELECT status FROM behaviour_parent_emails WHERE id=$1',[job.id])).rows[0].status,'accepted');
+    });
+    await t.test('timeout retry reuses the same email payload and key; definitive failures stay safe',async()=>{
+      const job=await emailJob(),calls=[];
+      const send=async(...args)=>{calls.push(args);return calls.length===1?{success:false,error:'EMAIL_API_TIMEOUT'}:{success:true};};
+      assert.equal((await processOne({database:db,ready:true,send})).deferred,true);
+      assert.ok((await db.query('SELECT first_attempt_at FROM behaviour_parent_emails WHERE id=$1',[job.id])).rows[0].first_attempt_at);
+      await db.query('UPDATE behaviour_parent_emails SET next_attempt_at=NOW() WHERE id=$1',[job.id]);
+      assert.deepEqual(await processOne({database:db,ready:true,send}),{accepted:true});assert.deepEqual(calls[0],calls[1]);
+      const rejected=await emailJob();assert.equal((await processOne({database:db,ready:true,send:async()=>({success:false,error:'EMAIL_AUTH_FAILED'})})).deferred,true);
+      assert.equal((await db.query('SELECT first_attempt_at FROM behaviour_parent_emails WHERE id=$1',[rejected.id])).rows[0].first_attempt_at,null);
+    });
+    await t.test('a crash after provider acceptance retries the durable attempt with the same key',async()=>{
+      const job=await emailJob();const calls=[];
+      const send=async(...args)=>{calls.push(args);return {success:true};};
+      const failDatabase={pool:{connect:async()=>{
+        const c=await db.pool.connect();return {release:()=>c.release(),query:async(sql,args)=>{
+          if(sql.includes("SET status='accepted'"))throw new Error('Synthetic connection loss after send');return c.query(sql,args);
+        }};
+      }}};
+      await assert.rejects(processOne({database:failDatabase,ready:true,send}),/Synthetic connection loss/);
+      assert.equal((await db.query('SELECT status FROM behaviour_parent_emails WHERE id=$1',[job.id])).rows[0].status,'sending');
+      assert.deepEqual(await processOne({database:db,ready:true,send}),{accepted:true});assert.deepEqual(calls[0],calls[1]);
+    });
+    await t.test('uncertain old sends require review; provider outages do not erase portal alerts',async()=>{
+      const job=await emailJob();let calls=0;const send=async()=>{calls++;return {success:true};};
+      await db.query("UPDATE behaviour_parent_emails SET first_attempt_at=NOW()-interval '24 hours' WHERE id=$1",[job.id]);
+      assert.deepEqual(await processOne({database:db,ready:true,send}),{check_required:true});assert.equal(calls,0);
+      assert.deepEqual(await processOne({database:db,ready:false,send}),{waiting_for_configuration:true});
+      assert.ok((await db.query('SELECT 1 FROM parent_notifications WHERE id=$1',[job.notification_id])).rowCount);
+    });
+    await t.test('removed links, changed email, disabled accounts and corrected incidents cannot trigger queued emails',async()=>{
+      for(const change of ['unlink','email','parent','learner','void']){
+        const job=await emailJob();let calls=0;
+        if(change==='unlink')await db.query('DELETE FROM parent_students WHERE parent_id=10 AND student_id=501');
+        if(change==='email')await db.query("UPDATE users SET email='changed@example.test' WHERE id=10");
+        if(change==='parent')await db.query('UPDATE users SET is_active=false WHERE id=10');
+        if(change==='learner')await db.query('UPDATE users SET is_active=false WHERE id=501');
+        if(change==='void')assert.equal((await request(`/records/${job.record_id}/void`,{actor:3,method:'POST',body:{reason:'Incorrect incident selected, corrected by teacher.'}})).status,200);
+        const outcome=await processOne({database:db,ready:true,send:async()=>{calls++;return {success:true};}});
+        assert.equal(calls,0);assert.ok(change==='void'?outcome.empty:outcome.skipped);
+        assert.equal((await db.query('SELECT status FROM behaviour_parent_emails WHERE id=$1',[job.id])).rows[0].status,'skipped');
+        if(change==='unlink')await db.query('INSERT INTO parent_students VALUES(10,501)');
+        await db.query("UPDATE users SET email='parent@example.test',is_active=true WHERE id=10");await db.query('UPDATE users SET is_active=true WHERE id=501');
+        if(change==='void')assert.equal((await db.query('SELECT title FROM parent_notifications WHERE id=$1',[job.notification_id])).rows[0].title,'Demerit entry corrected');
+      }
+    });
+    await t.test('repeated migrations preserve inbox reads, queued messages and behaviour history without backfill',async()=>{
+      const n=(await rows('parent_notifications'))[0];await db.query('INSERT INTO parent_notification_reads(notification_id,parent_id) VALUES($1,$2)',[n.id,n.parent_id]);
+      const before={alerts:await rows('parent_notifications'),reads:await rows('parent_notification_reads'),emails:await rows('behaviour_parent_emails'),records:await rows('behaviour_records')};
+      await require('../scripts/run-learner-behaviour-migration').run(db);
+      assert.deepEqual(await rows('parent_notifications'),before.alerts);assert.deepEqual(await rows('parent_notification_reads'),before.reads);
+      assert.deepEqual(await rows('behaviour_parent_emails'),before.emails);assert.deepEqual(await rows('behaviour_records'),before.records);
     });
     await t.test('users, Parent links and financial data are unchanged',async()=>{
       assert.deepEqual(await rows('users'),protectedBefore.users);assert.deepEqual(await rows('parent_students'),protectedBefore.links);

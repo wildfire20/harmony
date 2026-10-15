@@ -44,3 +44,5 @@
 .behaviour-workspace .behaviour-type-list li{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid var(--behaviour-border);overflow-wrap:anywhere}
 .behaviour-workspace .behaviour-type-list button{flex-shrink:0}
 @media(max-width:540px){.behaviour-workspace .behaviour-card{padding:16px}.behaviour-workspace .behaviour-form-grid{grid-template-columns:minmax(0,1fr)}.behaviour-workspace .behaviour-summary{gap:7px}.behaviour-workspace .behaviour-summary>div{padding:12px 8px}.behaviour-workspace .behaviour-summary strong{font-size:25px}.behaviour-workspace .behaviour-type-list li{align-items:flex-start;flex-direction:column}.behaviour-workspace h1{font-size:25px}}
+
+.behaviour-workspace .behaviour-error button{flex-shrink:0;white-space:nowrap;min-width:84px}
