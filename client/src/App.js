@@ -46,6 +46,7 @@ import ParentResetPassword from './components/parent/ParentResetPassword';
 import ParentHelp from './components/parent/ParentHelp';
 import ParentEnquiriesAdmin from './components/admin/ParentEnquiriesAdmin';
 import ParentReRegistrationAdmin from './components/admin/ParentReRegistrationAdmin';
+import StaffBehaviour from './components/behaviour/StaffBehaviour';
 import StaffScanStation from './components/attendance/StaffScanStation';
 import AdmissionsPortal from './components/admissions/AdmissionsPortal';
 
@@ -196,6 +197,8 @@ const AppContent = () => {
             <PaymentsHub />
           </ProtectedRoute>
         } />
+
+        <Route path="behaviour" element={<ProtectedRoute roles={['teacher', 'admin', 'super_admin']}><StaffBehaviour /></ProtectedRoute>} />
 
         <Route path="enquiries" element={
           <ProtectedRoute roles={['admin', 'super_admin']}>

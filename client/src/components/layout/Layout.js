@@ -71,7 +71,8 @@ const Layout = () => {
     { name: 'Documents', href: '/documents', icon: FileText, color: 'harmony-secondary' },
     { name: 'Calendar', href: '/calendar', icon: Calendar, color: 'harmony-navy' },
     ...(isTeacherOrAdmin ? [
-      { name: 'Attendance', href: '/attendance', icon: ClipboardCheck, color: 'harmony-gold' }
+      { name: 'Attendance', href: '/attendance', icon: ClipboardCheck, color: 'harmony-gold' },
+      { name: 'Merits & Demerits', href: '/behaviour', icon: Award, color: 'harmony-gold' }
     ] : []),
     { name: 'Profile', href: '/profile', icon: User, color: 'harmony-secondary' },
     ...(isAdmin ? [

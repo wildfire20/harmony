@@ -18,7 +18,7 @@
     "test:portal:integration": "node --test tests/admissions-portal-postgres.integration.test.js",
     "test:finance:integration": "node scripts/run-finance-core-integration.js",
     "test:invoice-cancellation": "node --test tests/finance-invoice-cancellation.test.js",
-    "release-gate": "npm run test:security && npm run test:invoice-cancellation && npm run test:parent-reregistration && npm run test:finance:integration && npm run build && npm run test:parent-enquiries:client && npm run test:parent-reregistration:client && npm run test:fees",
+    "release-gate": "npm run test:security && npm run test:invoice-cancellation && npm run test:parent-reregistration && npm run test:finance:integration && npm run build && npm run test:parent-enquiries:client && npm run test:parent-reregistration:client && npm run test:fees && npm run test:behaviour:client && npm run test:statement-print",
     "test:admissions-documents": "node --test tests/admissions-documents.test.js",
     "verify:email": "node scripts/verify-email.js",
     "migrate:parent-enquiries": "node scripts/run-parent-enquiries-migration.js",
@@ -51,7 +51,11 @@
     "migrate:parent-reregistration": "node scripts/run-parent-reregistration-migration.js",
     "migrate:parent-portal": "node scripts/run-parent-portal-migrations.js",
     "test:parent-reregistration": "node --test tests/parent-reregistration-email.test.js",
-    "test:parent-reregistration:client": "npm run test --prefix client -- --watchAll=false --runInBand --runTestsByPath src/components/parent/ParentReRegistration.test.js"
+    "test:parent-reregistration:client": "npm run test --prefix client -- --watchAll=false --runInBand --runTestsByPath src/components/parent/ParentReRegistration.test.js",
+    "migrate:learner-behaviour": "node scripts/run-learner-behaviour-migration.js",
+    "test:behaviour": "node --test tests/learner-behaviour-postgres.integration.test.js",
+    "test:behaviour:client": "npm run test --prefix client -- --watchAll=false --runInBand --runTestsByPath src/components/common/BehaviourWorkspace.test.js",
+    "test:statement-print": "node --test tests/statement-print-layout.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1116.0",

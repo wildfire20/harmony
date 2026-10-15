@@ -1055,10 +1055,10 @@ router.get('/student-payment-history/:studentNumber', [
           });
           worksheet.addImage(logoImage, {
             tl: { col: 0, row: 0 },
-            ext: { width: 100, height: 100 }
+            ext: { width: 64, height: 64 }
           });
-          logoRowOffset = 6; // Leave space for logo
-          worksheet.getRow(1).height = 80;
+          logoRowOffset = 3; // Compact logo block: removes three unused spacer rows
+          worksheet.getRow(1).height = 26;
         }
       } catch (logoErr) {
         console.log('Could not add logo to Excel:', logoErr.message);
@@ -1066,38 +1066,38 @@ router.get('/student-payment-history/:studentNumber', [
       
       // Title row (after logo)
       const titleRow = 1 + logoRowOffset;
-      worksheet.mergeCells(`A${titleRow}:G${titleRow}`);
+      worksheet.mergeCells(`A${titleRow}:L${titleRow}`);
       worksheet.getCell(`A${titleRow}`).value = 'HARMONY LEARNING INSTITUTE';
       worksheet.getCell(`A${titleRow}`).font = { bold: true, size: 18, color: { argb: 'FFDC2626' } };
       worksheet.getCell(`A${titleRow}`).alignment = { horizontal: 'center' };
       
-      worksheet.mergeCells(`A${titleRow + 1}:G${titleRow + 1}`);
+      worksheet.mergeCells(`A${titleRow + 1}:L${titleRow + 1}`);
       worksheet.getCell(`A${titleRow + 1}`).value = 'STUDENT PAYMENT HISTORY';
       worksheet.getCell(`A${titleRow + 1}`).font = { bold: true, size: 14, color: { argb: 'FF1E40AF' } };
       worksheet.getCell(`A${titleRow + 1}`).alignment = { horizontal: 'center' };
       
       // Student info
-      const studentInfoRow = titleRow + 3;
-      worksheet.mergeCells(`A${studentInfoRow}:G${studentInfoRow}`);
+      const studentInfoRow = titleRow + 2;
+      worksheet.mergeCells(`A${studentInfoRow}:L${studentInfoRow}`);
       worksheet.getCell(`A${studentInfoRow}`).value = `Student: ${student.first_name} ${student.last_name} (${student.student_number})`;
       worksheet.getCell(`A${studentInfoRow}`).font = { bold: true, size: 12 };
       
-      worksheet.mergeCells(`A${studentInfoRow + 1}:G${studentInfoRow + 1}`);
+      worksheet.mergeCells(`A${studentInfoRow + 1}:L${studentInfoRow + 1}`);
       worksheet.getCell(`A${studentInfoRow + 1}`).value = `Grade: ${student.grade || 'N/A'}`;
       
-      worksheet.mergeCells(`A${studentInfoRow + 2}:G${studentInfoRow + 2}`);
+      worksheet.mergeCells(`A${studentInfoRow + 2}:L${studentInfoRow + 2}`);
       worksheet.getCell(`A${studentInfoRow + 2}`).value = `Report Generated: ${new Date().toLocaleDateString('en-ZA')}`;
 
-      const feeStructureRow = studentInfoRow + 4;
+      const feeStructureRow = studentInfoRow + 3;
       worksheet.getCell(`A${feeStructureRow}`).value = 'INVOICE BREAKDOWN';
       worksheet.getCell(`A${feeStructureRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
       worksheet.getCell(`A${feeStructureRow + 1}`).value =
         'Persisted invoice charge and discount lines are provided on the Invoice Breakdown worksheet. Legacy invoices are marked snapshot unavailable.';
-      worksheet.mergeCells(`A${feeStructureRow + 1}:G${feeStructureRow + 1}`);
+      worksheet.mergeCells(`A${feeStructureRow + 1}:L${feeStructureRow + 1}`);
       const feeStructureHeight = 2;
 
       // Summary section
-      const summaryRow = feeStructureRow + feeStructureHeight + 2;
+      const summaryRow = feeStructureRow + feeStructureHeight;
       worksheet.getCell(`A${summaryRow}`).value = 'OVERALL ACCOUNT SUMMARY';
       worksheet.getCell(`A${summaryRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
       
@@ -1124,34 +1124,28 @@ router.get('/student-payment-history/:studentNumber', [
       worksheet.getCell(`A${summaryRow + 6}`).value = 'Completed Payments:';
       worksheet.getCell(`B${summaryRow + 6}`).value = paidCount;
       
-      // Banking Details Section
-      const bankingRow = summaryRow + 8;
-      worksheet.getCell(`A${bankingRow}`).value = 'BANKING DETAILS';
-      worksheet.getCell(`A${bankingRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
-      
-      worksheet.getCell(`A${bankingRow + 1}`).value = 'Name of Bank:';
-      worksheet.getCell(`B${bankingRow + 1}`).value = BANKING_DETAILS.bank;
-      worksheet.getCell(`B${bankingRow + 1}`).font = { bold: true };
-      
-      worksheet.getCell(`A${bankingRow + 2}`).value = 'Account Holder:';
-      worksheet.getCell(`B${bankingRow + 2}`).value = BANKING_DETAILS.accountHolder;
-      worksheet.getCell(`B${bankingRow + 2}`).font = { bold: true };
-      
-      worksheet.getCell(`A${bankingRow + 3}`).value = 'Type of Account:';
-      worksheet.getCell(`B${bankingRow + 3}`).value = BANKING_DETAILS.accountType;
-      
-      worksheet.getCell(`A${bankingRow + 4}`).value = 'Account Number:';
-      worksheet.getCell(`B${bankingRow + 4}`).value = BANKING_DETAILS.accountNumber;
-      worksheet.getCell(`B${bankingRow + 4}`).font = { bold: true, size: 12 };
-      
-      worksheet.getCell(`A${bankingRow + 5}`).value = 'Branch Code:';
-      worksheet.getCell(`B${bankingRow + 5}`).value = BANKING_DETAILS.branchCode;
-      worksheet.getCell(`B${bankingRow + 5}`).font = { bold: true };
-      
-      worksheet.getCell(`A${bankingRow + 6}`).value = 'Reference:';
-      worksheet.getCell(`B${bankingRow + 6}`).value = `Use student number: ${student.student_number}`;
-      worksheet.getCell(`B${bankingRow + 6}`).font = { bold: true, color: { argb: 'FFDC2626' } };
-      
+      // Banking details share the summary block instead of adding seven rows.
+      const bankingRow = summaryRow;
+      worksheet.mergeCells(`F${bankingRow}:L${bankingRow}`);
+      worksheet.getCell(`F${bankingRow}`).value = 'BANKING DETAILS';
+      worksheet.getCell(`F${bankingRow}`).font = { bold: true, size: 12, color: { argb: 'FF1E40AF' } };
+      const bankingFields = [
+        ['Name of Bank:', BANKING_DETAILS.bank],
+        ['Account Holder:', BANKING_DETAILS.accountHolder],
+        ['Type of Account:', BANKING_DETAILS.accountType],
+        ['Account Number:', BANKING_DETAILS.accountNumber],
+        ['Branch Code:', BANKING_DETAILS.branchCode],
+        ['Reference:', `Use student number: ${student.student_number}`],
+      ];
+      bankingFields.forEach(([label, value], index) => {
+        const r = bankingRow + index + 1;
+        worksheet.mergeCells(`F${r}:G${r}`);
+        worksheet.mergeCells(`H${r}:L${r}`);
+        worksheet.getCell(`F${r}`).value = label;
+        worksheet.getCell(`H${r}`).value = value;
+        worksheet.getCell(`H${r}`).font = { bold: true };
+      });
+
       // Payment history table
       const historyTitleRow = bankingRow + 8;
       worksheet.getCell(`A${historyTitleRow}`).value = 'MONTHLY PAYMENT HISTORY';
@@ -1291,34 +1285,9 @@ router.get('/student-payment-history/:studentNumber', [
         { width: 20 }, { width: 24 }, { width: 32 },
       ];
       
-      // Set column widths — narrowed to fit on one A4 landscape page
-      worksheet.columns = [
-        { width: 22 },  // A: labels ("Outstanding Balance:", "Reference Number:", …)
-        { width: 22 },  // B: values ("HARMONY LEARNING INSTITUTE", amounts, …)
-         { width: 28 },  // C: Service charges
-         { width: 13 },  // D: Gross charges
-         { width: 13 },  // E: Discounts
-         { width: 13 },  // F: Net due
-         { width: 13 },  // G: Allocated payments
-         { width: 13 },  // H: Outstanding
-         { width: 11 },  // I: Credit
-         { width: 14 },  // J: Status
-         { width: 24 },  // K: Review flags
-         { width: 20 },  // L: Reference number
-      ];
-
-      // Page setup — A4 landscape, always fit to one page width
-      worksheet.pageSetup = {
-        paperSize:   9,           // 9 = A4
-        orientation: 'landscape',
-        fitToPage:   true,
-        fitToWidth:  1,           // shrink to exactly 1 page wide
-        fitToHeight: 0,           // allow as many rows tall as needed
-        margins: {
-          left: 0.5, right: 0.5, top: 0.75, bottom: 0.75,
-          header: 0.3, footer: 0.3
-        }
-      };
+      require('../services/statementPrintLayout').configureStatementPrint(worksheet, {
+        headerRow: headerRowNum, lastRow: rowNum - 1, historyRows: exportRows.length,
+      });
 
       const breakdownSheet = workbook.addWorksheet('Invoice Breakdown');
       breakdownSheet.columns = [
