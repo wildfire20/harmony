@@ -512,6 +512,7 @@ app.use('/api/admin', admissionsNotificationsRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/passwords', passwordRoutes);
 app.use('/api/parent', parentRoutes);
+app.use('/api/behaviour', require('./routes/behaviour'));
 app.use('/api/staff-attendance', staffAttendanceRoutes);
 app.use('/api/payment-proofs', paymentProofsRoutes);
 app.use('/api/student-fees', studentFeesRoutes);

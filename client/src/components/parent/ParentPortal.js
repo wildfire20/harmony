@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
   Home, CalendarDays, Bell, CreditCard, FolderOpen,
-  LogOut, Menu, X, ChevronDown, ChevronRight, Users, BellRing, Settings2, MessageSquare
+  LogOut, Menu, X, ChevronDown, ChevronRight, Users, BellRing, Settings2, MessageSquare, Award
 } from 'lucide-react';
 import ParentDashboard from './ParentDashboard';
 import ParentAttendance from './ParentAttendance';
@@ -13,6 +13,7 @@ import ParentAccount from './ParentAccount';
 import ParentNotifications from './ParentNotifications';
 import ParentCalendar from './ParentCalendar';
 import ParentEnquiries from './ParentEnquiries';
+import ParentBehaviour from './ParentBehaviour';
 import ParentReRegistration from './ParentReRegistration';
 import { getSafeParentDestination, parentLoginPath } from './parentNavigation';
 import './ParentPortal.css';
@@ -24,6 +25,7 @@ const NAV = [
   { path: '/parent/announcements',  label: 'Notices',     icon: Bell, section: 'announcements' },
   { path: '/parent/documents',      label: 'Documents',   icon: FolderOpen, section: 'documents' },
   { path: '/parent/invoices',       label: 'Fees',        icon: CreditCard, section: 'fees' },
+  { path: '/parent/behaviour', label: 'Merits & Demerits', icon: Award },
   { path: '/parent/enquiries',      label: 'Enquiry',     icon: MessageSquare },
   { path: '/parent/re-registration', label: 'Re-registration', icon: Users },
   { path: '/parent/account',        label: 'Account',      icon: Settings2 },
@@ -568,6 +570,7 @@ const ParentPortal = () => {
               <Route path="notifications"  element={<ParentNotifications />} />
               <Route path="documents"       element={<ParentDocuments     child={selectedChild} />} />
               <Route path="invoices"        element={<ParentInvoices      child={selectedChild} />} />
+              <Route path="behaviour" element={<ParentBehaviour child={selectedChild} />} />
               <Route path="enquiries"       element={<ParentEnquiries />} />
               <Route path="re-registration" element={<ParentReRegistration child={selectedChild} />} />
               <Route path="account"         element={<ParentAccount user={user} children={children} selectedChild={selectedChild} onSelectChild={handleSelectChild} onLogout={handleLogout} />} />

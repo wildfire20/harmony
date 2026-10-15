@@ -1,0 +1,317 @@
+[
+  {
+    "code": "M001",
+    "kind": "merit",
+    "label": "Helped clean the classroom",
+    "category": null,
+    "points": null
+  },
+  {
+    "code": "M002",
+    "kind": "merit",
+    "label": "Was obedient and listened to the teacher",
+    "category": null,
+    "points": null
+  },
+  {
+    "code": "M003",
+    "kind": "merit",
+    "label": "Helped the teacher",
+    "category": null,
+    "points": null
+  },
+  {
+    "code": "M004",
+    "kind": "merit",
+    "label": "Produced neat work",
+    "category": null,
+    "points": null
+  },
+  {
+    "code": "M005",
+    "kind": "merit",
+    "label": "Showed good manners",
+    "category": null,
+    "points": null
+  },
+  {
+    "code": "M006",
+    "kind": "merit",
+    "label": "Played appropriately with friends",
+    "category": null,
+    "points": null
+  },
+  {
+    "code": "1001",
+    "kind": "demerit",
+    "label": "Homework not done, incomplete or not written down",
+    "category": 1,
+    "points": 2
+  },
+  {
+    "code": "1002",
+    "kind": "demerit",
+    "label": "Books, homework book or stationery not at school",
+    "category": 1,
+    "points": 2
+  },
+  {
+    "code": "1003",
+    "kind": "demerit",
+    "label": "Not working, distracting classmates or playing during work",
+    "category": 1,
+    "points": 2
+  },
+  {
+    "code": "1004",
+    "kind": "demerit",
+    "label": "Talking, making sounds, walking around, shouting or not putting up a hand",
+    "category": 1,
+    "points": 2
+  },
+  {
+    "code": "1005",
+    "kind": "demerit",
+    "label": "Test, FAT or notice not given to parent to sign",
+    "category": 1,
+    "points": 2
+  },
+  {
+    "code": "1006",
+    "kind": "demerit",
+    "label": "Late for class or leaving class without permission",
+    "category": 1,
+    "points": 2
+  },
+  {
+    "code": "1007",
+    "kind": "demerit",
+    "label": "Not looking after property or rocking a chair",
+    "category": 1,
+    "points": 2
+  },
+  {
+    "code": "1008",
+    "kind": "demerit",
+    "label": "Eating in class or chewing gum",
+    "category": 1,
+    "points": 2
+  },
+  {
+    "code": "1009",
+    "kind": "demerit",
+    "label": "Not respecting class leader, anthems or school uniform rules",
+    "category": 1,
+    "points": 2
+  },
+  {
+    "code": "1010",
+    "kind": "demerit",
+    "label": "Disobedience in the hall, assembly or bathroom",
+    "category": 1,
+    "points": 2
+  },
+  {
+    "code": "2001",
+    "kind": "demerit",
+    "label": "Repeated Category 1 violations (Head of Discipline)",
+    "category": 2,
+    "points": 6
+  },
+  {
+    "code": "2002",
+    "kind": "demerit",
+    "label": "Disrespecting Student Council",
+    "category": 2,
+    "points": 10
+  },
+  {
+    "code": "2003",
+    "kind": "demerit",
+    "label": "Using a cellphone without permission",
+    "category": 2,
+    "points": 10
+  },
+  {
+    "code": "2004",
+    "kind": "demerit",
+    "label": "Not being a good school ambassador or disobedience",
+    "category": 2,
+    "points": 10
+  },
+  {
+    "code": "2005",
+    "kind": "demerit",
+    "label": "Disrespectful, rude or rebellious towards a teacher",
+    "category": 2,
+    "points": 10
+  },
+  {
+    "code": "2006",
+    "kind": "demerit",
+    "label": "Drawing inappropriate pictures or writing vulgar letters",
+    "category": 2,
+    "points": 10
+  },
+  {
+    "code": "2007",
+    "kind": "demerit",
+    "label": "Cursing or foul language",
+    "category": 2,
+    "points": 10
+  },
+  {
+    "code": "2008",
+    "kind": "demerit",
+    "label": "Dishonesty with minor consequences or falsifying a signature",
+    "category": 2,
+    "points": 10
+  },
+  {
+    "code": "2009",
+    "kind": "demerit",
+    "label": "Running on the stoep or playing where not permitted",
+    "category": 2,
+    "points": 10
+  },
+  {
+    "code": "2010",
+    "kind": "demerit",
+    "label": "Littering or refusing to help clean school property",
+    "category": 2,
+    "points": 10
+  },
+  {
+    "code": "2011",
+    "kind": "demerit",
+    "label": "Frequently late or absent from practice, duties or detention",
+    "category": 2,
+    "points": 10
+  },
+  {
+    "code": "3002",
+    "kind": "demerit",
+    "label": "Misconduct or dishonesty in a test, FAT or exam",
+    "category": 3,
+    "points": 15
+  },
+  {
+    "code": "3003",
+    "kind": "demerit",
+    "label": "Teasing or public humiliation",
+    "category": 3,
+    "points": 15
+  },
+  {
+    "code": "3004",
+    "kind": "demerit",
+    "label": "Social exclusion",
+    "category": 3,
+    "points": 15
+  },
+  {
+    "code": "3005",
+    "kind": "demerit",
+    "label": "Verbal threats to safety, intimidation or stalking",
+    "category": 3,
+    "points": 15
+  },
+  {
+    "code": "3006",
+    "kind": "demerit",
+    "label": "Physical violence",
+    "category": 3,
+    "points": 15
+  },
+  {
+    "code": "3007",
+    "kind": "demerit",
+    "label": "Theft, destruction of property or hiding another learner’s property",
+    "category": 3,
+    "points": 15
+  },
+  {
+    "code": "3008",
+    "kind": "demerit",
+    "label": "Sexual, religious, racial affliction",
+    "category": 3,
+    "points": 15
+  },
+  {
+    "code": "3009",
+    "kind": "demerit",
+    "label": "Extortion",
+    "category": 3,
+    "points": 15
+  },
+  {
+    "code": "3010",
+    "kind": "demerit",
+    "label": "Intentional violation of a person’s dignity or privacy",
+    "category": 3,
+    "points": 15
+  },
+  {
+    "code": "3011",
+    "kind": "demerit",
+    "label": "Cyberbullying",
+    "category": 3,
+    "points": 15
+  },
+  {
+    "code": "4001",
+    "kind": "demerit",
+    "label": "Repeated violation of school rules (Head of Discipline)",
+    "category": 4,
+    "points": 20
+  },
+  {
+    "code": "4002",
+    "kind": "demerit",
+    "label": "Serious assault",
+    "category": 4,
+    "points": 20
+  },
+  {
+    "code": "4003",
+    "kind": "demerit",
+    "label": "Possessing, using or selling alcohol, drugs or cigarettes",
+    "category": 4,
+    "points": 20
+  },
+  {
+    "code": "4004",
+    "kind": "demerit",
+    "label": "Possessing or spreading pornography",
+    "category": 4,
+    "points": 20
+  },
+  {
+    "code": "4005",
+    "kind": "demerit",
+    "label": "Using, threatening with or possessing a dangerous weapon",
+    "category": 4,
+    "points": 20
+  },
+  {
+    "code": "4006",
+    "kind": "demerit",
+    "label": "Serious disruptive behaviour that impedes learning",
+    "category": 4,
+    "points": 20
+  },
+  {
+    "code": "4007",
+    "kind": "demerit",
+    "label": "Robbery or serious theft",
+    "category": 4,
+    "points": 20
+  },
+  {
+    "code": "4008",
+    "kind": "demerit",
+    "label": "Sexual harassment or abuse",
+    "category": 4,
+    "points": 20
+  }
+]
