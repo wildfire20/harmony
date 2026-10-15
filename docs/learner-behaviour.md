@@ -24,7 +24,9 @@ The year and Merit/Demerit filters apply to history. Summary totals cover all ac
 
 The additive migration creates only `behaviour_types` and `behaviour_records`, their indexes and history protection trigger. It seeds catalogue choices and does not import incidents from photographed forms. It does not change users, teacher assignments, Parent links or financial data. Startup never runs the migration.
 
-After the reviewed application is available in the target service, the operator runs:
+The existing release command, `npm run migrate:parent-portal`, now applies and verifies the enquiry, re-registration and behaviour migrations together in one transaction. It verifies all 45 initial behaviour codes before reporting success. Railway's existing pre-deploy step can therefore prepare the new tables without a separate shell session.
+
+For a standalone behaviour migration, the operator can also run:
 
 ```sh
 npm run migrate:learner-behaviour
