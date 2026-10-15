@@ -15,9 +15,11 @@ const DEEP_LINKS = Object.freeze({
   documents: '/parent/documents',
   announcements: '/parent/announcements',
   notifications: '/parent/notifications',
+  behaviour: '/parent/behaviour',
 });
 
 const EVENT = Object.freeze({
+  DEMERIT: 'behaviour_demerit_recorded',
   ABSENT: 'attendance_absent',
   LATE: 'attendance_late',
   RESULT: 'academic_result_published',

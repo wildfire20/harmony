@@ -81,6 +81,16 @@ describe('learner-specific notification navigation', () => {
     expect(navigate).toHaveBeenCalledWith('/parent/attendance');
   });
 
+  test('a demerit inbox alert selects its linked learner and opens Merits & Demerits', async () => {
+    parentApi.mockImplementation(path => Promise.resolve(path === '/notifications'
+      ? {notifications:[{id:8,category:'behaviour',action:'behaviour',learner_id:101,title:'New demerit recorded'}]}
+      : {count:1}));
+    await act(async () => { root.render(<ParentNotifications />); });
+    const action=[...container.querySelectorAll('button')].find(b=>b.textContent.includes('View merits & demerits'));
+    expect(action).toBeTruthy();await act(async()=>action.click());
+    expect(onSelectChild).toHaveBeenCalledWith(linkedChild);expect(navigate).toHaveBeenCalledWith('/parent/behaviour');
+  });
+
   test('does not navigate or select a learner that is no longer linked', async () => {
     useSelectedChild.mockReturnValue({ children: [], onSelectChild });
     await act(async () => { root.render(<ParentNotifications />); });

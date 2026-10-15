@@ -679,6 +679,8 @@ const startServer = async () => {
 
   const stopReRegistrationEmails = require('./services/parentReRegistrationEmails').startEmailWorker();
   server.once('close', stopReRegistrationEmails);
+  const stopDemeritEmails = require('./services/behaviourParentAlerts').startEmailWorker();
+  server.once('close', stopDemeritEmails);
 
   // Initialize database asynchronously after server starts
   try {
