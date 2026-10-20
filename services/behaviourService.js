@@ -1,3 +1,4 @@
+const classScope = require('./classScope');
 const crypto = require('node:crypto');
 const db = require('../config/database');
 const { logAudit } = require('../utils/auditLogger');
@@ -16,9 +17,7 @@ const fields = (body, allowed) => {
   if (!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(k=>!allowed.includes(k))) throw fail(400,'Invalid form fields.');
 };
 const today = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Johannesburg',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-// Standard assignments have no active flag. If a flag exists, only true grants access.
-const activeTeacherAssignment = `(NOT (to_jsonb(ta) ? 'is_active') OR to_jsonb(ta)->>'is_active'='true')`;
-const teacherScope = `EXISTS (SELECT 1 FROM teacher_assignments ta WHERE ta.teacher_id=$1 AND ${activeTeacherAssignment} AND ta.grade_id=u.grade_id AND ta.class_id=u.class_id)`;
+const teacherScope = classScope.teacherScope('$1','u.grade_id','u.class_id');
 async function transaction(work) {
   const c=await db.pool.connect();
   try {await c.query('BEGIN');const result=await work(c);await c.query('COMMIT');return result;}
@@ -34,8 +33,15 @@ async function learner(c, actor, learnerId) {
   if (!row) throw fail(404,'Learner not found or access unavailable.');
   // Lock current links/assignments as well as the learner until the transaction ends.
   if (actor.role==='parent' && !(await c.query('SELECT parent_id FROM parent_students WHERE parent_id=$1 AND student_id=$2 FOR SHARE',[actor.id,studentId])).rowCount) throw fail(404,'Learner access changed.');
-  if (actor.role==='teacher' && !(await c.query(`SELECT ta.teacher_id FROM teacher_assignments ta WHERE ta.teacher_id=$1 AND ${activeTeacherAssignment} AND
-    ta.grade_id=(SELECT grade_id FROM users WHERE id=$2) AND ta.class_id=(SELECT class_id FROM users WHERE id=$2) FOR SHARE OF ta`,[actor.id,studentId])).rowCount) throw fail(404,'Learner access changed.');
+  if (actor.role==='teacher') {
+    await c.query(`SELECT ta.teacher_id FROM teacher_assignments ta JOIN users u ON u.id=$2
+      WHERE ta.teacher_id=$1 AND ta.grade_id=u.grade_id AND ${classScope.active('ta')}
+        AND ${classScope.resolvedClassId('ta.grade_id','ta.class_id')}=${classScope.resolvedClassId('u.grade_id','u.class_id')} FOR SHARE OF ta`,[actor.id,studentId]);
+    await c.query(`SELECT homeroom.id FROM classes homeroom JOIN users u ON u.id=$2
+      WHERE homeroom.id=${classScope.resolvedClassId('u.grade_id','u.class_id')}
+      AND to_jsonb(homeroom)->>'teacher_id'=$1::text FOR SHARE OF homeroom`,[actor.id,studentId]);
+    if(!(await c.query(`SELECT u.id FROM users u WHERE u.id=$2 AND ${teacherScope}`,[actor.id,studentId])).rowCount)throw fail(404,'Learner access changed.');
+  }
   return row;
 }
 async function audit(c,actor,action,entityId,details) {
@@ -98,7 +104,8 @@ async function records(actor,query) {
       FROM behaviour_records b JOIN users u ON u.id=b.recorded_by
       WHERE b.student_id=$1 AND b.event_date >= $2::date AND b.event_date < $3::date AND ($4='all' OR b.kind=$4)
       ORDER BY b.event_date DESC,b.id DESC LIMIT 50 OFFSET $5`,[...params,kind,(page-1)*50]);
-    return {learner:student,summary,records:result.rows.map(({total_count,...row})=>({...row,can_void:row.status==='active'&&(isAdmin(actor)||(actor.role==='teacher'&&row.recorded_by===actor.id))})),page,has_more:page*50<Number(result.rows[0]?.total_count||0)};
+    const points_balance={starting:100,remaining:100-summary.demerit_points,review_required:summary.demerit_points>=70};
+    return {learner:student,summary,points_balance,records:result.rows.map(({total_count,...row})=>({...row,can_void:row.status==='active'&&(isAdmin(actor)||(actor.role==='teacher'&&row.recorded_by===actor.id))})),page,has_more:page*50<Number(result.rows[0]?.total_count||0)};
   });
 }
 async function createRecord(actor,body) {
@@ -135,4 +142,20 @@ async function voidRecord(actor,recordId,body) {
     await audit(c,actor,'behaviour_record_voided',record.id,{student_id:record.student_id,reason});return {voided:true};
   });
 }
-module.exports={listLearners,catalogue,saveType,records,createRecord,voidRecord};
+async function adminAlerts(actor,query={}) {
+  if(!isAdmin(actor))throw fail(403,'Admin access is required.');
+  const year=query.year==null?Number(today().slice(0,4)):Number(query.year);
+  if(!Number.isInteger(year)||year<2000||year>2100)throw fail(400,'Enter a valid school year.');
+  const page=query.page==null?1:id(query.page);if(page>10000)throw fail(400,'Invalid page.');
+  const result=await db.query(`SELECT u.id,u.student_number,u.first_name,u.last_name,
+    g.name AS grade_name,c.name AS class_name,100-sum(b.points)::integer AS remaining,
+    count(*) OVER()::integer AS total_count FROM users u JOIN behaviour_records b ON b.student_id=u.id
+    LEFT JOIN grades g ON g.id=u.grade_id LEFT JOIN classes c ON c.id=u.class_id
+    WHERE u.role='student' AND u.is_active=true AND b.kind='demerit' AND b.status='active'
+      AND b.event_date >= $1::date AND b.event_date < $2::date
+    GROUP BY u.id,u.student_number,u.first_name,u.last_name,g.name,c.name HAVING sum(b.points)>=70
+    ORDER BY remaining,u.last_name,u.first_name,u.id LIMIT 50 OFFSET $3`,[`${year}-01-01`,`${year+1}-01-01`,(page-1)*50]);
+  return {year,starting:100,threshold:30,count:result.rows[0]?.total_count||0,page,
+    learners:result.rows.map(({total_count,...row})=>row)};
+}
+module.exports={adminAlerts,listLearners,catalogue,saveType,records,createRecord,voidRecord};

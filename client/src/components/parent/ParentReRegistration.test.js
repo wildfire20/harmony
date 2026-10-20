@@ -106,3 +106,9 @@ test('Parent sees bank reference and upload when a deposit is due',async()=>{
   parentApi.mockResolvedValue({...fixture({status:'submitted',status_label:'Awaiting deposit verification',read_only:true}),deposit:{required:true,verified:false,invoice_id:800,outstanding:500,amount_paid:0,pending_amount:0,proofs:[],bank:{bank:'FNB',holder:'Harmony Learning Institute',account:'63035320265',branch:'250655'}}});
   await render();expect(container.textContent).toContain('63035320265');expect(container.textContent).toContain('SYN501');await click(button('Upload proof of payment'));await click(button('Submit Proof of Payment'));expect(container.querySelector('[role="alert"]').textContent).toContain('Upload a PDF');
 });
+
+test.each(['not_open','closed'])('online forms cannot be edited when the registration window is %s',async phase=>{
+  parentApi.mockResolvedValue({...fixture(),window:{is_open:false,phase,message:'11 December 2026 to 8 January 2027'}});
+  await render();expect(button('Re-register online')).toBeUndefined();expect(button('Save draft')).toBeUndefined();expect(button('Submit re-registration')).toBeUndefined();
+  expect(container.textContent).toContain('11 December 2026 to 8 January 2027');expect(button('Download form')).toBeTruthy();
+});

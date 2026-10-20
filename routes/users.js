@@ -83,22 +83,11 @@ router.get('/teacher/assignments', [
       });
     }
 
-    const result = await db.query(`
-      SELECT 
-        ta.grade_id, 
-        ta.class_id,
-        g.name as grade_name,
-        c.name as class_name
-      FROM teacher_assignments ta
-      JOIN grades g ON ta.grade_id = g.id
-      JOIN classes c ON ta.class_id = c.id
-      WHERE ta.teacher_id = $1
-      ORDER BY g.name, c.name
-    `, [user.id]);
+    const assignments = await require('../services/classScope').teacherClasses(db,user.id);
 
     res.json({
       success: true,
-      assignments: result.rows
+      assignments
     });
 
   } catch (error) {

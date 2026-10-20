@@ -1,6 +1,7 @@
 import React, {act} from 'react';
 import {createRoot} from 'react-dom/client';
-import BehaviourWorkspace from './BehaviourWorkspace';
+import BehaviourWorkspace,{newRequestKey} from './BehaviourWorkspace';
+jest.mock('../admin/DemeritAlerts',()=>()=>null);
 const child={id:501,first_name:'Synthetic',last_name:'Learner',student_number:'TEST501',grade_name:'Grade 2'};
 const types=[{id:1,code:'M001',kind:'merit',label:'Helped clean the classroom',category:null,points:null,is_active:true,version:1},
   {id:2,code:'1001',kind:'demerit',label:'Homework incomplete',category:1,points:2,is_active:true,version:1},
@@ -99,4 +100,15 @@ test('Refresh retries a failed teacher learner search without retyping the refer
   expect(container.querySelectorAll('.behaviour-search-results button')).toHaveLength(1);
   expect(request.mock.calls.filter(([path])=>path.startsWith('/learners'))).toHaveLength(2);
   expect(container.querySelector('[role="alert"]')).toBeNull();
+});
+
+test('the annual balance starts at 100 and flags review at 30 remaining without suspending',async()=>{
+  request.mockResolvedValue({...result(),summary:{merits:3,demerits:4,demerit_points:70},points_balance:{starting:100,remaining:30,review_required:true}});
+  await render({readOnly:true,parentChild:child});expect(container.textContent).toContain('30 / 100 points remaining');
+  expect(container.textContent).toContain('Suspension review required');expect(container.textContent).toContain('Merits are separate awards');
+});
+
+test('older secure browsers can generate a valid request key without crypto.randomUUID',()=>{
+  Object.defineProperty(global,'crypto',{configurable:true,value:{getRandomValues:bytes=>{bytes.fill(27);return bytes;}}});
+  expect(newRequestKey()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });

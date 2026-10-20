@@ -1,8 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './BehaviourWorkspace.css';
+import DemeritAlerts from '../admin/DemeritAlerts';
 
 const localToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Johannesburg', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-const newEntry = () => ({ kind: 'merit', type_id: '', event_date: localToday(), notes: '', request_key: crypto.randomUUID() });
+export const newRequestKey = () => {
+  if(typeof crypto.randomUUID==='function')return crypto.randomUUID();
+  const bytes=crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+  const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+};
+const newEntry = () => ({ kind: 'merit', type_id: '', event_date: localToday(), notes: '', request_key: newRequestKey() });
 const emptyType = () => ({ code: '', kind: 'merit', label: '', category: null, points: null, is_active: true });
 const name = learner => `${learner.first_name} ${learner.last_name}`;
 const dateLabel = date => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Africa/Johannesburg' });
@@ -11,6 +18,7 @@ export default function BehaviourWorkspace({ request, readOnly = false, parentCh
   const admin = !readOnly && ['admin', 'super_admin'].includes(role);
   const [query, setQuery] = useState('');
   const [learners, setLearners] = useState([]);
+  const [searchLoading,setSearchLoading]=useState(false);
   const [selected, setSelected] = useState(null);
   const learner = readOnly ? parentChild : selected;
   const learnerId = learner?.id;
@@ -39,11 +47,13 @@ export default function BehaviourWorkspace({ request, readOnly = false, parentCh
     return () => { active = false; };
   }, [readOnly, request, reload]);
   useEffect(() => {
-    if (readOnly || query.trim().length < 2) { setLearners([]); return undefined; }
+    if (readOnly || query.trim().length < 2) { setLearners([]);setSearchLoading(false); return undefined; }
     let active = true;
+    setSearchLoading(true);
     const timer = setTimeout(() => request(`/learners?q=${encodeURIComponent(query.trim())}`)
       .then(result => { if (active) setLearners(result.learners || []); })
-      .catch(e => { if (active) setError(e.message); }), 300);
+      .catch(e => { if (active) setError(e.message); })
+      .finally(()=>{if(active)setSearchLoading(false);}), 300);
     return () => { active = false; clearTimeout(timer); };
   }, [query, readOnly, request, reload]);
   useEffect(() => {
@@ -59,7 +69,7 @@ export default function BehaviourWorkspace({ request, readOnly = false, parentCh
   const work = async operation => {
     if (inFlight.current) return;
     inFlight.current = true; setBusy(true); setError(''); setNotice('');
-    try { await operation(); setReload(value => value + 1); }
+    try { await operation(); setReload(value => value + 1);window.dispatchEvent(new Event('behaviour-records-updated')); }
     catch (e) { setError(e.message || 'Unable to save. Please try again.'); }
     finally { inFlight.current = false; setBusy(false); }
   };
@@ -89,7 +99,7 @@ export default function BehaviourWorkspace({ request, readOnly = false, parentCh
     setEntry(newEntry()); setVoiding(null); setNotice(''); setError('');
   };
   const selectedType = types.find(t => t.id === Number(entry.type_id));
-  const editEntry = changes => setEntry(current => ({ ...current, ...changes, request_key: crypto.randomUUID() }));
+  const editEntry = changes => setEntry(current => ({ ...current, ...changes, request_key: newRequestKey() }));
 
   return <section className="behaviour-workspace" aria-label="Merits and Demerits">
     <div className="behaviour-heading"><div><h1>Merits &amp; Demerits</h1>
@@ -98,10 +108,12 @@ export default function BehaviourWorkspace({ request, readOnly = false, parentCh
     </div>
     {error && <div role="alert" className="behaviour-error">{error}<button type="button" onClick={() => setReload(r => r + 1)}>Refresh</button></div>}
     {notice && <div role="status" className="behaviour-notice">{notice}</div>}
+    {admin && <DemeritAlerts year={year} onSelectLearner={selectLearner} />}
 
     {!readOnly && <div className="behaviour-card"><label>Find learner
       <input type="search" value={query} disabled={busy} onChange={e => setQuery(e.target.value)} placeholder="Search by name or HAR number" /></label>
       {learners.length > 0 && <ul className="behaviour-search-results">{learners.map(student => <li key={student.id}><button type="button" disabled={busy} onClick={() => selectLearner(student)}>{name(student)} · {student.student_number} · {student.grade_name} {student.class_name}</button></li>)}</ul>}
+      {!searchLoading && query.trim().length>=2 && !learners.length && !error && <p>No learners found. Check the HAR number or ask Admin to check your class assignment.</p>}
       {learner && <p className="behaviour-selected">Selected: <strong>{name(learner)}</strong> · {learner.student_number}</p>}
     </div>}
     {readOnly && learner && <p className="behaviour-selected"><strong>{name(learner)}</strong> · {learner.student_number} · {learner.grade_name}</p>}
@@ -115,6 +127,10 @@ export default function BehaviourWorkspace({ request, readOnly = false, parentCh
         <div><strong>{data.summary.merits}</strong><span>Merits awarded</span></div>
         <div><strong>{data.summary.demerits}</strong><span>Demerits recorded</span></div>
         <div><strong>{data.summary.demerit_points}</strong><span>Demerit points</span></div>
+      </div>}
+      {data && <div className="behaviour-card"><strong>{data.points_balance?.remaining ?? 100-data.summary.demerit_points} / 100 points remaining</strong>
+        <p>School year {year}. Recorded demerit points are deducted from 100. Corrected entries are excluded. Merits are separate awards.</p>
+        {(data.points_balance?.remaining ?? 100-data.summary.demerit_points)<=30 && <p className="behaviour-serious">Suspension review required: 30 points remaining or below. Admin will review the record.</p>}
       </div>}
       {!readOnly && <form onSubmit={submitEntry} className="behaviour-card">
         <h2>Add a record</h2><div className="behaviour-form-grid">

@@ -17,6 +17,7 @@ const handle=fn=>async(req,res)=>{
     res.status(500).json({message:'Unable to save or load this record. Please try again.'});
   }
 };
+router.get('/alerts',handle(async(req,res)=>res.json(await service.adminAlerts(req.user,req.query))));
 router.get('/learners',handle(async(req,res)=>res.json(await service.listLearners(req.user,req.query.q||''))));
 router.get('/catalogue',handle(async(req,res)=>res.json(await service.catalogue(req.user))));
 router.post('/catalogue',handle(async(req,res)=>res.status(201).json(await service.saveType(req.user,req.body))));
