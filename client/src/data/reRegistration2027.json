@@ -2,6 +2,8 @@
   "schoolYear": 2027,
   "definitionVersion": 2,
   "deadline": "2027-01-11",
+  "opensOn": "2026-12-11",
+  "closesOn": "2027-01-08",
   "depositAmount": 500,
   "bank": {
     "bank": "FNB",

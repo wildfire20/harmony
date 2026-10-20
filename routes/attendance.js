@@ -4,6 +4,7 @@ const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { notifyAttendance } = require('../services/parentNotificationService');
 
+const classScope = require('../services/classScope');
 const router = express.Router();
 
 // Submit class attendance (teachers only)
@@ -31,8 +32,7 @@ router.post('/submit', [
     // Check if teacher has access to this class (skip for admin)
     if (user.role === 'teacher') {
       const assignmentCheck = await db.query(`
-        SELECT 1 FROM teacher_assignments 
-        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+        SELECT 1 WHERE ${classScope.teacherScope('$1','$2::integer','$3::integer')}
       `, [user.id, grade_id, class_id]);
 
       if (assignmentCheck.rows.length === 0) {
@@ -45,22 +45,35 @@ router.post('/submit', [
 
     // Get all students in this class for validation
     const studentsResult = await db.query(`
-      SELECT id FROM users 
-      WHERE role = 'student' AND grade_id = $1 AND class_id = $2 AND is_active = true
+      SELECT u.id FROM users u
+      WHERE u.role = 'student' AND u.grade_id = $1 AND ${classScope.resolvedClassId('u.grade_id','u.class_id')} = $2 AND u.is_active = true
     `, [grade_id, class_id]);
 
+    const selectedClass=(await db.query('SELECT id FROM classes WHERE id=$1 AND grade_id=$2',[class_id,grade_id])).rows[0];
+    if(!selectedClass)return res.status(400).json({success:false,message:'Class and grade do not match. Refresh the class list.'});
     const validStudentIds = new Set(studentsResult.rows.map(s => s.id));
+
+    if (!attendance.length || attendance.some(record=>!validStudentIds.has(record.student_id)||!['present','absent','late','excused'].includes(record.status || 'present')) || new Set(attendance.map(r=>r.student_id)).size!==attendance.length)
+      return res.status(400).json({success:false,message:'The learner list changed or contains invalid entries. Refresh before saving.'});
 
     // Begin transaction
     const client = await db.pool.connect();
     try {
       await client.query('BEGIN');
+      await client.query("SET LOCAL lock_timeout='5s'");
+      await client.query('LOCK TABLE classes,teacher_assignments IN SHARE MODE');
+      const currentLearners=await client.query(`SELECT u.id FROM users u WHERE u.role='student' AND u.is_active=true
+        AND u.grade_id=$2 AND ${classScope.resolvedClassId('u.grade_id','u.class_id')}=$1 FOR SHARE OF u`,[class_id,grade_id]);
+      const currentIds=new Set(currentLearners.rows.map(r=>r.id));
+      if(attendance.some(record=>!currentIds.has(record.student_id)))throw Object.assign(new Error('The learner list changed. Refresh before saving.'),{status:409});
+      if(user.role==='teacher' && !(await client.query(`SELECT 1 WHERE ${classScope.teacherScope('$1','$2::integer','$3::integer')}`,[user.id,grade_id,class_id])).rowCount)
+        throw Object.assign(new Error('Your class assignment changed. Refresh before saving.'),{status:403});
 
       // Delete existing attendance for this class and date (to allow updates)
       await client.query(`
         DELETE FROM attendance 
-        WHERE class_id = $1 AND date = $2
-      `, [class_id, date]);
+        WHERE class_id = $1 AND date = $2 AND grade_id=$3
+      `, [class_id, date, grade_id]);
 
       // Insert all attendance records
       let insertedCount = 0;
@@ -123,6 +136,7 @@ router.post('/submit', [
     }
 
   } catch (error) {
+    if(error.status)return res.status(error.status).json({success:false,message:error.message});
     console.error('Submit attendance error:', error);
     res.status(500).json({ success: false, message: 'Server error submitting attendance' });
   }
@@ -154,8 +168,7 @@ router.get('/class/:classId/:date', [
     // Check access for teachers
     if (user.role === 'teacher') {
       const assignmentCheck = await db.query(`
-        SELECT 1 FROM teacher_assignments 
-        WHERE teacher_id = $1 AND grade_id = $2 AND class_id = $3
+        SELECT 1 WHERE ${classScope.teacherScope('$1','$2::integer','$3::integer')}
       `, [user.id, classInfo.grade_id, classId]);
 
       if (assignmentCheck.rows.length === 0) {
@@ -183,7 +196,7 @@ router.get('/class/:classId/:date', [
       FROM users u
       LEFT JOIN attendance a ON u.id = a.student_id AND a.date = $2
       LEFT JOIN users ru ON a.recorded_by = ru.id
-      WHERE u.role = 'student' AND u.grade_id = $3 AND u.class_id = $1 AND u.is_active = true
+      WHERE u.role = 'student' AND u.grade_id = $3 AND ${classScope.resolvedClassId('u.grade_id','u.class_id')} = $1 AND u.is_active = true
       ORDER BY u.last_name, u.first_name
     `, [classId, date, classInfo.grade_id]);
 

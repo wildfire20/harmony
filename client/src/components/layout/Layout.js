@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from 'react-query';
 import { 
   Home, 
@@ -27,6 +27,7 @@ import { ThemeToggle, useTheme, ThemedLayout } from '../common/ThemeProvider';
 import { StatusIndicator, DepartmentBadge } from '../common/BrandingElements';
 import { useResponsive, useTouchDevice } from '../../hooks/useResponsive';
 import useAdminEnquiryAlerts from '../../hooks/useAdminEnquiryAlerts';
+import DemeritAlerts from '../admin/DemeritAlerts';
 import useAdminReRegistrationAlerts from '../../hooks/useAdminReRegistrationAlerts';
 
 const Layout = () => {
@@ -34,6 +35,7 @@ const Layout = () => {
   const { user, logout, isAdmin } = useAuth();
   const { theme } = useTheme();
   const navigate = useNavigate();
+  const location=useLocation();
   const { isMobile, isTablet } = useResponsive();
   const isTouch = useTouchDevice();
   const { count: unreadEnquiries } = useAdminEnquiryAlerts();
@@ -279,6 +281,7 @@ const Layout = () => {
           }`} style={{ paddingBottom: isMobile ? '80px' : '0' }}>
             <div className="py-6 px-4 sm:px-6 lg:px-8">
               <div className="max-w-7xl mx-auto">
+                {isAdmin && location.pathname!=='/behaviour' && <DemeritAlerts />}
                 <Outlet />
               </div>
             </div>

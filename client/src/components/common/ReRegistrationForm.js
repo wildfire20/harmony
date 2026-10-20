@@ -29,7 +29,7 @@ export function FeesUndertaking({form}) {
       <div className="rr-notice"><strong>No re-registration fee for Preschool, Baby Class or Grade R.</strong></div>
       <p>Baby Class: R1,900 per month. Preschool / Grade R: R1,850 per month. Boarding: R3,650 per month.</p></>}
     <p><b>NO FEE INCREASE FOR 2027.</b></p><p>Uniform must be complete on the first school day. <b>NO UNIFORM, NO ENTRY.</b></p>
-    <p>Complete re-registration by 11 January 2027. Late re-registration may result in the place being offered to a learner on the waiting list.</p>
+    <p>Re-registration opens on 11 December 2026. Complete and submit your form by 8 January 2027. Late re-registration may result in the place being offered to a learner on the waiting list.</p>
   </section>;
 }
 export function FormReview({ form }) {

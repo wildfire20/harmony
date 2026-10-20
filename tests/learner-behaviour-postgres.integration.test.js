@@ -303,6 +303,37 @@ test('Merits and Demerits enforce portal permissions and preserve history',{
       assert.deepEqual(await rows('parent_notifications'),before.alerts);assert.deepEqual(await rows('parent_notification_reads'),before.reads);
       assert.deepEqual(await rows('behaviour_parent_emails'),before.emails);assert.deepEqual(await rows('behaviour_records'),before.records);
     });
+    await t.test('100-point balances and Admin review alerts use active demerits only and recover after corrections',async()=>{
+      const current=(await request('/records?student_id=501',{actor:10})).data;
+      assert.equal(current.points_balance.remaining,100-current.summary.demerit_points);
+      const alerts=await request('/alerts',{actor:1});assert.equal(alerts.status,200);
+      assert.ok(alerts.data.learners.some(r=>r.id===501&&r.remaining<=30));
+      for(const actor of [3,10])assert.equal((await request('/alerts',{actor})).status,403);
+      for(const kind of ['year=bad','year=2101','page=10001'])assert.equal((await request('/alerts?'+kind)).status,400);
+      const before=await rows('users');const records=(await db.query("SELECT id FROM behaviour_records WHERE student_id=501 AND kind='demerit' AND status='active'")).rows;
+      for(const r of records)assert.equal((await request(`/records/${r.id}/void`,{actor:1,method:'POST',body:{reason:'Synthetic correction of threshold test incidents.'}})).status,200);
+      assert.equal((await request('/records?student_id=501',{actor:10})).data.points_balance.remaining,100);
+      assert.equal((await request('/alerts')).data.learners.some(r=>r.id===501),false);
+      assert.deepEqual(await rows('users'),before);
+    });
+    await t.test('legacy cross-grade class links resolve only within the learner grade; primary teachers are scoped',async()=>{
+      await db.query('ALTER TABLE classes ADD COLUMN grade_id INTEGER,ADD COLUMN teacher_id INTEGER');
+      try{
+        await db.query("UPDATE classes SET grade_id=id;INSERT INTO grades VALUES(5,'Grade 5');INSERT INTO classes VALUES(51,'A',5,3),(52,'B',5,4);UPDATE users SET grade_id=5,class_id=2 WHERE id=501");
+        // Class 2 is the legacy reference for B; Grade 5 B resolves to 52.
+        assert.equal((await request('/records?student_id=501',{actor:4})).status,200);
+        assert.equal((await request('/records?student_id=501',{actor:3})).status,404);
+        await db.query('INSERT INTO teacher_assignments(teacher_id,grade_id,class_id) VALUES(3,5,2)');
+        assert.equal((await request('/records?student_id=501',{actor:3})).status,200);
+        assert.equal((await request('/records?student_id=502',{actor:3})).status,404);
+        await db.query('UPDATE teacher_assignments SET is_active=false WHERE teacher_id=3 AND grade_id=5');
+        assert.equal((await request('/records?student_id=501',{actor:3})).status,404);
+        await db.query("INSERT INTO classes VALUES(53,' B ',5,NULL)");
+        assert.equal((await request('/records?student_id=501',{actor:4})).status,404,'ambiguous B labels must not grant access');
+      }finally{
+        await db.query('UPDATE users SET grade_id=1,class_id=1 WHERE id=501;DELETE FROM teacher_assignments WHERE grade_id=5;DELETE FROM classes WHERE id>=51;DELETE FROM grades WHERE id=5;ALTER TABLE classes DROP COLUMN grade_id,DROP COLUMN teacher_id');
+      }
+    });
     await t.test('users, Parent links and financial data are unchanged',async()=>{
       assert.deepEqual(await rows('users'),protectedBefore.users);assert.deepEqual(await rows('parent_students'),protectedBefore.links);
       assert.deepEqual(await rows('invoices'),protectedBefore.invoices);assert.deepEqual(await rows('payment_transactions'),protectedBefore.payments);

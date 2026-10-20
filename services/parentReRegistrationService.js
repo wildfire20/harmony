@@ -4,7 +4,7 @@ const { logAudit } = require('../utils/auditLogger');
 const { normalizePhone } = require('./parentAuth');
 const { escapeHtml } = require('./gmailService');
 const definition = require('../client/src/data/reRegistration2027.json');
-const { primary, preschool, visibleField, requiredField, feeTerms } = require('./parentReRegistrationPolicy');
+const { registrationWindow, primary, preschool, visibleField, requiredField, feeTerms } = require('./parentReRegistrationPolicy');
 const deposits = require('./parentReRegistrationDeposit');
 const finance = require('./financeCommandService');
 const fields = definition.sections.flatMap(section => section.fields);
@@ -99,7 +99,7 @@ function projection(row, actor) {
     ...(isAdmin(actor) ? { office_note: row.office_note, submitted_by: row.submitted_by } : {}) };
 }
 async function detail(client, child, row, actor) {
-  const result = { school_year: YEAR, child: { id: child.id, first_name: child.first_name, last_name: child.last_name, student_number: child.student_number, grade_name: child.grade_name },
+  const result = { school_year: YEAR, window: registrationWindow(), child: { id: child.id, first_name: child.first_name, last_name: child.last_name, student_number: child.student_number, grade_name: child.grade_name },
     registration: projection(row, actor), grades: await grades(client) };
   if (!row || (!isAdmin(actor) && row.definition_version!==2 && row.submitted_by===actor.id && ['draft','changes_needed'].includes(row.status))) result.registration.form = await prefill(client,child,actor);
   result.deposit=await deposits.summary(client,row,actor);
@@ -156,6 +156,8 @@ async function saveRegistration(studentId, actor, body, submit = false) {
     const hash = crypto.createHash('sha256').update(JSON.stringify({ form, version })).digest('hex');
     let row = await getRow(client, child.id, true);
     if (await duplicate(client, body, actor, child.id, action, hash)) return { ...await detail(client, child, row, actor), duplicate: true };
+    const window=registrationWindow();
+    if(!window.is_open)throw fail(409,window.message);
     if (row && (row.submitted_by !== actor.id || row.source !== 'portal')) throw fail(409, 'A form already exists for this child. Please contact the school office.');
     if ((row?.version || 0) !== version) throw fail(409, 'This form has changed. Reload it before making changes.');
     if (row && !['draft','changes_needed'].includes(row.status)) throw fail(409, 'This form has already been submitted. Please contact the school office if a correction is needed.');

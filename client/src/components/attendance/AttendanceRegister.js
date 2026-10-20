@@ -13,7 +13,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { attendanceAPI, classesAPI } from '../../services/api';
+import { attendanceAPI, classesAPI, usersAPI } from '../../services/api';
 import { useTheme } from '../common/ThemeProvider';
 import LoadingSpinner from '../common/LoadingSpinner';
 
@@ -28,9 +28,20 @@ const AttendanceRegister = () => {
   const [notes, setNotes] = useState({});
   const [showSuccess, setShowSuccess] = useState(false);
   
-  const assignments = user?.assignments || [];
+  const admin=['admin','super_admin'].includes(user?.role);
+  const {data:assignmentData,isLoading:loadingAssignments,error:assignmentError,refetch:refreshAssignments}=useQuery(
+    ['attendance-classes',user?.id,admin],
+    ()=>admin ? classesAPI.getClasses().then(r=>(r.data.classes || []).map(c=>({...c,class_id:c.id,class_name:c.name})))
+      : usersAPI.getTeacherAssignments().then(r=>r.data.assignments || []),
+    {enabled:!!user?.id,refetchOnWindowFocus:true}
+  );
+  const assignments=assignmentData || [];
+  useEffect(()=>{
+    if(selectedClass && assignmentData && !assignments.some(a=>Number(a.class_id)===Number(selectedClass.class_id)&&Number(a.grade_id)===Number(selectedClass.grade_id)))setSelectedClass(null);
+  },[assignmentData,selectedClass]);
+  useEffect(()=>{setAttendanceData({});setNotes({});},[selectedClass?.class_id,selectedDate]);
   
-  const { data: classAttendance, isLoading: loadingAttendance, refetch: refetchAttendance } = useQuery(
+  const { data: classAttendance, isLoading: loadingAttendance, error: attendanceError, refetch: refetchAttendance } = useQuery(
     ['class-attendance', selectedClass?.class_id, selectedDate],
     () => attendanceAPI.getClassAttendance(selectedClass.class_id, selectedDate),
     { 
@@ -79,7 +90,7 @@ const AttendanceRegister = () => {
   };
 
   const handleSubmit = () => {
-    if (!selectedClass) return;
+    if (!selectedClass || loadingAttendance || attendanceError || !students.length) return;
 
     const attendance = Object.entries(attendanceData).map(([student_id, status]) => ({
       student_id: parseInt(student_id),
@@ -126,6 +137,9 @@ const AttendanceRegister = () => {
 
   return (
     <div className="space-y-6">
+      {assignmentError && <div role="alert" className="rounded-xl border border-red-300 bg-red-50 p-4 text-red-800">Could not load classes. <button onClick={()=>refreshAssignments()}>Refresh classes</button></div>}
+      {attendanceError && <div role="alert" className="rounded-xl border border-red-300 bg-red-50 p-4 text-red-800">{attendanceError.response?.data?.message || 'Could not load learners for this class.'} <button onClick={()=>refetchAttendance()}>Retry</button></div>}
+      {loadingAssignments && <p role="status">Loading classes…</p>}
       <div className={`rounded-xl shadow-lg p-6 ${
         theme === 'dark' ? 'bg-gray-800' : 'bg-white'
       }`}>
@@ -153,7 +167,7 @@ const AttendanceRegister = () => {
                 value={selectedClass ? `${selectedClass.grade_id}-${selectedClass.class_id}` : ''}
                 onChange={(e) => {
                   const [gradeId, classId] = e.target.value.split('-').map(Number);
-                  const assignment = assignments.find(a => a.grade_id === gradeId && a.class_id === classId);
+                  const assignment = assignments.find(a => Number(a.grade_id) === gradeId && Number(a.class_id) === classId);
                   setSelectedClass(assignment);
                 }}
                 className={`w-full px-4 py-3 rounded-lg border appearance-none cursor-pointer ${
@@ -376,7 +390,7 @@ const AttendanceRegister = () => {
                   </div>
                   <button
                     onClick={handleSubmit}
-                    disabled={submitMutation.isLoading}
+                    disabled={submitMutation.isLoading || loadingAttendance || !!attendanceError || !students.length}
                     className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-medium transition-colors disabled:opacity-50"
                   >
                     {submitMutation.isLoading ? (

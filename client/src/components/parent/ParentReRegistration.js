@@ -40,6 +40,7 @@ export default function ParentReRegistration({ child }) {
   const change = (key, value) => { setForm(previous => ({ ...previous, [key]: value })); setDirty(true); setNotice(''); };
   const save = async submit => {
     setError(''); setNotice('');
+    if(data?.window && !data.window.is_open){setError(data.window.message);return;}
     if (submit) {
       const missing = definition.sections.flatMap(section => section.fields).find(field => visibleField(field,form) && requiredField(field,form) && !String(form[field.key] || '').trim());
       if (missing) { setError(`Please complete ${missing.label}.`); return; }
@@ -66,6 +67,7 @@ export default function ParentReRegistration({ child }) {
     {loading && <p role="status">Loading your form…</p>}
     {error && <div role="alert" className="rr-notice rr-error">{error}</div>}
     {notice && <div role="status" className="rr-notice rr-success">{notice}</div>}
+    {visibleData?.window && <div className="rr-notice" role="status"><strong>Re-registration dates</strong>{visibleData.window.message}</div>}
     {visibleData && <><div className="rr-notice"><strong>{data.child.first_name} {data.child.last_name}</strong>{data.child.student_number} · {data.child.grade_name}
       {registration.reference && <p>Re-registration reference: <strong style={{ display: 'inline', fontSize: 'inherit' }}>{registration.reference}</strong></p>}</div>
       {registration.review_note && <div className="rr-notice" style={{ marginTop: 16 }}><strong>Message from Admin</strong>{registration.review_note}</div>}
@@ -75,7 +77,7 @@ export default function ParentReRegistration({ child }) {
           : registration.source === 'paper' ? 'Admin has recorded your paper form. Contact the office if you need to make changes.' : 'There is already a form for this child. Admin will review it. Please contact the office if you need a correction.'}</p>
         {registration.form && registration.source === 'portal' && <button className="rr-button rr-secondary" onClick={() => setShowForm(!showForm)}>{showForm ? 'Hide submitted form' : 'View submitted form'}</button>}
         <EmailUpdates updates={data.email_updates} />
-      </section> : <>{!showForm && registration.status==='not_started' ? <section className="rr-card"><h2>Re-register online</h2><p>Check the details we already have, confirm whether your child is returning, and sign the short form.</p><button className="rr-button" onClick={()=>setShowForm(true)}>Re-register online</button></section> : <>
+      </section> : visibleData.window && !visibleData.window.is_open ? <section className="rr-card"><h2>{visibleData.window.phase==='not_open'?'Re-registration opens soon':'Re-registration closed'}</h2><p>{visibleData.window.message}</p><p>Your existing account and saved information remain available.</p></section> : <>{!showForm && registration.status==='not_started' ? <section className="rr-card"><h2>Re-register online</h2><p>Check the details we already have, confirm whether your child is returning, and sign the short form.</p><button className="rr-button" onClick={()=>setShowForm(true)}>Re-register online</button></section> : <>
         <p className="rr-muted">Fields marked * are required. Save your draft before leaving this page or changing child.</p>
         {definition.sections.map(section=><FormSection key={section.title} section={section} form={form} onChange={change} grades={data.grades} disabled={busy}/>)}
         <FeesUndertaking form={form}/><section className="rr-card"><h2>Confirm and submit</h2>

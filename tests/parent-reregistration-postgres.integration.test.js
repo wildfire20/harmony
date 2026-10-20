@@ -6,6 +6,7 @@ test('Short re-registration, separate fee, bank verification and preserved histo
  const schema=`rereg_${crypto.randomBytes(8).toString('hex')}`;const control=new Pool({connectionString:url,max:1,ssl:false});
  let db,server;const savedSecret=process.env.JWT_SECRET;const savedAdminEmail=process.env.ADMIN_NOTIFICATION_EMAIL;const tokens={};const key=()=>crypto.randomUUID();
  const complete=(extra={})=>({date_of_birth:'2018-05-12',gender:'Male',parent_full_name:'Synthetic Parent',parent_mobile:'0731234567',parent_whatsapp:'0731234567',physical_address:'123 Synthetic Street',returning:'Yes',grade_applied_for:'Grade 3',declared_name:'Synthetic Parent',declaration_accepted:true,...extra});
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-12-15T10:00:00+02:00').getTime()});
  try{
   await control.query(`CREATE SCHEMA "${schema}"`);const scoped=new URL(url);scoped.searchParams.set('options',`-csearch_path=${schema}`);
   db=require('../config/database');assert.equal(db.pool.totalCount,0);db.pool.options.connectionString=scoped.toString();db.pool.options.ssl=false;db.pool.options.max=8;db.pool.options.query_timeout=15000;
@@ -103,6 +104,17 @@ test('Short re-registration, separate fee, bank verification and preserved histo
     assert.equal(sent.filter(args=>args[0]==='office@example.test').length,alerts.length);
     assert.ok(sent.some(args=>args[0]==='first@example.test'));assert.ok(events.some(e=>e.kind==='received' && e.status==='skipped'));
     assert.ok(sent.filter(args=>args[0]==='office@example.test').every(args=>args[2].includes('https://www.harmonylearning.co.za/re-registration')));
+  });
+  await t.test('opening and closing dates enforce South African day boundaries without altering existing submissions',async()=>{
+    for(const date of ['2026-12-10T23:59:59.999+02:00','2027-01-09T00:00:00+02:00']){
+      t.mock.timers.setTime(new Date(date).getTime());
+      const claim=jwt.decode(tokens[10]);delete claim.exp;delete claim.iat;tokens[10]=jwt.sign(claim,process.env.JWT_SECRET,{expiresIn:'10m'});
+      const before={forms:await rows('parent_reregistrations'),invoices:await rows('invoices'),actions:(await db.query('SELECT * FROM parent_reregistration_actions ORDER BY request_key')).rows};
+      const closed=await submit(511);assert.equal(closed.status,409);assert.equal((await get(511)).data.window.is_open,false);
+      assert.deepEqual(await rows('parent_reregistrations'),before.forms);assert.deepEqual(await rows('invoices'),before.invoices);assert.deepEqual((await db.query('SELECT * FROM parent_reregistration_actions ORDER BY request_key')).rows,before.actions);
+      assert.equal((await get(501)).status,200);assert.equal((await req('/forms/primary?child_id=501')).status,200);
+    }
+    t.mock.timers.setTime(new Date('2026-12-15T10:00:00+02:00').getTime());
   });
   await t.test('tuition, October billing, existing transactions and accounts remain byte-for-byte unchanged',async()=>{assert.deepEqual(await rows('invoices','WHERE id IN (11091,11473)'),protectedInvoices);assert.deepEqual(await rows('payment_transactions','WHERE id IN (1,2)'),protectedPayments);assert.deepEqual(await rows('users'),originalUsers);});
  }finally{if(server)await new Promise(r=>server.close(r));if(db)await db.pool.end();await control.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(()=>{});await control.end();if(savedSecret===undefined)delete process.env.JWT_SECRET;else process.env.JWT_SECRET=savedSecret;if(savedAdminEmail===undefined)delete process.env.ADMIN_NOTIFICATION_EMAIL;else process.env.ADMIN_NOTIFICATION_EMAIL=savedAdminEmail;}
