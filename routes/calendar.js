@@ -3,12 +3,14 @@ const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize, authorizeResourceAccess } = require('../middleware/auth');
 
+const {schoolTimeSql,schoolWallSql,dateStorageTypes,storageValue,validateRange}=require('../services/calendarTime');
+const {parseSchoolTime}=require('../client/src/utils/schoolCalendarTime');
 const router = express.Router();
 const { notifyCalendarEvent } = require('../services/parentNotificationService');
 const hasParentVisibilitySchema = async () => {
   const result = await db.query(`
     SELECT column_name FROM information_schema.columns
-    WHERE table_schema='public' AND table_name='school_events'
+    WHERE table_schema=current_schema() AND table_name='school_events'
       AND column_name IN ('parent_visible','class_id')
   `);
   return result.rows.length === 2;
@@ -79,7 +81,7 @@ router.get('/', authenticate, async (req, res) => {
     // Get school events
     const parentVisibilityReady = await hasParentVisibilitySchema();
     let eventQuery = `
-      SELECT e.id, e.title, e.description, e.start_date, e.start_date as due_date, e.end_date, 'school_event' as event_type,
+      SELECT e.id, e.title, e.description, ${schoolTimeSql('e.start_date')} AS start_date, ${schoolTimeSql('e.start_date')} as due_date, ${schoolTimeSql('e.end_date')} AS end_date, 'school_event' as event_type,
               e.event_type as category, e.target_audience, e.created_by, e.grade_id,
               ${parentVisibilityReady ? 'e.class_id' : 'NULL::integer AS class_id'},
               ${parentVisibilityReady ? 'e.parent_visible' : 'false AS parent_visible'},
@@ -100,7 +102,7 @@ router.get('/', authenticate, async (req, res) => {
     if (month && year) {
       const monthInt = parseInt(month);
       const yearInt = parseInt(year);
-      eventQuery += ` AND EXTRACT(MONTH FROM e.start_date) = $${eventParams.length + 1} AND EXTRACT(YEAR FROM e.start_date) = $${eventParams.length + 2}`;
+      eventQuery += ` AND EXTRACT(MONTH FROM ${schoolWallSql('e.start_date')}) = $${eventParams.length + 1} AND EXTRACT(YEAR FROM ${schoolWallSql('e.start_date')}) = $${eventParams.length + 2}`;
       eventParams.push(monthInt, yearInt);
     }
 
@@ -178,14 +180,12 @@ router.post('/events', [
   body('title').notEmpty().trim().withMessage('Title is required'),
   body('description').optional().trim(),
   body('start_date').notEmpty().withMessage('Start date is required').custom((value) => {
-    const d = new Date(value);
-    if (isNaN(d.getTime())) throw new Error('Start date must be a valid date/time');
+    parseSchoolTime(value);
     return true;
   }),
   body('end_date').optional().custom((value) => {
     if (value && value !== '') {
-      const d = new Date(value);
-      if (isNaN(d.getTime())) throw new Error('End date must be a valid date/time');
+      parseSchoolTime(value);
     }
     return true;
   }),
@@ -227,17 +227,20 @@ router.post('/events', [
       return res.status(503).json({ success: false, message: 'Run the Calendar Parent visibility migration before publishing this event to Parents.' });
     }
 
-    console.log('Creating event:', { title, description, start_date, end_date, event_type, target_audience, grade_id: processedGradeId });
+    const types=await dateStorageTypes(db);
+    const start=storageValue(start_date,types.start_date);
+    const end=storageValue(end_date ?? null,types.end_date);
+    validateRange(start,end);
 
     const result = parentVisibilityReady ? await db.query(`
       INSERT INTO school_events (title, description, start_date, end_date, event_type, target_audience, grade_id, class_id, parent_visible, created_by)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      RETURNING id, title, description, start_date, end_date, event_type, target_audience, grade_id, class_id, parent_visible, created_at
-    `, [title, description, start_date, end_date || null, event_type, target_audience, processedGradeId, processedClassId, parent_visible === true, user.id]) : await db.query(`
+      RETURNING id, title, description, ${schoolTimeSql('start_date')} AS start_date, ${schoolTimeSql('end_date')} AS end_date, event_type, target_audience, grade_id, class_id, parent_visible, created_at
+    `, [title, description, start, end, event_type, target_audience, processedGradeId, processedClassId, parent_visible === true, user.id]) : await db.query(`
       INSERT INTO school_events (title, description, start_date, end_date, event_type, target_audience, grade_id, created_by)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, title, description, start_date, end_date, event_type, target_audience, grade_id, false AS parent_visible, created_at
-    `, [title, description, start_date, end_date || null, event_type, target_audience, processedGradeId, user.id]);
+      RETURNING id, title, description, ${schoolTimeSql('start_date')} AS start_date, ${schoolTimeSql('end_date')} AS end_date, event_type, target_audience, grade_id, false AS parent_visible, created_at
+    `, [title, description, start, end, event_type, target_audience, processedGradeId, user.id]);
 
     const event = result.rows[0];
     await notifyCalendarEvent(event);
@@ -248,6 +251,7 @@ router.post('/events', [
     });
 
   } catch (error) {
+    if(error.status)return res.status(error.status).json({success:false,message:error.message});
     console.error('Create school event error:', error);
     res.status(500).json({ 
       success: false,
@@ -262,8 +266,8 @@ router.put('/events/:id', [
   authorize('admin', 'super_admin'),
   body('title').optional().notEmpty().withMessage('Title cannot be empty'),
   body('description').optional(),
-  body('start_date').optional().isISO8601().withMessage('Start date must be a valid date'),
-  body('end_date').optional().isISO8601().withMessage('End date must be a valid date'),
+  body('start_date').optional().custom(value=>{parseSchoolTime(value);return true;}),
+  body('end_date').optional({nullable:true}).custom(value=>{if(value!=='')parseSchoolTime(value);return true;}),
   body('event_type').optional().isIn(['holiday', 'exam', 'meeting', 'deadline', 'other']).withMessage('Invalid event type'),
   body('target_audience').optional().isIn(['all', 'students', 'teachers', 'staff']).withMessage('Invalid target audience'),
   body('parent_visible').optional().isBoolean().withMessage('Parent visibility must be true or false')
@@ -290,22 +294,22 @@ router.put('/events/:id', [
     // Build dynamic update query
     const fields = Object.keys(updateFields);
     if (!fields.length) return res.status(400).json({ success: false, message: 'No supported fields to update' });
-    const values = Object.values(updateFields);
-    const setClause = fields.map((field, index) => `${field} = $${index + 1}`).join(', ');
-    
-    const result = await db.query(`
-      UPDATE school_events 
-      SET ${setClause}, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $${fields.length + 1}
-      RETURNING *
-    `, [...values, id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'School event not found' 
-      });
-    }
+    const client=await db.pool.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      const current=(await client.query(`SELECT ${schoolTimeSql('start_date')} AS start_date,
+        ${schoolTimeSql('end_date')} AS end_date FROM school_events WHERE id=$1 FOR UPDATE`,[id])).rows[0];
+      if(!current)throw Object.assign(new Error('School event not found'),{status:404});
+      const types=await dateStorageTypes(client);
+      for(const key of ['start_date','end_date'])if(Object.hasOwn(updateFields,key))updateFields[key]=storageValue(updateFields[key],types[key]);
+      validateRange(updateFields.start_date ?? current.start_date,Object.hasOwn(updateFields,'end_date')?updateFields.end_date:current.end_date);
+      const values=Object.values(updateFields);
+      const setClause=fields.map((field,index)=>`${field} = $${index+1}`).join(', ');
+      result=await client.query(`UPDATE school_events SET ${setClause},updated_at=CURRENT_TIMESTAMP WHERE id=$${fields.length+1}
+        RETURNING *,${schoolTimeSql('start_date')} AS start_date,${schoolTimeSql('end_date')} AS end_date`,[...values,id]);
+      await client.query('COMMIT');
+    }catch(error){await client.query('ROLLBACK').catch(()=>{});throw error;}finally{client.release();}
 
     await notifyCalendarEvent(result.rows[0]);
     res.json({
@@ -315,6 +319,7 @@ router.put('/events/:id', [
     });
 
   } catch (error) {
+    if(error.status)return res.status(error.status).json({success:false,message:error.message});
     console.error('Update school event error:', error);
     res.status(500).json({ 
       success: false,

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, momentLocalizer } from 'react-big-calendar';
 import moment from 'moment';
+import {schoolTimeParts,schoolDisplayDate} from '../../utils/schoolCalendarTime';
 import { Calendar as CalendarIcon, Plus, X, Clock, MapPin, Users, BookOpen, AlertCircle, ChevronLeft, ChevronRight, Edit, Trash2 } from 'lucide-react';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -81,8 +82,8 @@ const CalendarComponent = () => {
         const transformedEvents = response.data.events.map(event => ({
           id: event.id,
           title: event.title,
-          start: new Date(event.due_date || event.start_date),
-          end: new Date(event.end_date || event.due_date || event.start_date),
+          start: event.event_type==='school_event' ? schoolDisplayDate(event.start_date || event.due_date) : new Date(event.due_date || event.start_date),
+          end: event.event_type==='school_event' ? schoolDisplayDate(event.end_date || event.start_date || event.due_date) : new Date(event.end_date || event.due_date || event.start_date),
           resource: event,
           type: event.event_type
         }));
@@ -104,11 +105,11 @@ const CalendarComponent = () => {
       setError(null);
       
       const startDateTime = eventForm.start_date && eventForm.start_time 
-        ? `${eventForm.start_date}T${eventForm.start_time}:00`
+        ? `${eventForm.start_date}T${eventForm.start_time}:00+02:00`
         : eventForm.start_date;
       
       const endDateTime = eventForm.end_date && eventForm.end_time
-        ? `${eventForm.end_date}T${eventForm.end_time}:00`
+        ? `${eventForm.end_date}T${eventForm.end_time}:00+02:00`
         : eventForm.end_date || null;
 
       const cleanedForm = {
@@ -159,16 +160,16 @@ const CalendarComponent = () => {
     const startDate = resource.start_date || resource.due_date;
     const endDate = resource.end_date;
 
-    const startMoment = moment(startDate);
-    const endMoment = endDate ? moment(endDate) : null;
+    const startParts = schoolTimeParts(startDate);
+    const endParts = endDate ? schoolTimeParts(endDate) : null;
 
     setEventForm({
       title: resource.title || '',
       description: resource.description || '',
-      start_date: startMoment.format('YYYY-MM-DD'),
-      start_time: startMoment.format('HH:mm'),
-      end_date: endMoment ? endMoment.format('YYYY-MM-DD') : '',
-      end_time: endMoment ? endMoment.format('HH:mm') : '10:00',
+      start_date: startParts.date,
+      start_time: startParts.time,
+      end_date: endParts ? endParts.date : '',
+      end_time: endParts ? endParts.time : '10:00',
       event_type: resource.category || resource.event_type || 'other',
       target_audience: resource.target_audience || 'all',
       grade_id: resource.grade_id || '',
@@ -328,7 +329,7 @@ const CalendarComponent = () => {
         <div className={`flex items-center gap-3 p-3 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>
           <Clock className={`h-5 w-5 ${textSecondary}`} />
           <div>
-            <p className={`text-sm ${textSecondary}`}>Date & Time</p>
+            <p className={`text-sm ${textSecondary}`}>Date & Time (South Africa)</p>
             <p className={`font-medium ${textPrimary}`}>{dateStr}</p>
             <p className={`text-sm ${textSecondary}`}>{startTime} - {endTime}</p>
           </div>
@@ -576,7 +577,7 @@ const CalendarComponent = () => {
                 />
               </div>
 
-              <h4 className={`pt-1 text-xs font-bold uppercase tracking-[0.14em] ${textSecondary}`}>Date &amp; time</h4>
+              <h4 className={`pt-1 text-xs font-bold uppercase tracking-[0.14em] ${textSecondary}`}>Date &amp; time (South Africa)</h4>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={`block text-sm font-medium ${textSecondary} mb-2`}>

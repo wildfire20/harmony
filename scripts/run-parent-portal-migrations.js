@@ -13,7 +13,7 @@ async function run(database = db) {
       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()
         AND table_name='pending_payments' AND column_name='payment_date') AS proof_payment_date`)).rows[0];
     console.log('Parent Portal schema before migration:', before);
-    for (const file of ['parent_enquiries.sql', 'parent_reregistration.sql', 'learner_behaviour.sql', 'behaviour_parent_alerts.sql']) {
+    for (const file of ['parent_enquiries.sql', 'parent_reregistration.sql', 'learner_behaviour.sql', 'behaviour_parent_alerts.sql', 'calendar_school_time.sql']) {
       await client.query(fs.readFileSync(path.join(__dirname, '..', 'migrations', file), 'utf8'));
     }
     await checkEnquirySchema(client);
@@ -21,6 +21,9 @@ async function run(database = db) {
     await client.query('SELECT payment_date FROM parent_reregistration_proofs LIMIT 0');
     await client.query('SELECT student_id,request_key,request_hash,status,void_reason FROM behaviour_records LIMIT 0');
     await client.query('SELECT record_id,parent_id,notification_id,first_attempt_at,status FROM behaviour_parent_emails LIMIT 0');
+    const calendarTypes=(await client.query("SELECT data_type FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='school_events' AND column_name IN ('start_date','end_date')")).rows;
+    if(calendarTypes.length!==2 || calendarTypes.some(row=>!['timestamp without time zone','timestamp with time zone'].includes(row.data_type)))throw new Error('Calendar time storage verification failed.');
+    console.log('Calendar school time storage applied and verified successfully.');
     const missing = await client.query('SELECT code FROM unnest($1::text[]) AS seed(code) WHERE NOT EXISTS(SELECT 1 FROM behaviour_types b WHERE b.code=seed.code)', [require('../data/behaviourCatalogue.json').map(type => type.code)]);
     if (missing.rowCount) throw new Error('Behaviour catalogue verification failed.');
     await client.query('COMMIT');
