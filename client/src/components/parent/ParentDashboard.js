@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { parentApi } from './ParentPortal';
+import {SCHOOL_TIME_ZONE} from '../../utils/schoolCalendarTime';
 import {
   CheckCircle, XCircle, Clock, Bell,
   TrendingUp, AlertCircle, CreditCard, CalendarDays, MessageSquare
@@ -111,7 +112,7 @@ const ParentDashboard = ({ child, user }) => {
         {upcoming.length ? <div className="space-y-2">{upcoming.map(event => (
           <a key={event.id} href="/parent/calendar" className="flex min-w-0 items-center gap-3 rounded-xl bg-[#f4f7f5] p-3">
             <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e8f1ef]"><CalendarDays className="h-5 w-5 text-[#176b73]" /></div>
-            <div className="min-w-0"><p className="truncate text-sm font-semibold text-[#19324a]">{event.title}</p><p className="text-xs text-[#617487]">{new Date(event.start_date).toLocaleDateString()}</p></div>
+            <div className="min-w-0"><p className="truncate text-sm font-semibold text-[#19324a]">{event.title}</p><p className="text-xs text-[#617487]">{new Date(event.start_date).toLocaleDateString('en-ZA',{timeZone:SCHOOL_TIME_ZONE})}</p></div>
           </a>
         ))}</div> : <p className="text-sm text-[#84929e]">No upcoming calendar events.</p>}
       </section>

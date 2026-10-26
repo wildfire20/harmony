@@ -25,6 +25,7 @@ if (!String(process.env.FINANCE_TEST_DATABASE_URL || '').trim()) {
       path.join(__dirname, '..', 'tests', 'parent-enquiries-postgres.integration.test.js'),
       path.join(__dirname, '..', 'tests', 'learner-behaviour-postgres.integration.test.js'),
       path.join(__dirname, '..', 'tests', 'class-attendance-postgres.integration.test.js'),
+      path.join(__dirname, '..', 'tests', 'calendar-time-postgres.integration.test.js'),
       path.join(__dirname, '..', 'tests', 'parent-reregistration-postgres.integration.test.js'),
     ],
     { stdio: 'inherit', env: process.env },

@@ -18,7 +18,7 @@
     "test:portal:integration": "node --test tests/admissions-portal-postgres.integration.test.js",
     "test:finance:integration": "node scripts/run-finance-core-integration.js",
     "test:invoice-cancellation": "node --test tests/finance-invoice-cancellation.test.js",
-    "release-gate": "npm run test:security && npm run test:invoice-cancellation && npm run test:parent-reregistration && npm run test:finance:integration && npm run build && npm run test:parent-enquiries:client && npm run test:parent-reregistration:client && npm run test:fees && npm run test:behaviour:client && npm run test:statement-print",
+    "release-gate": "npm run test:security && npm run test:invoice-cancellation && npm run test:parent-reregistration && npm run test:calendar && npm run test:calendar:client && npm run test:finance:integration && npm run build && npm run test:parent-enquiries:client && npm run test:parent-reregistration:client && npm run test:fees && npm run test:behaviour:client && npm run test:statement-print",
     "test:admissions-documents": "node --test tests/admissions-documents.test.js",
     "verify:email": "node scripts/verify-email.js",
     "migrate:parent-enquiries": "node scripts/run-parent-enquiries-migration.js",
@@ -55,7 +55,9 @@
     "migrate:learner-behaviour": "node scripts/run-learner-behaviour-migration.js",
     "test:behaviour": "node --test tests/learner-behaviour-postgres.integration.test.js",
     "test:behaviour:client": "npm run test --prefix client -- --watchAll=false --runInBand --runTestsByPath src/components/common/BehaviourWorkspace.test.js src/components/parent/ParentNotifications.test.js src/components/admin/DemeritAlerts.test.js src/components/attendance/AttendanceRegister.test.js",
-    "test:statement-print": "node --test tests/statement-print-layout.test.js"
+    "test:statement-print": "node --test tests/statement-print-layout.test.js",
+    "test:calendar": "node --test tests/calendar-time.test.js tests/calendar-parent-visibility.test.js",
+    "test:calendar:client": "npm run test --prefix client -- --watchAll=false --runInBand --runTestsByPath src/components/calendar/Calendar.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1116.0",

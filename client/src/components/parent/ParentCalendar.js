@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock, X } from 'lucide-react';
 import { parentApi, useSelectedChild } from './ParentPortal';
+import {schoolTimeParts,schoolDisplayDate,schoolTimeLabel} from '../../utils/schoolCalendarTime';
 
 const tones = {
   holiday: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -9,14 +10,14 @@ const tones = {
   deadline: 'bg-red-50 text-red-700 border-red-200',
   other: 'bg-slate-50 text-slate-700 border-slate-200',
 };
-const dateKey = value => new Date(value).toISOString().slice(0, 10);
+const dateKey = value => schoolTimeParts(value).date;
 
 const EventCard = ({ event, onOpen }) => {
-  const start = new Date(event.start_date);
-  const end = event.end_date ? new Date(event.end_date) : null;
+  const start = schoolDisplayDate(event.start_date);
+  const end = event.end_date ? schoolDisplayDate(event.end_date) : null;
   const hasTime = !Number.isNaN(start.getTime()) && (start.getHours() !== 0 || start.getMinutes() !== 0);
   const timeLabel = hasTime
-    ? `${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${end && !Number.isNaN(end.getTime()) ? ` – ${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`
+    ? `${schoolTimeParts(event.start_date).time}${end && !Number.isNaN(end.getTime()) ? ` – ${schoolTimeParts(event.end_date).time}` : ''}`
     : '';
   return (
     <button type="button" onClick={() => onOpen(event)} className="parent-calendar-event w-full min-w-0 rounded-2xl border border-[#dce7eb] bg-white p-4 text-left shadow-sm">
@@ -59,16 +60,16 @@ const ParentCalendar = () => {
     ? events
     : events.filter(event => dateKey(event.start_date) === selectedDate), [events, mode, selectedDate]);
   const moveDay = amount => {
-    const next = new Date(`${selectedDate}T12:00:00`);
-    next.setDate(next.getDate() + amount);
-    setSelectedDate(dateKey(next));
+    const next = new Date(`${selectedDate}T12:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + amount);
+    setSelectedDate(next.toISOString().slice(0,10));
   };
 
   return (
     <div className="min-w-0 space-y-5">
       <header>
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b5473a]">Harmony Learning Institute</p>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#19324a]">Calendar</h1>
+        <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#19324a]">Calendar</h1><p className="mt-1 text-xs text-[#617487]">Times are shown in South African time.</p>
         <p className="mt-1 text-sm text-[#617487]">{child ? `Events for ${child.first_name} and school-wide Parent events` : 'Select a linked learner to view events'}</p>
       </header>
       <div className="parent-calendar-tabs grid grid-cols-2 rounded-xl border border-[#dce7eb] bg-white p-1">
@@ -97,8 +98,8 @@ const ParentCalendar = () => {
         <div className="fixed inset-0 z-50 flex items-end bg-black/40 p-0 sm:items-center sm:justify-center sm:p-4" onClick={() => setSelectedEvent(null)}>
           <article className="max-h-[85dvh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 sm:max-w-lg sm:rounded-3xl sm:p-6" onClick={event => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-3"><h2 className="break-words text-xl font-bold text-[#19324a]">{selectedEvent.title}</h2><button onClick={() => setSelectedEvent(null)} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100"><X className="h-5 w-5" /></button></div>
-            <p className="mt-3 text-sm font-medium text-[#176b73]">{new Date(selectedEvent.start_date).toLocaleString()}</p>
-            {selectedEvent.end_date && <p className="mt-1 text-xs text-[#617487]">Ends {new Date(selectedEvent.end_date).toLocaleString()}</p>}
+            <p className="mt-3 text-sm font-medium text-[#176b73]">{schoolTimeLabel(selectedEvent.start_date)}</p>
+            {selectedEvent.end_date && <p className="mt-1 text-xs text-[#617487]">Ends {schoolTimeLabel(selectedEvent.end_date)}</p>}
             <div className="mt-4 flex flex-wrap gap-2"><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${tones[selectedEvent.event_type] || tones.other}`}>{selectedEvent.event_type}</span>{selectedEvent.grade_name && <span className="max-w-full break-words rounded-full bg-[#e8f1ef] px-2.5 py-1 text-xs text-[#176b73]">{selectedEvent.grade_name}{selectedEvent.class_name ? ` · ${selectedEvent.class_name}` : ''}</span>}</div>
             {selectedEvent.description && <p className="mt-5 whitespace-pre-wrap break-words text-sm leading-6 text-[#526879]">{selectedEvent.description}</p>}
           </article>

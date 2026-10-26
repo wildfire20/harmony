@@ -1,4 +1,5 @@
 const express = require('express');
+const {schoolTimeSql,schoolWallSql}=require('../services/calendarTime');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -227,14 +228,14 @@ router.get('/calendar', requireParent, async (req, res) => {
     const params = [child.grade_id, child.class_id];
     let dateClause = '';
     if (upcoming) {
-      dateClause = 'AND e.start_date >= CURRENT_DATE';
+      dateClause = `AND ${schoolWallSql('e.start_date')} >= (NOW() AT TIME ZONE 'Africa/Johannesburg')::date`;
     } else if (Number.isInteger(month) && month >= 1 && month <= 12 &&
                Number.isInteger(year) && year >= 2000 && year <= 2200) {
       params.push(month, year);
-      dateClause = `AND EXTRACT(MONTH FROM e.start_date)=$3 AND EXTRACT(YEAR FROM e.start_date)=$4`;
+      dateClause = `AND EXTRACT(MONTH FROM ${schoolWallSql('e.start_date')})=$3 AND EXTRACT(YEAR FROM ${schoolWallSql('e.start_date')})=$4`;
     }
     const result = await db.query(`
-      SELECT e.id,e.title,e.description,e.start_date,e.end_date,e.event_type,
+      SELECT e.id,e.title,e.description,${schoolTimeSql('e.start_date')} AS start_date,${schoolTimeSql('e.end_date')} AS end_date,e.event_type,
              e.grade_id,g.name AS grade_name,e.class_id,c.name AS class_name,e.parent_visible
       FROM school_events e
       LEFT JOIN grades g ON g.id=e.grade_id
