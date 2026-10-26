@@ -1160,8 +1160,6 @@ router.post('/:id/reject', requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('Reject proof error:', err);
     res.status(err.status || 500).json({ message: err.safeMessage || err.message || 'Server error rejecting payment' });
-  } finally {
-    if (client) client.release();
   }
 });
 
