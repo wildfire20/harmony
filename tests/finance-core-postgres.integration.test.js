@@ -449,7 +449,7 @@ async function runSuite() {
         (student_id, discount_type, calculation_method, amount,
          applicable_service_key, reason, starts_on)
       VALUES
-        (3, 'sibling', 'fixed', 100, 'tuition',
+        (3, 'sibling', 'fixed', 150, NULL,
          'Approved sibling gate discount', '2029-01-01');
     `);
 
@@ -621,9 +621,9 @@ async function runSuite() {
       ['transport', 'charge', 0, true],
       ['aftercare', 'charge', 0, true],
       ['tuition', 'charge', 2350, false],
-      ['tuition', 'discount', 100, false],
+      ['tuition', 'discount', 150, false],
     ]);
-    assert.equal(Number(monthlyInvoice.amount_due), 3850);
+    assert.equal(Number(monthlyInvoice.amount_due), 3800);
     // Isolated A-E fixture: exercise each service/bundle/discount combination
     // in one synthetic month while keeping the original release-gate learner
     // above as the persisted multi-service baseline.
@@ -654,7 +654,7 @@ async function runSuite() {
         (student_id, discount_type, calculation_method, amount,
          applicable_service_key, reason, starts_on)
       VALUES
-        (13, 'sibling', 'fixed', 100, 'tuition', 'Synthetic sibling', '2029-02-01'),
+        (13, 'sibling', 'fixed', 150, 'tuition', 'Synthetic sibling', '2029-02-01'),
         (14, 'custom', 'fixed', 75, 'transport', 'Synthetic transport service discount', '2029-02-01');
     `);
     const synthetic = await financeCommands.generateMonthlyInvoices({
@@ -678,7 +678,7 @@ async function runSuite() {
     assert.deepEqual(syntheticInvoices.map((invoice) => [
       Number(invoice.student_id), Number(invoice.amount_due),
     ]), [
-      [10, 2350], [11, 3550], [12, 3950], [13, 2250], [14, 2925],
+      [10, 2350], [11, 3550], [12, 3950], [13, 2200], [14, 2925],
     ]);
     const syntheticLines = (await database.query(`
       SELECT i.student_id, l.service_key, l.line_type, l.amount, l.is_included,

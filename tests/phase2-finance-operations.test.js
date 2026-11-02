@@ -647,6 +647,10 @@ test('Phase 4A preview pure policy helpers produce deduped sources, prices, disc
   assert.deepEqual(preview.calculatePolicyTotals(), { tuition: 2350, boarding: 1600, gross: 3950 });
   assert.deepEqual(preview.calculatePolicyTotals('staff'), { tuition: 1175, boarding: 1600, gross: 2775 });
   assert.deepEqual(preview.calculatePolicyTotals('sibling'), { tuition: 2250, boarding: 1600, gross: 3850 });
+  assert.deepEqual(preview.calculatePolicyTotals('sibling', '2026-11-01'),
+    { tuition: 2200, boarding: 1600, gross: 3800 });
+  const novemberDiscounts = preview.buildDiscountPreview(students, [], '2026-11-01');
+  assert.equal(novemberDiscounts.proposals.find((row) => row.discount_type === 'sibling').amount, 150);
   const previewSource = fs.readFileSync(project('scripts/preview-finance-service-bootstrap.js'), 'utf8');
   assert.match(previewSource, /beginVerifiedReadonlySession/);
   assert.match(previewSource, /await client\.query\('ROLLBACK'\)/);
@@ -721,9 +725,9 @@ test('Phase 4A readiness validates policy discount terms and legacy precedence',
     calculation_method: 'percentage', percentage: 50, applicable_service_key: 'tuition' };
   const sibling = { id: 2, student_id: 51, discount_type: 'sibling',
     calculation_method: 'fixed', amount: 100, applicable_service_key: 'tuition' };
-  const run = async (flags, assignments) => {
+  const run = async (flags, assignments, period = '2026-10') => {
     let assignmentSql;
-    const result = await getMonthlyBillingReadiness('2026-10', { async query(sql) {
+    const result = await getMonthlyBillingReadiness(period, { async query(sql) {
       if (/FROM users/.test(sql)) return { rows: [{
         id: 51, student_number: 'POLICY-51', ...flags,
       }] };
@@ -779,6 +783,33 @@ test('Phase 4A readiness validates policy discount terms and legacy precedence',
 
   const conflict = await run({}, [staff, sibling]);
   assert.equal(codes(conflict, 'conflicting_discount_assignments').length, 1);
+
+  // The approved November amount is R150. Older Admin forms saved an empty
+  // scope; the ledger already forces these policy discounts to tuition only.
+  for (const scope of ['tuition', null, '']) {
+    const approved = { ...sibling, amount: 150, applicable_service_key: scope };
+    const result = await run({ has_sibling_discount: true }, [approved], '2026-11');
+    assert.equal(result.ready, true, JSON.stringify(result.hardFailures));
+    const { buildInvoiceSnapshotLines } = require('../services/financeLedger');
+    const lines = buildInvoiceSnapshotLines({}, prices, [approved], [
+      { state: 'active', service_key: 'tuition' },
+      { state: 'active', service_key: 'boarding' },
+      { state: 'active', service_key: 'transport' },
+      { state: 'active', service_key: 'aftercare' },
+    ]);
+    assert.deepEqual(lines.filter((line) => line.line_type === 'discount')
+      .map((line) => [line.service_key, line.amount]), [['tuition', 150]]);
+    assert.equal(lines.reduce((sum, line) => sum +
+      (line.line_type === 'discount' ? -line.amount : line.amount), 0), 3800);
+  }
+  for (const invalid of [sibling, { ...sibling, amount: 150, applicable_service_key: 'boarding' },
+    { ...sibling, amount: 151 }, { ...sibling, amount: 150, calculation_method: 'percentage' }]) {
+    const result = await run({}, [invalid], '2026-11');
+    assert.equal(codes(result, 'invalid_policy_discount_assignment').length, 1);
+    assert.match(codes(result, 'invalid_policy_discount_assignment')[0].message, /POLICY-51/);
+  }
+  assert.equal((await run({ has_teacher_discount: true },
+    [{ ...staff, applicable_service_key: null }], '2026-11')).ready, true);
 });
 
 test('Phase 4A UI discount start date is blank/reset and validated before API', () => {

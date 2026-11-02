@@ -7,6 +7,7 @@
  */
 const db = require('../config/database');
 const { periodBounds } = require('./serviceEnrollmentRepository');
+const { siblingDiscountAmount } = require('./harmonyDiscountPolicy');
 const {
   CANONICAL_BILLING_START_PERIOD,
   isBeforeCanonicalBillingStart,
@@ -325,22 +326,26 @@ async function getMonthlyBillingReadiness(period, executor = db) {
   const validPolicyAssignment = (assignment) => {
     const type = String(assignment.discount_type || '').toLowerCase();
     const method = String(assignment.calculation_method || '').toLowerCase();
-    const serviceKey = String(assignment.applicable_service_key || '').toLowerCase();
+    // The ledger always applies policy discounts to tuition. Older Admin forms
+    // saved an empty selector ("all charges"); it has the same tuition-only
+    // effect in the calculator. An explicit different service still fails.
+    const serviceKey = String(assignment.applicable_service_key || 'tuition').toLowerCase();
     if (type === 'staff') {
       return method === 'percentage' && assignment.percentage != null &&
         Number(assignment.percentage) === 50 && serviceKey === 'tuition';
     }
     if (type === 'sibling') {
       return method === 'fixed' && assignment.amount != null &&
-        Number(assignment.amount) === 100 && serviceKey === 'tuition';
+        Number(assignment.amount) === siblingDiscountAmount(requestedPeriod) && serviceKey === 'tuition';
     }
     return true;
   };
   (assignments || []).forEach((assignment) => {
     const type = String(assignment.discount_type || '').toLowerCase();
     if (!['staff', 'sibling'].includes(type) || validPolicyAssignment(assignment)) return;
+    const learner = (students || []).find((student) => Number(student.id) === Number(assignment.student_id));
     hardFailures.push(blocker('invalid_policy_discount_assignment',
-      `Learner ${assignment.student_id} has an invalid ${type} discount assignment for the Harmony billing policy.`, {
+      `Learner ${learner?.student_number || assignment.student_id} has an invalid ${type} discount assignment for the Harmony billing policy.`, {
         student_id: Number(assignment.student_id),
         discount_type: type,
         discount_assignment_id: Number(assignment.id),
