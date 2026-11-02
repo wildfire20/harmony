@@ -6,6 +6,7 @@
  * reports rows that could be reviewed, and always rolls back its transaction.
  */
 require('dotenv').config();
+const { siblingDiscountAmount } = require('../services/harmonyDiscountPolicy');
 
 const {
   createFinanceReadonlyPool,
@@ -126,7 +127,7 @@ function buildDiscountPreview(students, assignments = [], effectiveStart) {
       discount_type: 'staff', calculation_method: 'percentage', percentage: 50, amount: 0,
     });
     if (student.has_sibling_discount && !hasStaff) legacy.push({
-      discount_type: 'sibling', calculation_method: 'fixed', amount: 100, percentage: null,
+      discount_type: 'sibling', calculation_method: 'fixed', amount: siblingDiscountAmount(effectiveStart), percentage: null,
     });
     legacy.forEach((assignment) => {
       const existing = rows.find((row) => row.discount_type === assignment.discount_type &&
@@ -166,8 +167,9 @@ function compareServicePrices(rows = []) {
   });
 }
 
-function calculatePolicyTotals(discountType = null) {
-  const tuition = discountType === 'staff' ? 1175 : discountType === 'sibling' ? 2250 : 2350;
+function calculatePolicyTotals(discountType = null, effectiveStart = '2026-10-01') {
+  const tuition = discountType === 'staff' ? 1175
+    : discountType === 'sibling' ? 2350 - siblingDiscountAmount(effectiveStart) : 2350;
   return { tuition, boarding: 1600, gross: tuition + 1600 };
 }
 
@@ -232,7 +234,7 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     const pricePolicy = compareServicePrices(servicePrices.rows);
     const boarderExample = calculatePolicyTotals();
     const staffBoarderExample = calculatePolicyTotals('staff');
-    const siblingBoarderExample = calculatePolicyTotals('sibling');
+    const siblingBoarderExample = calculatePolicyTotals('sibling', effectiveStart);
     const learner_lists = {
       boarding: [...new Set(proposals.filter((row) => row.policy_source === 'boarding_package')
         .map((row) => row.student_number || row.student_id))],
@@ -267,7 +269,7 @@ async function main(argv = process.argv.slice(2), env = process.env) {
       package_examples: {
         boarding: { ...boarderExample, gross: 3950 },
         staff_child_boarding: { ...staffBoarderExample, gross: 2775 },
-        sibling_boarding: { ...siblingBoarderExample, gross: 3850 },
+        sibling_boarding: siblingBoarderExample,
       },
       summary: {
         active_learners: students.rows.length,
