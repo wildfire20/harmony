@@ -7,6 +7,7 @@ export function StatusBadge({ registration }) {
 }
 export const visibleField = (field,form) => !field.when || form.returning===field.when;
 export const requiredField = (field,form) => field.required || field.requiredWhen===form.returning;
+export const formatSchoolDate = value => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Johannesburg' }).format(new Date(`${value}T12:00:00+02:00`));
 export function FormSection({section,form,onChange,grades=[],disabled=false}) {
   return <section className="rr-card"><h2>{section.title}</h2><div className="rr-fields">{section.fields.filter(field=>visibleField(field,form)).map(field=>{
     const choices=field.type==='grade' ? grades.map(g=>g.name) : field.choices;
@@ -24,12 +25,13 @@ export function FeesUndertaking({form}) {
   const primary=/^Grade\s*[1-7]$/i.test(form.grade_applied_for || '');
   return <section className="rr-card"><h2>Fees undertaking for 2027</h2>
     {!form.grade_applied_for ? <p>Choose the grade requested for 2027 to see the applicable fee.</p> : primary ? <>
-      <div className="rr-notice"><strong>R500 non-refundable re-registration deposit</strong>Pay on or before <b>11 January 2027</b>. Use your child’s <b>HAR reference number</b>.</div>
+      <div className="rr-notice"><strong>IMPORTANT</strong>All 2026 school fees must be paid in full before re-registration can begin. The R500 re-registration deposit for returning Grades 1–7 learners must also be paid.</div>
+      <div className="rr-notice"><strong>R500 non-refundable re-registration deposit</strong>Pay on or before <b>{formatSchoolDate(definition.deadline)}</b>. Use your child’s <b>HAR reference number</b>.</div>
       <p>Day scholars: <b>R2,350 per month</b>. Boarders: <b>R3,950 per month</b>.</p></> : <>
       <div className="rr-notice"><strong>No re-registration fee for Preschool, Baby Class or Grade R.</strong></div>
       <p>Baby Class: R1,900 per month. Preschool / Grade R: R1,850 per month. Boarding: R3,650 per month.</p></>}
-    <p><b>NO FEE INCREASE FOR 2027.</b></p><p>Uniform must be complete on the first school day. <b>NO UNIFORM, NO ENTRY.</b></p>
-    <p>Re-registration opens on 11 December 2026. Complete and submit your form by 8 January 2027. Late re-registration may result in the place being offered to a learner on the waiting list.</p>
+    <p><b>NO FEE INCREASE FOR 2027.</b></p><p>Uniform must be complete on the first school day.</p>
+    <p>Re-registration runs from {formatSchoolDate(definition.opensOn)} to {formatSchoolDate(definition.closesOn)}. Complete and submit your form by {formatSchoolDate(definition.closesOn)}. Late re-registration may result in the place being offered to a learner on the waiting list.</p>
   </section>;
 }
 export function FormReview({ form }) {

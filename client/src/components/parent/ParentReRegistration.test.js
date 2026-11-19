@@ -98,6 +98,17 @@ test('recording a paper form requires a signed-form confirmation and only lists 
 test('No response hides requested grade and payment undertaking',async()=>{
   await render();await change('#rr-returning','No');expect(container.querySelector('#rr-grade_applied_for')).toBeNull();expect(container.querySelector('#rr-nonreturn_reason')).toBeTruthy();expect(container.textContent).not.toContain('R500 non-refundable');
 });
+test('reopened forms show the approved fee notice, deadline and dates',async()=>{
+ parentApi.mockResolvedValue({...fixture(),window:{is_open:true,phase:'open',message:'Online re-registration is open until the end of 8 January 2027.'}});
+ await render();
+ expect(button('Submit re-registration')).toBeTruthy();
+ expect(container.textContent).toContain('All 2026 school fees must be paid in full');
+ expect(container.textContent).toContain('23 December 2026');
+ expect(container.textContent).toContain('19 November 2026');
+ expect(container.textContent).toContain('8 January 2027');
+ expect(container.textContent).not.toContain('NO UNIFORM, NO ENTRY');
+ expect(container.textContent).not.toContain('11 January 2027');
+});
 test('Admin cannot approve an unpaid registration even after reviewing the form',async()=>{
   api.request.mockImplementation(options=>Promise.resolve({data:options.url.includes('?')?adminList:{...adminFixture(),deposit:{required:true,verified:false,invoice_id:800,outstanding:500,amount_paid:0,pending_amount:0,proofs:[]}}}));
   await render(<ParentReRegistrationAdmin/>);await click(container.querySelector('.rr-list-row'));await click(Array.from(container.querySelectorAll('input[type="checkbox"]')).at(-1));expect(button('Approve re-registration').disabled).toBe(true);expect(button('Record deposit received')).toBeTruthy();
@@ -108,7 +119,7 @@ test('Parent sees bank reference and upload when a deposit is due',async()=>{
 });
 
 test.each(['not_open','closed'])('online forms cannot be edited when the registration window is %s',async phase=>{
-  parentApi.mockResolvedValue({...fixture(),window:{is_open:false,phase,message:'11 December 2026 to 8 January 2027'}});
+  parentApi.mockResolvedValue({...fixture(),window:{is_open:false,phase,message:'19 November 2026 to 8 January 2027'}});
   await render();expect(button('Re-register online')).toBeUndefined();expect(button('Save draft')).toBeUndefined();expect(button('Submit re-registration')).toBeUndefined();
-  expect(container.textContent).toContain('11 December 2026 to 8 January 2027');expect(button('Download form')).toBeTruthy();
+  expect(container.textContent).toContain('19 November 2026 to 8 January 2027');expect(button('Download form')).toBeTruthy();
 });

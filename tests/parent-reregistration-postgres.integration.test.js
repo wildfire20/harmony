@@ -6,7 +6,7 @@ test('Short re-registration, separate fee, bank verification and preserved histo
  const schema=`rereg_${crypto.randomBytes(8).toString('hex')}`;const control=new Pool({connectionString:url,max:1,ssl:false});
  let db,server;const savedSecret=process.env.JWT_SECRET;const savedAdminEmail=process.env.ADMIN_NOTIFICATION_EMAIL;const tokens={};const key=()=>crypto.randomUUID();
  const complete=(extra={})=>({date_of_birth:'2018-05-12',gender:'Male',parent_full_name:'Synthetic Parent',parent_mobile:'0731234567',parent_whatsapp:'0731234567',physical_address:'123 Synthetic Street',returning:'Yes',grade_applied_for:'Grade 3',declared_name:'Synthetic Parent',declaration_accepted:true,...extra});
- t.mock.timers.enable({apis:['Date'],now:new Date('2026-12-15T10:00:00+02:00').getTime()});
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-11-19T10:00:00+02:00').getTime()});
  try{
   await control.query(`CREATE SCHEMA "${schema}"`);const scoped=new URL(url);scoped.searchParams.set('options',`-csearch_path=${schema}`);
   db=require('../config/database');assert.equal(db.pool.totalCount,0);db.pool.options.connectionString=scoped.toString();db.pool.options.ssl=false;db.pool.options.max=8;db.pool.options.query_timeout=15000;
@@ -69,6 +69,16 @@ test('Short re-registration, separate fee, bank verification and preserved histo
   await t.test('draft creates no fee; submit issues exactly one separate fee and repeated requests are safe',async()=>{const draft=await submit(501,complete(),0,key(),10,'draft');assert.equal(draft.status,200);assert.equal(draft.data.deposit.invoice_id,null);const k=key();const result=await submit(501,complete(),1,k);assert.equal(result.status,200);assert.equal(result.data.deposit.outstanding,500);assert.equal(result.data.registration.status_label,'Awaiting deposit verification');assert.equal((await submit(501,complete(),1,k)).data.duplicate,true);assert.equal((await rows('invoices',"WHERE invoice_source='parent_reregistration' AND student_id=501")).length,1);assert.equal((await review(501,'approve',2,'',{review_confirmed:true})).status,409);assert.equal((await get(501,11)).data.registration.form,null);});
   await t.test('typed proof is stored durably and reservations block duplicate or competing uploads',async()=>{const k=key();const first=await proof(501,'500',k);assert.equal(first.status,200);assert.equal(first.data.deposit.pending_amount,500);assert.equal((await proof(501,'500',k)).data.duplicate,true);assert.equal((await proof(501,'500')).status,409);assert.equal((await proof(501,'500',key(),11)).status,409);const pp=(await rows('pending_payments'))[0];assert.ok(pp.receipt_data.length>0);assert.equal((await req('/api/payment-proofs/'+pp.id+'/receipt',undefined,11)).status,403);});
   await t.test('bank confirmation and exact learner allocation are required before approval',async()=>{const id=(await rows('pending_payments'))[0].id;assert.equal((await req('/admin/501/proof',{action:'verify',proof_id:id,request_key:key()},1)).status,400);assert.equal((await req('/admin/502/proof',{action:'verify',proof_id:id,bank_confirmed:true,request_key:key()},1)).status,409);const verified=await req('/admin/501/proof',{action:'verify',proof_id:id,bank_confirmed:true,request_key:key()},1);assert.equal(verified.status,200);assert.equal(verified.data.deposit.verified,true);const approved=await review(501,'approve',2,'Welcome back.',{review_confirmed:true});assert.equal(approved.status,200);assert.equal(approved.data.registration.status,'approved');});
+  await t.test('new deposit uses the approved deadline and repeat issuance preserves the existing invoice',async()=>{
+    const registration=(await get(501,1)).data.registration;
+    const before=(await db.query('SELECT to_jsonb(i) AS value FROM invoices i WHERE id=(SELECT deposit_invoice_id FROM parent_reregistrations WHERE id=$1)',[registration.id])).rows[0].value;
+    assert.equal(before.due_date,'2026-12-23');
+    const result=await require('../services/financeCommandService').issueReRegistrationDeposit({studentId:501,schoolYear:2027,registrationId:registration.id,dueDate:'2027-01-11',actor:{id:1,role:'super_admin',name:'Synthetic Office'}});
+    assert.equal(result.idempotent,true);
+    const after=(await db.query('SELECT to_jsonb(i) AS value FROM invoices i WHERE id=$1',[before.id])).rows[0].value;
+    assert.deepEqual(after,before);
+    for(const dueDate of ['2026-02-30','2025-12-23','not-a-date'])await assert.rejects(require('../services/financeCommandService').issueReRegistrationDeposit({studentId:501,schoolYear:2027,registrationId:registration.id,dueDate,actor:{id:1,role:'super_admin'}}),/Invalid re-registration deposit deadline/);
+  });
   await t.test('phone screenshots upload with the declared payment date on the upgraded schema',async()=>{
     assert.equal((await submit(510)).status,200);
     const requestKey=key();const fd=new FormData();
@@ -106,7 +116,7 @@ test('Short re-registration, separate fee, bank verification and preserved histo
     assert.ok(sent.filter(args=>args[0]==='office@example.test').every(args=>args[2].includes('https://www.harmonylearning.co.za/re-registration')));
   });
   await t.test('opening and closing dates enforce South African day boundaries without altering existing submissions',async()=>{
-    for(const date of ['2026-12-10T23:59:59.999+02:00','2027-01-09T00:00:00+02:00']){
+    for(const date of ['2026-11-18T23:59:59.999+02:00','2027-01-09T00:00:00+02:00']){
       t.mock.timers.setTime(new Date(date).getTime());
       const claim=jwt.decode(tokens[10]);delete claim.exp;delete claim.iat;tokens[10]=jwt.sign(claim,process.env.JWT_SECRET,{expiresIn:'10m'});
       const before={forms:await rows('parent_reregistrations'),invoices:await rows('invoices'),actions:(await db.query('SELECT * FROM parent_reregistration_actions ORDER BY request_key')).rows};

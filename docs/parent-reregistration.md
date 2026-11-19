@@ -2,6 +2,8 @@
 
 For a learner already enrolled at Harmony, use **Re-registration** in the Parent Portal. For a new learner, including a new sibling, use **Apply for 2027** on the public website.
 
+Online re-registration reopened on **19 November 2026** and closes at the end of **8 January 2027**, South African time. The approved Grades 1–7 download has the wider HAR field, separate date-of-birth boxes, fees notice, banking details and optional receipt number.
+
 ## Parent steps
 
 1. Sign in and select the correct child.
@@ -10,7 +12,7 @@ For a learner already enrolled at Harmony, use **Re-registration** in the Parent
 4. Complete the short guardian details. Select **Yes** or **No** for returning in 2027. If Yes, choose the next-year grade. If No, give the reason.
 5. **Save draft** stores your progress. Save before leaving or changing child.
 6. Read the fees undertaking if returning. Type your full name, accept the declaration and select **Submit re-registration**.
-7. For Grades 1–7 in 2027, pay the separate **R500 non-refundable re-registration deposit**, due on or before **11 January 2027**. This is separate from monthly tuition. Use the child's **HAR reference** in your bank app.
+7. For Grades 1–7 in 2027, all 2026 school fees must be settled before re-registration can begin. Pay the separate **R500 non-refundable re-registration deposit** on or before **23 December 2026**. This is separate from monthly tuition. Use the child's **HAR reference** in your bank app. New deposit invoices use this deadline. Existing invoices, signed submissions and payment history are retained.
 8. Return to the same page. Select **Upload proof of payment**, enter amount, payment date and method, choose **Upload Receipt**, then **Submit Proof of Payment**. PDF, JPG, PNG or WebP up to 10MB is supported. A screenshot or bank receipt must show the actual payment. Never upload a password or banking login details.
 9. **Refresh status** checks progress. **Awaiting deposit verification** means Admin must check the money. **Approved** means Admin has approved re-registration. Uploading proof does not automatically approve the place.
 

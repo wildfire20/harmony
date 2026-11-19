@@ -1796,6 +1796,12 @@ async function issueReRegistrationDeposit(options = {}) {
       !options.registrationId || !['admin','super_admin','parent'].includes(options.actor?.role)) {
     throw new FinanceCommandError('Invalid re-registration fee request', 400);
   }
+  const dueDate = options.dueDate ?? `${schoolYear}-01-11`;
+  if (typeof dueDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate) ||
+      !Number.isFinite(Date.parse(dueDate)) || new Date(dueDate).toISOString().slice(0,10) !== dueDate ||
+      ![schoolYear-1,schoolYear].includes(Number(dueDate.slice(0,4)))) {
+    throw new FinanceCommandError('Invalid re-registration deposit deadline', 400);
+  }
   return withTransaction(async executor => {
     await lockIdempotency(executor, `reregistration-fee:${schoolYear}:${studentId}`);
     const existing = (await executor.query(`
@@ -1814,7 +1820,7 @@ async function issueReRegistrationDeposit(options = {}) {
       INSERT INTO invoices(student_id,student_number,amount_due,amount_paid,due_date,status,
         billing_period,invoice_kind,invoice_source,finance_origin,reference_number,description,created_by)
       VALUES($1,$2,500,0,$3::date,'Unpaid',$4::date,'one_off','parent_reregistration','canonical',$5,$6,$7)
-      RETURNING *`, [studentId,child.student_number,`${schoolYear}-01-11`,`${schoolYear}-01-01`,
+      RETURNING *`, [studentId,child.student_number,dueDate,`${schoolYear}-01-01`,
       `RR-DEPOSIT-${schoolYear}-${studentId}`,`Re-registration fee for ${schoolYear}`,options.actor.id])).rows[0];
     await executor.query(`
       INSERT INTO invoice_line_items(invoice_id,line_type,service_key,label,description,quantity,unit_amount,amount,is_included,metadata)

@@ -10,9 +10,10 @@ function registrationWindow(now=new Date()) {
   const opens=new Date(`${definition.opensOn}T00:00:00+02:00`);
   const closes=new Date(`${definition.closesOn}T23:59:59.999+02:00`);
   const phase=now<opens?'not_open':now>closes?'closed':'open';
+  const label=value=>new Intl.DateTimeFormat('en-GB',{day:'numeric',month:'long',year:'numeric',timeZone:'Africa/Johannesburg'}).format(new Date(`${value}T12:00:00+02:00`));
   return {opens_on:definition.opensOn,closes_on:definition.closesOn,time_zone:'Africa/Johannesburg',
-    phase,is_open:phase==='open',message:phase==='not_open'?'Online re-registration opens on 11 December 2026 and closes on 8 January 2027.'
-      :phase==='closed'?'Online re-registration closed on 8 January 2027. Please contact the school office.'
-      :'Online re-registration is open until the end of 8 January 2027.'};
+    phase,is_open:phase==='open',message:phase==='not_open'?`Online re-registration opens on ${label(definition.opensOn)} and closes on ${label(definition.closesOn)}.`
+      :phase==='closed'?`Online re-registration closed on ${label(definition.closesOn)}. Please contact the school office.`
+      :`Online re-registration is open until the end of ${label(definition.closesOn)}.`};
 }
 module.exports = { registrationWindow, primary, preschool, visibleField, requiredField, feeTerms };
