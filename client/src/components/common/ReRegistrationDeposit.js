@@ -1,4 +1,6 @@
 import React,{useState,useRef} from 'react';
+import definition from '../../data/reRegistration2027.json';
+import { formatSchoolDate } from './ReRegistrationForm';
 export function ProofViewer({proof,getBlob}) {
   const [url,setUrl]=useState('');const [mime,setMime]=useState('');const [error,setError]=useState('');
   React.useEffect(()=>()=>{if(url) URL.revokeObjectURL(url);},[url]);
@@ -35,7 +37,7 @@ export default function ReRegistrationDeposit({data,childId,request,getBlob,onUp
   };
   return <section className="rr-card"><h2>Re-registration deposit</h2>
     <div className="rr-notice"><strong>{deposit.verified ? 'Deposit verified' : `R${deposit.outstanding.toFixed(2)} still to be verified`}</strong>
-      This R500 fee is separate from monthly tuition. Due by <b>11 January 2027</b>.</div>
+      This R500 fee is separate from monthly tuition. Due by <b>{formatSchoolDate(definition.deadline)}</b>.</div>
     {!deposit.verified && <><p>Pay using your bank app. Use <b>{data.child.student_number}</b> as the payment reference.</p>
       <dl className="rr-bank"><dt>Bank</dt><dd>{deposit.bank.bank}</dd><dt>Account holder</dt><dd>{deposit.bank.holder}</dd>
         <dt>Account number</dt><dd>{deposit.bank.account}</dd><dt>Branch code</dt><dd>{deposit.bank.branch}</dd></dl>

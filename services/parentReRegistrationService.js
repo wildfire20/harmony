@@ -264,7 +264,7 @@ async function pendingCount(actor) {
 
 async function ensureDeposit(client,row,actor) {
   if (feeTerms(row.form_data).required && !row.deposit_invoice_id) {
-    const result=await finance.issueReRegistrationDeposit({executor:client,studentId:row.student_id,schoolYear:YEAR,registrationId:row.id,actor:deposits.actorFor(actor)});
+    const result=await finance.issueReRegistrationDeposit({executor:client,studentId:row.student_id,schoolYear:YEAR,registrationId:row.id,dueDate:feeTerms(row.form_data).deadline,actor:deposits.actorFor(actor)});
     await client.query('UPDATE parent_reregistrations SET deposit_invoice_id=$2 WHERE id=$1',[row.id,result.invoice.id]);
   }
 }

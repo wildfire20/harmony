@@ -4,9 +4,9 @@ const { PDFDocument, rgb } = require('pdf-lib');
 const fontkit = require('@pdf-lib/fontkit');
 const layouts = {
   primary: {file:'Harmony_2027_Grades_1_7_Re_registration_Form.pdf',fields:{
-    learner_full_name:[35,205,335],learner_reference:[385,205,160],current_grade:[35,233,230],
-    date_of_birth:[110,259,145],parent_full_name:[35,304,510],parent_mobile:[35,332,230],
-    parent_whatsapp:[277,332,265],physical_address:[141,352,410]},gender:[340,414,257]},
+    learner_full_name:[35,207,258],learner_reference:[303,207,257],current_grade:[35,235,230],
+    date_of_birth:[122,260.5,113],parent_full_name:[35,306,510],parent_mobile:[35,334,230],
+    parent_whatsapp:[277,334,265],physical_address:[141,354,410]},gender:[340,414,257]},
   preschool: {file:'Harmony_2027_Preschool_Re_registration_Form.pdf',fields:{
     learner_full_name:[39,184,338],learner_reference:[396,184,150],current_grade:[39,213,240],
     date_of_birth:[110,226,145],parent_full_name:[39,290,310],parent_mobile:[373,290,170],
@@ -21,9 +21,15 @@ async function create(category,form={}) {
   const page=pdf.getPages()[0];const height=page.getHeight();
   for (const [key,[x,top,width]] of Object.entries(layout.fields)) {
     if (!form[key]) continue;
-    let text=String(form[key]).replace(/[\r\n]/g,' ');let size=8;
+    let text=String(form[key]).replace(/[\r\n]/g,' ');let size=category==='primary' ? 7.2 : 8;
     if (key==='date_of_birth') {
       const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+      if (category==='primary') {
+        if (match) for (const [value,left,boxWidth] of [[match[3],122,26],[match[2],157,26],[match[1],192,43]]) {
+          page.drawText(value,{x:left+(boxWidth-font.widthOfTextAtSize(value,size))/2,y:height-top,size,font,color:rgb(.08,.12,.18)});
+        }
+        continue;
+      }
       text=match ? `${match[3]} / ${match[2]} / ${match[1]}` : text;
       page.drawRectangle({x,y:height-top-2,width,height:13,color:rgb(1,1,1)});
     }
