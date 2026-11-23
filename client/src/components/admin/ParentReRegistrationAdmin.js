@@ -7,6 +7,7 @@ import AdminReRegistrationDeposit from './AdminReRegistrationDeposit';
 import { reRegistrationAlertKey } from '../../hooks/useAdminReRegistrationAlerts';
 import { StatusBadge, FormReview, FormDownloads, EmailUpdates, FormSection, FeesUndertaking } from '../common/ReRegistrationForm';
 import { downloadReRegistration } from '../common/reRegistrationDownload';
+import CompletedReRegistrationActions from './CompletedReRegistrationActions';
 const statuses = { all: 'All statuses', not_started: 'Not started', draft: 'Draft', submitted: 'Submitted', changes_needed: 'Changes needed', approved: 'Approved', recorded:'Not returning', waiting_list:'Waiting list' };
 const request = async (path, body) => {
   try { return (await api.request({ url: `/parent/re-registration/admin${path}`, method: body ? 'POST' : 'GET', ...(body ? { data: body } : {}) })).data; }
@@ -79,6 +80,7 @@ export default function ParentReRegistrationAdmin() {
         <button className="rr-button rr-secondary" onClick={async()=>{try{setHistory(await request(`/${selected}/history`));}catch(err){setError(err.message);}}}>View previous versions</button>
         <EmailUpdates updates={detail.email_updates} />
       </section>
+      <CompletedReRegistrationActions key={`completed-${selected}`} childId={selected} registration={registration}/>
       {registration.form && <FormReview form={registration.form} />}
       {registration.source === 'paper' && <div className="rr-notice">Review the signed paper form held by the school office. The portal tracks its receipt and approval.</div>}
       {history && <section className="rr-card"><h2>Previous versions</h2>{history.versions.length ? history.versions.map(item=><details key={item.version}><summary>Version {item.version} · {item.source}</summary><pre className="rr-history">{JSON.stringify(item.form_data,null,2)}</pre></details>) : <p>No previous version.</p>}</section>}
