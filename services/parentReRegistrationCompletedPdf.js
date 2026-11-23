@@ -72,7 +72,7 @@ async function createCompleted(record) {
     if (dob && category==='primary') for (const [value,x,width] of [[dob[3],122,26],[dob[2],157,26],[dob[1],192,43]])
       draw(page,value,x+(width-font.widthOfTextAtSize(value,7.2))/2,260.5);
     else if (dob) {
-      page.drawRectangle({x:108,y:page.getHeight()-238,width:151,height:23,color:rgb(1,1,1)});
+      page.drawRectangle({x:108,y:page.getHeight()-238,width:151,height:20,color:rgb(1,1,1)});
       draw(page,`${dob[3]} / ${dob[2]} / ${dob[1]}`,110,225);
       page.drawLine({start:{x:108,y:page.getHeight()-230},end:{x:258,y:page.getHeight()-230},thickness:.4,color:ink});
     }
