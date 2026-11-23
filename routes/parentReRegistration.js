@@ -32,6 +32,11 @@ router.get('/forms/:document',authenticate,authorize('parent','admin','super_adm
 router.post('/deposit-proof',...parent,writeLimiter,require('./paymentProofs').uploadReceipt,handle(async(req,res)=>
   res.json(await service.depositAction(req.query.child_id,req.user,req.body,req.file,'submit_proof'))));
 router.get('/admin/:studentId/history',...admin,handle(async(req,res)=>res.json(await service.history(req.params.studentId,req.user))));
+router.get('/admin/:studentId/completed-form',...admin,handle(async(req,res)=>{
+  const result=await service.downloadCompletedForm(req.params.studentId,req.user,req.query.version);
+  res.set('Cache-Control','private, no-store').set('X-Content-Type-Options','nosniff')
+    .type('application/pdf').set('Content-Disposition',`attachment; filename="${result.filename}"`).send(result.bytes);
+}));
 router.post('/admin/:studentId/deposit',...admin,writeLimiter,handle(async(req,res)=>res.json(await service.depositAction(req.params.studentId,req.user,req.body,null,'record_deposit'))));
 router.post('/admin/:studentId/proof',...admin,writeLimiter,handle(async(req,res)=>res.json(await service.depositAction(req.params.studentId,req.user,req.body,null,'review_proof'))));
 router.get('/admin', ...admin, handle(async (req,res) => res.json(await service.listRegistrations(req.user,req.query))));

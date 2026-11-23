@@ -298,5 +298,36 @@ async function downloadForm(studentId,actor,category) {
   if (!child && !isAdmin(actor)) throw fail(400,'Select your child before downloading a form.');
   return require('./parentReRegistrationPdf').create(category,child ? await prefill(db,child,actor) : {});
 }
+async function downloadCompletedForm(studentId,actor,version) {
+  if (!isAdmin(actor)) throw fail(403,'Admin access is required.');
+  const expectedVersion=integer(version,'form version');
+  const client=await db.pool.connect();let record;
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const child=await learner(client,studentId,actor);
+    const row=await getRow(client,child.id);
+    if (!row || row.source!=='portal' || !row.submitted_at) throw fail(409,'There is no submitted online form to download for this learner.');
+    if (row.version!==expectedVersion) throw fail(409,'This form has changed. Refresh the learner before downloading.');
+    const submitted=(await client.query(`SELECT details->>'version' AS version,created_at
+      FROM audit_logs WHERE action='reregistration_submit' AND entity_type='parent_reregistration'
+      AND entity_id=$1 ORDER BY id DESC LIMIT 1`,[row.id])).rows[0];
+    let snapshot=row,submittedVersion=row.version;
+    if (submitted) {
+      submittedVersion=integer(submitted.version,'submitted form version');
+      if (submittedVersion>row.version) throw fail(409,'The submitted form version needs review.');
+      snapshot=(await client.query(`SELECT form_data,definition_version,source FROM parent_reregistration_versions
+        WHERE registration_id=$1 AND version>=$2 AND version<=$3 ORDER BY version LIMIT 1`,[row.id,submittedVersion,row.version])).rows[0] || row;
+    } else if (!['submitted','approved','waiting_list','recorded'].includes(row.status)) {
+      throw fail(409,'The last submitted form cannot be identified. Please contact support.');
+    }
+    if (snapshot.source!=='portal' || !snapshot.form_data || typeof snapshot.form_data!=='object' || Array.isArray(snapshot.form_data) || !Object.keys(snapshot.form_data).length)
+      throw fail(409,'The saved submission is incomplete. Please contact support.');
+    if (snapshot.definition_version===2 && (snapshot.form_data.declaration_accepted!==true || !snapshot.form_data.declared_name))
+      throw fail(409,'The submitted declaration needs review. Please contact support.');
+    record={form:snapshot.form_data,definition_version:snapshot.definition_version,reference:reference(row.id),
+      version:submittedVersion,submitted_at:submitted?.created_at || row.submitted_at};
+  } finally {await client.query('ROLLBACK').catch(()=>{});client.release();}
+  return require('./parentReRegistrationCompletedPdf').createCompleted(record);
+}
 
-module.exports = { depositAction, history, downloadForm, YEAR, LABELS, getRegistration, saveRegistration, reviewRegistration, listRegistrations, pendingCount };
+module.exports = { depositAction, history, downloadForm, downloadCompletedForm, YEAR, LABELS, getRegistration, saveRegistration, reviewRegistration, listRegistrations, pendingCount };

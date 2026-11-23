@@ -115,6 +115,47 @@ test('Short re-registration, separate fee, bank verification and preserved histo
     assert.ok(sent.some(args=>args[0]==='first@example.test'));assert.ok(events.some(e=>e.kind==='received' && e.status==='skipped'));
     assert.ok(sent.filter(args=>args[0]==='office@example.test').every(args=>args[2].includes('https://www.harmonylearning.co.za/re-registration')));
   });
+  await t.test('completed PDF is Admin-only, checks the viewed version and uses saved answers without changing records',async()=>{
+    const version=(await get(501,1)).data.registration.version;
+    const target=`/admin/501/completed-form?version=${version}`;
+    for(const actor of [10,11,2])assert.equal((await req(target,undefined,actor)).status,403);
+    assert.equal((await req(target,undefined,null)).status,401);
+    assert.equal((await req('/admin/501/completed-form',undefined,1)).status,400);
+    assert.equal((await req(`/admin/501/completed-form?version=${version+1}`,undefined,1)).status,409);
+    assert.equal((await req('/admin/999999/completed-form?version=1',undefined,1)).status,404);
+    assert.equal((await req('/admin/505/completed-form?version=3',undefined,1)).status,409);
+    const before={forms:await rows('parent_reregistrations'),invoices:await rows('invoices'),payments:await rows('payment_transactions'),emails:await rows('parent_reregistration_emails'),audit:await rows('audit_logs')};
+    await db.query("UPDATE users SET first_name='Changed current profile' WHERE id=501");
+    let response;
+    try{response=await fetch(base+'/api/parent/re-registration'+target,{headers:{Authorization:`Bearer ${tokens[1]}`}});
+      assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'private, no-store');
+      assert.ok(response.headers.get('content-disposition').includes('-Completed-Form.pdf'));
+      const parsed=await new(require('pdf.js-extract').PDFExtract)().extractBuffer(Buffer.from(await response.arrayBuffer()));
+      const text=parsed.pages.flatMap(p=>p.content.map(i=>i.str)).join(' ');
+      assert.ok(text.includes('Synthetic Learner'));assert.ok(text.includes('Synthetic Parent'));assert.ok(!text.includes('Changed current profile'));
+    }finally{await db.query("UPDATE users SET first_name='Synthetic' WHERE id=501");}
+    assert.deepEqual(await rows('parent_reregistrations'),before.forms);assert.deepEqual(await rows('invoices'),before.invoices);
+    assert.deepEqual(await rows('payment_transactions'),before.payments);assert.deepEqual(await rows('parent_reregistration_emails'),before.emails);assert.deepEqual(await rows('audit_logs'),before.audit);
+  });
+  await t.test('completed downloads reject drafts and retain the last submission through subsequent draft edits',async()=>{
+    assert.equal((await submit(513,complete(),0,key(),10,'draft')).status,200);
+    assert.equal((await req('/admin/513/completed-form?version=1',undefined,1)).status,409);
+    assert.equal((await submit(515)).status,200);
+    assert.equal((await review(515,'request_changes',1,'Please update the address.')).status,200);
+    assert.equal((await submit(515,complete({physical_address:'UNSUBMITTED DRAFT ADDRESS',declared_name:'UNSUBMITTED NAME',declaration_accepted:false}),2,key(),10,'draft')).status,200);
+    const pdf=await req('/admin/515/completed-form?version=3',undefined,1);assert.equal(pdf.status,200);
+    const parsed=await new(require('pdf.js-extract').PDFExtract)().extractBuffer(pdf.bytes);
+    const text=parsed.pages.flatMap(p=>p.content.map(i=>i.str)).join(' ');
+    assert.ok(text.includes('123 Synthetic Street'));assert.ok(!text.includes('UNSUBMITTED'));assert.ok(text.includes('submitted v1'));
+  });
+  await t.test('older submitted form definitions remain downloadable without a new submission',async()=>{
+    await db.query(`INSERT INTO parent_reregistrations(school_year,student_id,submitted_by,source,status,definition_version,submitted_at,form_data)
+      VALUES(2027,514,10,'portal','submitted',1,NOW(),'{"learner_full_name":"Synthetic Archived Learner","parent_id_passport":"SYNTHETIC-SAVED-LEGACY","declaration_accepted":true}')`);
+    const result=await req('/admin/514/completed-form?version=1',undefined,1);assert.equal(result.status,200);
+    const parsed=await new(require('pdf.js-extract').PDFExtract)().extractBuffer(result.bytes);
+    const text=parsed.pages.flatMap(p=>p.content.map(i=>i.str)).join(' ');
+    assert.ok(text.includes('SYNTHETIC-SAVED-LEGACY'));assert.ok(!text.includes('23 DECEMBER 2026'));
+  });
   await t.test('opening and closing dates enforce South African day boundaries without altering existing submissions',async()=>{
     for(const date of ['2026-11-18T23:59:59.999+02:00','2027-01-09T00:00:00+02:00']){
       t.mock.timers.setTime(new Date(date).getTime());
