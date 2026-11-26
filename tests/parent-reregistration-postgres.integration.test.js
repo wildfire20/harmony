@@ -68,6 +68,21 @@ test('Short re-registration, separate fee, bank verification and preserved histo
   await t.test('short prefills bind HAR identity and do not guess next-year grade',async()=>{const x=await get(501);assert.equal(x.status,200);assert.equal(x.data.registration.form.learner_reference,'HARTEST501');assert.equal(x.data.registration.form.current_grade,'Grade 2');assert.equal(x.data.registration.form.grade_applied_for,undefined);assert.ok(!JSON.stringify(x.data).includes('password'));assert.equal((await submit(501,complete({learner_reference:'HARTEST999'}))).status,400);assert.equal((await submit(501,complete({gender:'Other'}))).status,400);});
   await t.test('draft creates no fee; submit issues exactly one separate fee and repeated requests are safe',async()=>{const draft=await submit(501,complete(),0,key(),10,'draft');assert.equal(draft.status,200);assert.equal(draft.data.deposit.invoice_id,null);const k=key();const result=await submit(501,complete(),1,k);assert.equal(result.status,200);assert.equal(result.data.deposit.outstanding,500);assert.equal(result.data.registration.status_label,'Awaiting deposit verification');assert.equal((await submit(501,complete(),1,k)).data.duplicate,true);assert.equal((await rows('invoices',"WHERE invoice_source='parent_reregistration' AND student_id=501")).length,1);assert.equal((await review(501,'approve',2,'',{review_confirmed:true})).status,409);assert.equal((await get(501,11)).data.registration.form,null);});
   await t.test('typed proof is stored durably and reservations block duplicate or competing uploads',async()=>{const k=key();const first=await proof(501,'500',k);assert.equal(first.status,200);assert.equal(first.data.deposit.pending_amount,500);assert.equal((await proof(501,'500',k)).data.duplicate,true);assert.equal((await proof(501,'500')).status,409);assert.equal((await proof(501,'500',key(),11)).status,409);const pp=(await rows('pending_payments'))[0];assert.ok(pp.receipt_data.length>0);assert.equal((await req('/api/payment-proofs/'+pp.id+'/receipt',undefined,11)).status,403);});
+  await t.test('saved proof previews and downloads return private bytes only to Admin and the uploading parent',async()=>{
+    const saved=(await rows('pending_payments'))[0];
+    const endpoint='/api/payment-proofs/'+saved.id+'/receipt';
+    const before={proofs:await rows('pending_payments'),payments:await rows('payment_transactions'),invoices:await rows('invoices')};
+    for(const actor of [1,10]){
+      const res=await fetch(base+endpoint,{headers:{Authorization:`Bearer ${tokens[actor]}`}});
+      assert.equal(res.status,200);assert.equal(res.redirected,false);assert.equal(res.headers.get('content-type'),'application/pdf');
+      assert.equal(res.headers.get('cache-control'),'private, no-store');assert.equal(res.headers.get('x-content-type-options'),'nosniff');
+      assert.ok(res.headers.get('content-disposition').includes('synthetic-proof.pdf'));
+      assert.deepEqual(Buffer.from(await res.arrayBuffer()),saved.receipt_data);
+    }
+    for(const actor of [2,11])assert.equal((await req(endpoint,undefined,actor)).status,403);
+    assert.equal((await req(endpoint,undefined,null)).status,401);
+    assert.deepEqual(await rows('pending_payments'),before.proofs);assert.deepEqual(await rows('payment_transactions'),before.payments);assert.deepEqual(await rows('invoices'),before.invoices);
+  });
   await t.test('bank confirmation and exact learner allocation are required before approval',async()=>{const id=(await rows('pending_payments'))[0].id;assert.equal((await req('/admin/501/proof',{action:'verify',proof_id:id,request_key:key()},1)).status,400);assert.equal((await req('/admin/502/proof',{action:'verify',proof_id:id,bank_confirmed:true,request_key:key()},1)).status,409);const verified=await req('/admin/501/proof',{action:'verify',proof_id:id,bank_confirmed:true,request_key:key()},1);assert.equal(verified.status,200);assert.equal(verified.data.deposit.verified,true);const approved=await review(501,'approve',2,'Welcome back.',{review_confirmed:true});assert.equal(approved.status,200);assert.equal(approved.data.registration.status,'approved');});
   await t.test('new deposit uses the approved deadline and repeat issuance preserves the existing invoice',async()=>{
     const registration=(await get(501,1)).data.registration;

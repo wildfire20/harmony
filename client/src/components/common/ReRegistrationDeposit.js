@@ -1,18 +1,8 @@
 import React,{useState,useRef} from 'react';
 import definition from '../../data/reRegistration2027.json';
 import { formatSchoolDate } from './ReRegistrationForm';
-export function ProofViewer({proof,getBlob}) {
-  const [url,setUrl]=useState('');const [mime,setMime]=useState('');const [error,setError]=useState('');
-  React.useEffect(()=>()=>{if(url) URL.revokeObjectURL(url);},[url]);
-  const view=async()=>{
-    try {const blob=await getBlob(`/api/payment-proofs/${proof.id}/receipt`);setMime(blob.type);setUrl(URL.createObjectURL(blob));}
-    catch {setError('Could not open this proof. Please try again.');}
-  };
-  return <><button type="button" className="rr-button rr-secondary" onClick={view}>View proof</button>
-    {error && <p role="alert">{error}</p>}{url && <div className="rr-proof-view">
-      {mime.includes('pdf') ? <iframe title="Proof of payment" src={url} sandbox=""/> : <img src={url} alt="Proof of payment"/>}
-      <button type="button" className="rr-button rr-secondary" onClick={()=>setUrl('')}>Close proof</button></div>}</>;
-}
+import ProofViewer from './ProofViewer';
+export {ProofViewer};
 export default function ReRegistrationDeposit({data,childId,request,getBlob,onUpdate}) {
   const deposit=data.deposit;
   const [open,setOpen]=useState(false);const [value,setValue]=useState(String(deposit?.outstanding || 500));
